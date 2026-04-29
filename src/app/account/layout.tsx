@@ -36,29 +36,26 @@ export default async function AccountLayout({ children }: { children: ReactNode 
             <Link href="/account/bookings" className="text-slate-600 hover:text-slate-900">
               Bookings
             </Link>
+            <Link href="/account/classes" className="text-slate-600 hover:text-slate-900">
+              Classes
+            </Link>
             <Link href="/account/profile" className="text-slate-600 hover:text-slate-900">
               Profile
             </Link>
-            <Link
-              href="/account/credits"
-              className="text-slate-400 hover:text-slate-600"
-              title="Coming soon — not part of the current MVP"
-            >
-              Credits <span className="text-xs font-normal text-slate-400">(soon)</span>
+            <Link href="/account/credits" className="text-slate-600 hover:text-slate-900">
+              Credits
             </Link>
-            <Link
-              href="/account/memberships"
-              className="text-slate-400 hover:text-slate-600"
-              title="Coming soon — not part of the current MVP"
-            >
-              Memberships <span className="text-xs font-normal text-slate-400">(soon)</span>
+            <Link href="/account/courses" className="text-slate-600 hover:text-slate-900">
+              Courses
             </Link>
-            <Link
-              href="/account/payment-methods"
-              className="text-slate-400 hover:text-slate-600"
-              title="Saved cards blocked until Connect per-venue flow is specified"
-            >
-              Payments <span className="text-xs font-normal text-slate-400">(soon)</span>
+            <Link href="/account/memberships" className="text-slate-600 hover:text-slate-900">
+              Memberships
+            </Link>
+            <Link href="/account/recurring" className="text-slate-600 hover:text-slate-900">
+              Recurring
+            </Link>
+            <Link href="/account/payment-methods" className="text-slate-600 hover:text-slate-900">
+              Payments
             </Link>
             <Link href="/account/security" className="text-slate-600 hover:text-slate-900">
               Security

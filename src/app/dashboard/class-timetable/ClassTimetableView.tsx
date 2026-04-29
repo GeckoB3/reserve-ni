@@ -6,12 +6,12 @@ import { StripePaymentWarning } from '@/components/dashboard/StripePaymentWarnin
 import { defaultNewUnifiedCalendarWorkingHours } from '@/lib/availability/practitioner-defaults';
 import { ClassScheduleModal } from './ClassScheduleModal';
 import { ClassTimetableReadOnlyCalendar } from './ClassTimetableReadOnlyCalendar';
+import { ClassTimetableStatsRow } from './ClassTimetableStatsRow';
 import { canAddCalendarColumn, useCalendarEntitlement } from '@/hooks/use-calendar-entitlement';
 import { CalendarLimitMessage } from '@/components/dashboard/CalendarLimitMessage';
 import { NumericInput } from '@/components/ui/NumericInput';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
-import { StatTile } from '@/components/ui/dashboard/StatTile';
 import { Pill } from '@/components/ui/dashboard/Pill';
 import { currencySymbolFromCode } from '@/lib/money/currency-symbol';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
@@ -831,20 +831,28 @@ export function ClassTimetableView({
         title="Class timetable"
         subtitle="Set up class types, add sessions to the calendar, then manage bookings from your roster."
         actions={
-          isAdmin || linkedPractitionerIds.length > 0 ? (
-            <button
-              type="button"
-              onClick={() => {
-                setEditingClassTypeId(null);
-                setClassTypeForm({ ...BLANK_CT });
-                setClassTypeError(null);
-                setShowClassTypeForm(true);
-              }}
-              className="rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700"
+          <>
+            <Link
+              href="/dashboard/class-timetable/products"
+              className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 shadow-sm hover:bg-slate-50"
             >
-              + Add class type
-            </button>
-          ) : undefined
+              Class products
+            </Link>
+            {isAdmin || linkedPractitionerIds.length > 0 ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingClassTypeId(null);
+                  setClassTypeForm({ ...BLANK_CT });
+                  setClassTypeError(null);
+                  setShowClassTypeForm(true);
+                }}
+                className="rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700"
+              >
+                + Add class type
+              </button>
+            ) : null}
+          </>
         }
       />
 
@@ -867,14 +875,7 @@ export function ClassTimetableView({
         </div>
       )}
 
-      {!loading && classTypes.length > 0 && (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <StatTile label="Active class types" value={stats.activeClassTypes} color="slate" />
-          <StatTile label="Sessions (next 7 days)" value={stats.sessionsNext7Days} color="brand" />
-          <StatTile label="Upcoming sessions" value={stats.upcomingSessions} color="emerald" />
-          <StatTile label="Booked spots (all upcoming)" value={stats.totalBookedSpots} color="amber" />
-        </div>
-      )}
+      <ClassTimetableStatsRow loading={loading} classTypesLength={classTypes.length} stats={stats} />
 
       <SectionCard>
         <SectionCard.Header eyebrow="Workflow" title="How this page works" />

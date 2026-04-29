@@ -35,7 +35,6 @@ export default async function LoginPage({
           <Link href="/">
             <img src="/Logo.png" alt="Reserve NI" className="h-12 w-auto" />
           </Link>
-          <p className="mt-3 text-sm text-slate-500">Staff sign in</p>
         </div>
 
         {/* Card */}

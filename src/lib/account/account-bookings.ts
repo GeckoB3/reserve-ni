@@ -41,8 +41,56 @@ export interface AccountBookingRow {
   special_requests?: string | null;
   dietary_notes?: string | null;
   occasion?: string | null;
+  /** Present when this row was part of a class multi-session / course cart checkout. */
+  group_booking_id?: string | null;
+  class_instance_id?: string | null;
   venue: AccountVenueRow | null;
   manage_booking_link: string;
+}
+
+export type AccountBookingDisplayItem =
+  | { kind: 'group'; group_booking_id: string; venue: AccountVenueRow | null; rows: AccountBookingRow[] }
+  | { kind: 'single'; row: AccountBookingRow };
+
+/**
+ * Collapses multi-session class rows that share `group_booking_id` into one list entry for the account UI.
+ */
+export function buildAccountBookingDisplayList(rows: AccountBookingRow[]): AccountBookingDisplayItem[] {
+  const groupMap = new Map<string, AccountBookingRow[]>();
+  for (const r of rows) {
+    if (r.booking_model === 'class_session' && r.group_booking_id) {
+      const g = r.group_booking_id;
+      const arr = groupMap.get(g) ?? [];
+      arr.push(r);
+      groupMap.set(g, arr);
+    }
+  }
+
+  const usedGroups = new Set<string>();
+  const out: AccountBookingDisplayItem[] = [];
+
+  for (const r of rows) {
+    if (r.booking_model === 'class_session' && r.group_booking_id) {
+      const g = r.group_booking_id;
+      if (usedGroups.has(g)) continue;
+      usedGroups.add(g);
+      const members = groupMap.get(g) ?? [r];
+      if (members.length > 1) {
+        const sorted = [...members].sort(
+          (a, b) =>
+            a.booking_date.localeCompare(b.booking_date) ||
+            String(a.booking_time).localeCompare(String(b.booking_time)),
+        );
+        out.push({ kind: 'group', group_booking_id: g, venue: r.venue, rows: sorted });
+      } else {
+        out.push({ kind: 'single', row: r });
+      }
+      continue;
+    }
+    out.push({ kind: 'single', row: r });
+  }
+
+  return out;
 }
 
 export async function loadAccountSafeGuests(
@@ -75,7 +123,7 @@ export async function loadAccountBookings(
   const { data: bookings, error: bErr } = await admin
     .from('bookings')
     .select(
-      'id, venue_id, guest_id, booking_date, booking_time, booking_end_time, party_size, status, booking_model, deposit_status, deposit_amount_pence, special_requests, dietary_notes, occasion',
+      'id, venue_id, guest_id, booking_date, booking_time, booking_end_time, party_size, status, booking_model, deposit_status, deposit_amount_pence, special_requests, dietary_notes, occasion, group_booking_id, class_instance_id',
     )
     .in('guest_id', guestIds)
     .order('booking_date', { ascending: false })
@@ -114,6 +162,8 @@ export async function loadAccountBookings(
     special_requests: (b.special_requests as string | null | undefined) ?? null,
     dietary_notes: (b.dietary_notes as string | null | undefined) ?? null,
     occasion: (b.occasion as string | null | undefined) ?? null,
+    group_booking_id: (b as { group_booking_id?: string | null }).group_booking_id ?? null,
+    class_instance_id: (b as { class_instance_id?: string | null }).class_instance_id ?? null,
     venue: venueMap.get(b.venue_id as string) ?? null,
     manage_booking_link: createShortManageLink(b.id as string),
   }));

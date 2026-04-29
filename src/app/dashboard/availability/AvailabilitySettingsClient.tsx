@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { ServicesTab } from './ServicesTab';
 import { CapacityRulesTab } from './CapacityRulesTab';
 import { DiningDurationTab } from './DiningDurationTab';
@@ -73,7 +73,6 @@ export default function AvailabilitySettingsClient({
   initialTab,
   initialFloorPlanTab,
 }: Props) {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const [venue, setVenue] = useState<VenueSettings | null>(initialVenue);
   const [activeTab, setActiveTabState] = useState<TabKey>(() =>
@@ -92,7 +91,9 @@ export default function AvailabilitySettingsClient({
   /** False until `/api/venue/areas` has completed — avoids unscoped table/floor-plan fetches before `selectedAreaId` is set. */
   const [areasHydrated, setAreasHydrated] = useState(false);
   const [selectedAreaId, setSelectedAreaId] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [servicesHydrated, setServicesHydrated] = useState(false);
+  const [servicesRefreshing, setServicesRefreshing] = useState(false);
+  const [visitedTabs, setVisitedTabs] = useState<Set<TabKey>>(() => new Set([resolveInitialActiveTab(initialTab, initialVenue)]));
   const [toast, setToast] = useState<string | null>(null);
   const [addAreaOpen, setAddAreaOpen] = useState(false);
   const [addAreaSubmitting, setAddAreaSubmitting] = useState(false);
@@ -105,6 +106,18 @@ export default function AvailabilitySettingsClient({
   // Passed to the Combinations tab so the adjacency preview and pair count refresh.
   const [layoutSaveCount, setLayoutSaveCount] = useState(0);
   const handleLayoutSaved = useCallback(() => setLayoutSaveCount((n) => n + 1), []);
+
+  const replaceAvailabilityUrl = useCallback(
+    (update: (params: URLSearchParams) => void) => {
+      if (typeof window === 'undefined') return;
+      const params = new URLSearchParams(window.location.search);
+      update(params);
+      const query = params.toString();
+      const url = query ? `/dashboard/availability?${query}` : '/dashboard/availability';
+      window.history.replaceState(null, '', url);
+    },
+    [],
+  );
 
   useEffect(() => {
     setVenue(initialVenue);
@@ -129,12 +142,13 @@ export default function AvailabilitySettingsClient({
 
   const selectArea = useCallback(
     (id: string) => {
+      if (id === selectedAreaId) return;
       setSelectedAreaId(id);
-      const next = new URLSearchParams(searchParams.toString());
-      next.set('area', id);
-      router.replace(`/dashboard/availability?${next}`, { scroll: false });
+      replaceAvailabilityUrl((next) => {
+        next.set('area', id);
+      });
     },
-    [router, searchParams],
+    [replaceAvailabilityUrl, selectedAreaId],
   );
 
   const selectedAreaName = useMemo(() => {
@@ -150,28 +164,46 @@ export default function AvailabilitySettingsClient({
   useEffect(() => {
     if (activeTab === 'table' && !showTableTab) {
       setActiveTabState('services');
-      router.replace('/dashboard/availability?tab=services', { scroll: false });
+      replaceAvailabilityUrl((next) => {
+        next.set('tab', 'services');
+        next.delete('fp');
+      });
     }
-  }, [activeTab, showTableTab, router]);
+  }, [activeTab, showTableTab, replaceAvailabilityUrl]);
+
+  useEffect(() => {
+    setVisitedTabs((current) => {
+      if (current.has(activeTab)) return current;
+      const next = new Set(current);
+      next.add(activeTab);
+      return next;
+    });
+  }, [activeTab]);
 
   const setActiveTab = useCallback(
     (key: TabKey) => {
       setActiveTabState(key);
-      if (key === 'table') {
-        router.replace(`/dashboard/availability?tab=table&fp=${floorPlanTab}`, { scroll: false });
-      } else {
-        router.replace(`/dashboard/availability?tab=${key}`, { scroll: false });
-      }
+      replaceAvailabilityUrl((next) => {
+        next.set('tab', key);
+        if (key === 'table') {
+          next.set('fp', floorPlanTab);
+        } else {
+          next.delete('fp');
+        }
+      });
     },
-    [router, floorPlanTab],
+    [replaceAvailabilityUrl, floorPlanTab],
   );
 
   const setFloorPlanTab = useCallback(
     (key: FloorPlanEditorTabKey) => {
       setFloorPlanTabState(key);
-      router.replace(`/dashboard/availability?tab=table&fp=${key}`, { scroll: false });
+      replaceAvailabilityUrl((next) => {
+        next.set('tab', 'table');
+        next.set('fp', key);
+      });
     },
-    [router],
+    [replaceAvailabilityUrl],
   );
 
   const onUpdate = useCallback((patch: Partial<VenueSettings>) => {
@@ -208,9 +240,9 @@ export default function AvailabilitySettingsClient({
         const area = data.area as VenueArea;
         setAreas((prev) => [...prev, area]);
         setSelectedAreaId(area.id);
-        const next = new URLSearchParams(searchParams.toString());
-        next.set('area', area.id);
-        router.replace(`/dashboard/availability?${next}`, { scroll: false });
+        replaceAvailabilityUrl((next) => {
+          next.set('area', area.id);
+        });
         setAddAreaOpen(false);
         showToast('Area created');
       } catch {
@@ -219,7 +251,7 @@ export default function AvailabilitySettingsClient({
         setAddAreaSubmitting(false);
       }
     },
-    [router, searchParams, selectedAreaId, showToast],
+    [replaceAvailabilityUrl, selectedAreaId, showToast],
   );
 
   const activeAreas = useMemo(() => areas.filter((a) => a.is_active), [areas]);
@@ -279,9 +311,9 @@ export default function AvailabilitySettingsClient({
         if (current !== deletedId) return current;
         const nextId = stillActive[0]?.id ?? null;
         if (nextId) {
-          const next = new URLSearchParams(searchParams.toString());
-          next.set('area', nextId);
-          router.replace(`/dashboard/availability?${next}`, { scroll: false });
+          replaceAvailabilityUrl((next) => {
+            next.set('area', nextId);
+          });
         }
         return nextId;
       });
@@ -291,14 +323,17 @@ export default function AvailabilitySettingsClient({
     } finally {
       setDeleteSubmitting(false);
     }
-  }, [areas, deleteTarget, router, searchParams, showToast]);
+  }, [areas, deleteTarget, replaceAvailabilityUrl, showToast]);
 
   useEffect(() => {
     if (venue && !venue.table_management_enabled && floorPlanTab !== 'tables') {
       setFloorPlanTabState('tables');
-      router.replace('/dashboard/availability?tab=table&fp=tables', { scroll: false });
+      replaceAvailabilityUrl((next) => {
+        next.set('tab', 'table');
+        next.set('fp', 'tables');
+      });
     }
-  }, [venue, floorPlanTab, router]);
+  }, [venue, floorPlanTab, replaceAvailabilityUrl]);
 
   useEffect(() => {
     if (!venue) return;
@@ -348,9 +383,9 @@ export default function AvailabilitySettingsClient({
   }, [searchParams, venue, areas]);
 
   useEffect(() => {
-    if (!venue) return;
+    if (!venue?.id || !areasHydrated) return;
     async function loadServices() {
-      setLoading(true);
+      setServicesRefreshing(true);
       try {
         const url = selectedAreaId
           ? `/api/venue/services?area_id=${encodeURIComponent(selectedAreaId)}`
@@ -361,11 +396,12 @@ export default function AvailabilitySettingsClient({
           setServices(data.services ?? []);
         }
       } finally {
-        setLoading(false);
+        setServicesHydrated(true);
+        setServicesRefreshing(false);
       }
     }
     void loadServices();
-  }, [venue, selectedAreaId]);
+  }, [venue?.id, areasHydrated, selectedAreaId]);
 
   useEffect(() => {
     if (!venue?.id || !selectedAreaId) return;
@@ -374,9 +410,9 @@ export default function AvailabilitySettingsClient({
     } catch {
       /* ignore */
     }
-  }, [venue, selectedAreaId]);
+  }, [venue?.id, selectedAreaId]);
 
-  if (!venue && !loading) {
+  if (!venue) {
     return (
       <PageFrame>
         <p className="text-sm text-red-600">Could not load venue settings. Try again or contact support.</p>
@@ -384,7 +420,7 @@ export default function AvailabilitySettingsClient({
     );
   }
 
-  if (loading || !venue) {
+  if (!servicesHydrated) {
     return (
       <PageFrame>
         <div className="space-y-6 py-2" role="status" aria-label="Loading availability">
@@ -578,50 +614,66 @@ export default function AvailabilitySettingsClient({
         />
       </div>
 
-      {activeTab === 'services' && (
-        <ServicesTab
-          services={services}
-          setServices={setServices}
-          showToast={showToast}
-          areaId={selectedAreaId}
-        />
+      {servicesRefreshing && (
+        <p className="text-xs font-medium text-slate-400" role="status">
+          Updating area settings...
+        </p>
       )}
-      {activeTab === 'capacity' && (
-        <CapacityRulesTab services={services} showToast={showToast} selectedAreaId={selectedAreaId} />
+
+      {visitedTabs.has('services') && (
+        <div className={activeTab === 'services' ? undefined : 'hidden'}>
+          <ServicesTab
+            services={services}
+            setServices={setServices}
+            showToast={showToast}
+            areaId={selectedAreaId}
+          />
+        </div>
       )}
-      {activeTab === 'duration' && (
-        <DiningDurationTab services={services} showToast={showToast} selectedAreaId={selectedAreaId} />
+      {visitedTabs.has('capacity') && (
+        <div className={activeTab === 'capacity' ? undefined : 'hidden'}>
+          <CapacityRulesTab services={services} showToast={showToast} selectedAreaId={selectedAreaId} />
+        </div>
       )}
-      {activeTab === 'rules' && (
-        <BookingRulesTab services={services} showToast={showToast} selectedAreaId={selectedAreaId} />
+      {visitedTabs.has('duration') && (
+        <div className={activeTab === 'duration' ? undefined : 'hidden'}>
+          <DiningDurationTab services={services} showToast={showToast} selectedAreaId={selectedAreaId} />
+        </div>
       )}
-      {activeTab === 'table' && showTableTab && (
-        <div className="space-y-6">
-          <TableManagementSection venue={venue} onUpdate={onUpdate} isAdmin />
-          {!areasHydrated ? (
-            <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-              <DashboardGridSkeleton />
-            </div>
-          ) : activeAreas.length > 0 && !selectedAreaId ? (
-            <p className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-              Select a dining area above to manage tables and layout for that space.
-            </p>
-          ) : (
-            <FloorPlanEditorTabs
-              isAdmin
-              activeTab={floorPlanTab}
-              onTabChange={setFloorPlanTab}
-              advancedTableManagement={Boolean(venue.table_management_enabled)}
-              onLayoutSaved={handleLayoutSaved}
-              combinationThreshold={venue.combination_threshold ?? 80}
-              layoutSaveCount={layoutSaveCount}
-              onCombinationThresholdSaved={(v) => onUpdate({ combination_threshold: v })}
-              diningAreaId={selectedAreaId}
-            />
-          )}
-          {!hasServiceConfig && (
-            <AvailabilityConfigSection venue={venue} onUpdate={onUpdate} isAdmin />
-          )}
+      {visitedTabs.has('rules') && (
+        <div className={activeTab === 'rules' ? undefined : 'hidden'}>
+          <BookingRulesTab services={services} showToast={showToast} selectedAreaId={selectedAreaId} />
+        </div>
+      )}
+      {visitedTabs.has('table') && showTableTab && (
+        <div className={activeTab === 'table' ? undefined : 'hidden'}>
+          <div className="space-y-6">
+            <TableManagementSection venue={venue} onUpdate={onUpdate} isAdmin />
+            {!areasHydrated ? (
+              <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+                <DashboardGridSkeleton />
+              </div>
+            ) : activeAreas.length > 0 && !selectedAreaId ? (
+              <p className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                Select a dining area above to manage tables and layout for that space.
+              </p>
+            ) : (
+              <FloorPlanEditorTabs
+                isAdmin
+                activeTab={floorPlanTab}
+                onTabChange={setFloorPlanTab}
+                advancedTableManagement={Boolean(venue.table_management_enabled)}
+                onLayoutSaved={handleLayoutSaved}
+                combinationThreshold={venue.combination_threshold ?? 80}
+                layoutSaveCount={layoutSaveCount}
+                onCombinationThresholdSaved={(v) => onUpdate({ combination_threshold: v })}
+                diningAreaId={selectedAreaId}
+              />
+            )}
+            {!hasServiceConfig && (
+              <AvailabilityConfigSection venue={venue} onUpdate={onUpdate} isAdmin />
+            )}
+          </div>
         </div>
       )}
 

@@ -40,6 +40,7 @@ export function ClassOfferingsCalendar({
   rangeTo,
   highlightedDates,
   selectedDate,
+  selectedDates,
   onSelectDate,
   footerMessage = 'Dates with a session for this class are highlighted in green. Select a date to continue.',
 }: {
@@ -47,11 +48,13 @@ export function ClassOfferingsCalendar({
   rangeTo: string;
   highlightedDates: string[];
   selectedDate: string | null;
+  selectedDates?: string[];
   onSelectDate: (iso: string) => void;
   /** Override helper text under the grid (e.g. event bookings). */
   footerMessage?: string;
 }) {
   const highlightSet = useMemo(() => new Set(highlightedDates), [highlightedDates]);
+  const selectedSet = useMemo(() => new Set(selectedDates ?? []), [selectedDates]);
   const [monthAnchor, setMonthAnchor] = useState(() =>
     monthStartFromIso(highlightedDates[0] ?? rangeFrom),
   );
@@ -123,7 +126,7 @@ export function ClassOfferingsCalendar({
           const inMonth = iso.slice(0, 7) === monthAnchor.slice(0, 7);
           const hasSession = highlightSet.has(iso);
           const selectable = hasSession && inRange(iso);
-          const isSelected = selectedDate === iso;
+          const isSelected = selectedDate === iso || selectedSet.has(iso);
           const dayNum = Number(iso.slice(8, 10));
           return (
             <button

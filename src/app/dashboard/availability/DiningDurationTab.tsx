@@ -51,17 +51,22 @@ export function DiningDurationTab({ services, showToast, selectedAreaId }: Props
     void load();
   }, [selectedAreaId]);
 
+  async function createDuration(serviceId: string, minPs: number, maxPs: number, dur: number): Promise<Duration> {
+    const res = await fetch('/api/venue/party-size-durations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ service_id: serviceId, min_party_size: minPs, max_party_size: maxPs, duration_minutes: dur }),
+    });
+    if (!res.ok) throw new Error('Failed to create duration');
+    const data = (await res.json()) as { duration: Duration };
+    return data.duration;
+  }
+
   async function handleCreate(serviceId: string, minPs: number, maxPs: number, dur: number) {
     setSaving(true);
     try {
-      const res = await fetch('/api/venue/party-size-durations', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ service_id: serviceId, min_party_size: minPs, max_party_size: maxPs, duration_minutes: dur }),
-      });
-      if (!res.ok) throw new Error();
-      const data = await res.json();
-      setDurations([...durations, data.duration]);
+      const duration = await createDuration(serviceId, minPs, maxPs, dur);
+      setDurations((current) => [...current, duration]);
       setCreating(null);
       showToast('Duration added');
     } catch {
@@ -82,7 +87,7 @@ export function DiningDurationTab({ services, showToast, selectedAreaId }: Props
       });
       if (!res.ok) throw new Error();
       const data = await res.json();
-      setDurations(durations.map((d) => (d.id === editDraft.id ? data.duration : d)));
+      setDurations((current) => current.map((d) => (d.id === editDraft.id ? data.duration : d)));
       setEditingId(null);
       setEditDraft(null);
       showToast('Duration updated');
@@ -100,7 +105,7 @@ export function DiningDurationTab({ services, showToast, selectedAreaId }: Props
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id }),
       });
-      setDurations(durations.filter((d) => d.id !== id));
+      setDurations((current) => current.filter((d) => d.id !== id));
       showToast('Duration deleted');
     } catch {
       showToast('Failed to delete');
@@ -115,11 +120,18 @@ export function DiningDurationTab({ services, showToast, selectedAreaId }: Props
       { min: 7, max: 20, dur: 150 },
     ];
     setSaving(true);
-    for (const { min, max, dur } of defaults) {
-      await handleCreate(serviceId, min, max, dur);
+    try {
+      const createdDurations: Duration[] = [];
+      for (const { min, max, dur } of defaults) {
+        createdDurations.push(await createDuration(serviceId, min, max, dur));
+      }
+      setDurations((current) => [...current, ...createdDurations]);
+      showToast('Default durations added');
+    } catch {
+      showToast('Failed to add default durations');
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
-    showToast('Default durations added');
   }
 
   if (loading) {

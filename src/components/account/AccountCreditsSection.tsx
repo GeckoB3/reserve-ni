@@ -1,0 +1,309 @@
+'use client';
+
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { loadStripe } from '@stripe/stripe-js';
+import { Elements, PaymentElement, useElements, useStripe } from '@stripe/react-stripe-js';
+
+interface BalanceRow {
+  id: string;
+  venue_id: string;
+  product_id: string;
+  credits_remaining: number;
+  expires_at: string | null;
+}
+
+interface LedgerRow {
+  id: string;
+  delta_credits: number;
+  reason: string;
+  created_at: string;
+  venue_id: string;
+}
+
+function CreditPurchaseForm({
+  clientSecret,
+  stripeAccountId,
+  onDone,
+}: {
+  clientSecret: string;
+  stripeAccountId: string;
+  onDone: () => void;
+}) {
+  const stripe = useStripe();
+  const elements = useElements();
+  const [err, setErr] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!stripe || !elements) return;
+    setErr(null);
+    setLoading(true);
+    try {
+      const { error: submitError } = await elements.submit();
+      if (submitError) {
+        setErr(submitError.message ?? 'Check card details');
+        return;
+      }
+      const { error: pe, paymentIntent } = await stripe.confirmPayment({
+        elements,
+        clientSecret,
+        redirect: 'if_required',
+      });
+      if (pe) {
+        setErr(pe.message ?? 'Payment failed');
+        return;
+      }
+      if (paymentIntent?.status === 'succeeded' && paymentIntent.id) {
+        await fetch('/api/account/credits/fulfill', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            payment_intent_id: paymentIntent.id,
+            stripe_account_id: stripeAccountId,
+          }),
+        });
+      }
+      onDone();
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <form onSubmit={(ev) => void onSubmit(ev)} className="mt-3 space-y-3">
+      <PaymentElement options={{ layout: 'tabs' }} />
+      {err ? <p className="text-sm text-red-600">{err}</p> : null}
+      <button
+        type="submit"
+        disabled={!stripe || loading}
+        className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+      >
+        {loading ? 'Processing…' : 'Pay'}
+      </button>
+    </form>
+  );
+}
+
+const stripeCache = new Map<string, ReturnType<typeof loadStripe>>();
+
+function stripeForAccount(accountId: string) {
+  const key = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? '';
+  if (!stripeCache.has(accountId)) {
+    stripeCache.set(accountId, loadStripe(key, { stripeAccount: accountId }));
+  }
+  return stripeCache.get(accountId)!;
+}
+
+interface CatalogProduct {
+  id: string;
+  name: string;
+  venue_id: string;
+  credits_count: number;
+  price_pence: number;
+  currency: string;
+}
+
+export function AccountCreditsSection() {
+  const [balances, setBalances] = useState<BalanceRow[]>([]);
+  const [ledger, setLedger] = useState<LedgerRow[]>([]);
+  const [products, setProducts] = useState<Array<{ id: string; name: string; venue_id: string }>>([]);
+  const [venues, setVenues] = useState<Array<{ id: string; name: string }>>([]);
+  const [purchaseCatalog, setPurchaseCatalog] = useState<{
+    venues: Array<{ id: string; name: string }>;
+    products: CatalogProduct[];
+  }>({ venues: [], products: [] });
+  const [error, setError] = useState<string | null>(null);
+  const [purchase, setPurchase] = useState<{
+    venue_id: string;
+    product_id: string;
+    client_secret: string;
+    stripe_account_id: string;
+  } | null>(null);
+
+  const load = useCallback(async () => {
+    await Promise.resolve();
+    setError(null);
+    const res = await fetch('/api/account/credits');
+    const data = await res.json();
+    if (!res.ok) {
+      setError(data.error ?? 'Could not load credits');
+      return;
+    }
+    setBalances((data.balances ?? []) as BalanceRow[]);
+    setLedger((data.ledger ?? []) as LedgerRow[]);
+    setProducts((data.products ?? []) as Array<{ id: string; name: string; venue_id: string }>);
+    setVenues((data.venues ?? []) as Array<{ id: string; name: string }>);
+    const pc = (data as { purchase_catalog?: { venues?: unknown[]; products?: unknown[] } }).purchase_catalog;
+    setPurchaseCatalog({
+      venues: (pc?.venues ?? []) as Array<{ id: string; name: string }>,
+      products: (pc?.products ?? []) as CatalogProduct[],
+    });
+  }, []);
+
+  useEffect(() => {
+    queueMicrotask(() => {
+      void load();
+    });
+  }, [load]);
+
+  const venueName = (id: string) => venues.find((v) => v.id === id)?.name ?? id.slice(0, 8);
+  const productName = (id: string) => products.find((p) => p.id === id)?.name ?? 'Pack';
+
+  async function startPurchase(venue_id: string, product_id: string) {
+    setError(null);
+    const res = await fetch('/api/account/credits/purchase', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ venue_id, product_id }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setError(data.error ?? 'Could not start payment');
+      return;
+    }
+    setPurchase({
+      venue_id,
+      product_id,
+      client_secret: data.client_secret,
+      stripe_account_id: data.stripe_account_id,
+    });
+  }
+
+  function afterPaid() {
+    setPurchase(null);
+    void load();
+  }
+
+  return (
+    <div className="space-y-6">
+      <h1 className="text-2xl font-semibold text-slate-900">Class credits</h1>
+      <p className="text-sm text-slate-600">
+        Balances are per venue. Buy packs from a venue that sells them; redeem when booking paid classes (where enabled).
+      </p>
+      {error ? <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</div> : null}
+
+      <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <h2 className="text-sm font-semibold text-slate-900">Balances</h2>
+        {balances.length === 0 ? (
+          <p className="mt-2 text-sm text-slate-500">No credit batches yet.</p>
+        ) : (
+          <ul className="mt-3 space-y-2 text-sm">
+            {balances.map((b) => (
+              <li key={b.id} className="flex justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2">
+                <span>
+                  {productName(b.product_id)} · {venueName(b.venue_id)}
+                </span>
+                <span className="font-medium">{b.credits_remaining} left</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <h2 className="text-sm font-semibold text-slate-900">Buy a pack</h2>
+        <p className="mt-1 text-xs text-slate-500">Choose a venue, then a published credit pack.</p>
+        <BuyPackPicker catalog={purchaseCatalog} onBuy={(v, p) => void startPurchase(v, p)} />
+      </div>
+
+      {purchase ? (
+        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <h2 className="text-sm font-semibold text-slate-900">Complete payment</h2>
+          <Elements
+            stripe={stripeForAccount(purchase.stripe_account_id)}
+            options={{ clientSecret: purchase.client_secret, appearance: { theme: 'stripe' } }}
+          >
+            <CreditPurchaseForm
+              clientSecret={purchase.client_secret}
+              stripeAccountId={purchase.stripe_account_id}
+              onDone={() => void afterPaid()}
+            />
+          </Elements>
+        </div>
+      ) : null}
+
+      <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <h2 className="text-sm font-semibold text-slate-900">Recent ledger</h2>
+        {ledger.length === 0 ? (
+          <p className="mt-2 text-sm text-slate-500">No activity yet.</p>
+        ) : (
+          <ul className="mt-3 max-h-64 space-y-1 overflow-auto text-xs text-slate-700">
+            {ledger.map((l) => (
+              <li key={l.id}>
+                {l.created_at.slice(0, 10)} · {l.reason} · {l.delta_credits > 0 ? '+' : ''}
+                {l.delta_credits} · {venueName(l.venue_id)}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function BuyPackPicker({
+  catalog,
+  onBuy,
+}: {
+  catalog: { venues: Array<{ id: string; name: string }>; products: CatalogProduct[] };
+  onBuy: (venueId: string, productId: string) => void;
+}) {
+  const [venueId, setVenueId] = useState(catalog.venues[0]?.id ?? '');
+  const [productId, setProductId] = useState('');
+  const productChoices = useMemo(
+    () => catalog.products.filter((p) => p.venue_id === venueId),
+    [catalog.products, venueId],
+  );
+  const firstProductId = productChoices[0]?.id ?? '';
+  const effectiveProductId =
+    productId && productChoices.some((p) => p.id === productId) ? productId : firstProductId;
+
+  if (catalog.venues.length === 0 || catalog.products.length === 0) {
+    return <p className="mt-3 text-sm text-slate-500">No published credit packs are available yet.</p>;
+  }
+
+  return (
+    <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-end">
+      <label className="min-w-0 flex-1 text-xs text-slate-600">
+        Venue
+        <select
+          value={venueId}
+          onChange={(e) => {
+            setVenueId(e.target.value);
+            setProductId('');
+          }}
+          className="mt-1 w-full rounded border border-slate-300 px-2 py-2 text-sm"
+        >
+          {catalog.venues.map((v) => (
+            <option key={v.id} value={v.id}>
+              {v.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="min-w-0 flex-1 text-xs text-slate-600">
+        Pack
+        <select
+          value={effectiveProductId}
+          onChange={(e) => setProductId(e.target.value)}
+          className="mt-1 w-full rounded border border-slate-300 px-2 py-2 text-sm"
+        >
+          {productChoices.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name} — {p.credits_count} credits (£{(p.price_pence / 100).toFixed(2)})
+            </option>
+          ))}
+        </select>
+      </label>
+      <button
+        type="button"
+        disabled={!venueId || !effectiveProductId}
+        onClick={() => onBuy(venueId, effectiveProductId)}
+        className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+      >
+        Pay
+      </button>
+    </div>
+  );
+}

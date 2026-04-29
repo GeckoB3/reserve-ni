@@ -788,7 +788,7 @@ export function FloorPlanLiveView({
   }
 
   return (
-    <div className="flex h-[calc(100dvh-72px)] flex-col space-y-2 md:h-[calc(100dvh-100px)] md:space-y-3 lg:h-[calc(100dvh-120px)]">
+    <div className="flex flex-col space-y-2 md:space-y-3">
       <PageHeader
         eyebrow="Operations"
         title="Live floor"
@@ -859,7 +859,7 @@ export function FloorPlanLiveView({
       </ViewToolbar>
 
       {/* Canvas area */}
-      <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 shadow-sm shadow-slate-900/5">
+      <div className="relative h-[680px] min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 shadow-sm shadow-slate-900/5 sm:h-[760px] lg:h-[840px]">
         {reassignMode && (
           <div className="absolute left-2 right-2 top-2 z-30 flex items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] text-amber-900 shadow-sm sm:left-4 sm:right-4 sm:top-4 sm:px-4 sm:py-2 sm:text-xs">
             <span>Tap a highlighted table to move <strong>{reassignMode.guestName}</strong></span>

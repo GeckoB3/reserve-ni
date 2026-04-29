@@ -8,6 +8,7 @@ import {
   computeClassAvailability,
   fetchClassInputForRange,
 } from '@/lib/availability/class-session-engine';
+import { loadClassOfferingCommerceCatalog } from '@/lib/class-commerce/enrich-class-offerings';
 
 function addDaysIso(from: string, days: number): string {
   const [y, m, d] = from.split('-').map(Number);
@@ -51,12 +52,19 @@ export async function GET(request: NextRequest) {
     const slots = computeClassAvailability(input);
     const classes = buildClassOfferingSummaries(slots);
 
+    const { data: authUser } = await supabase.auth.getUser();
+    const commerce = await loadClassOfferingCommerceCatalog(admin, {
+      venueId: staff.venue_id,
+      viewerUserId: authUser.user?.id ?? null,
+    });
+
     return NextResponse.json({
       venue_id: staff.venue_id,
       from,
       to,
       classes,
       instances: slots,
+      commerce,
     });
   } catch (err) {
     console.error('GET /api/venue/class-offerings failed:', err);

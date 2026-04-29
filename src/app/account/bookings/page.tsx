@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
-import { loadAccountBookings } from '@/lib/account/account-bookings';
+import { buildAccountBookingDisplayList, loadAccountBookings } from '@/lib/account/account-bookings';
 import { bookingModelShortLabel } from '@/lib/booking/infer-booking-row-model';
 import {
   filterAccountBookings,
@@ -24,6 +24,7 @@ export default async function AccountBookingsPage({
   const bookings = await loadAccountBookings(supabase, getSupabaseAdminClient(), 100);
 
   const filtered = filterAccountBookings(bookings, filter, todayUtcDate);
+  const displayItems = buildAccountBookingDisplayList(filtered);
 
   const tabs: Array<{ id: AccountBookingFilter; label: string }> = [
     { id: 'all', label: 'All' },
@@ -51,29 +52,57 @@ export default async function AccountBookingsPage({
       </div>
       {bookings.length === 0 ? (
         <p className="text-slate-600">No bookings linked to this account yet.</p>
-      ) : filtered.length === 0 ? (
+      ) : displayItems.length === 0 ? (
         <p className="text-slate-600">No bookings in this view.</p>
       ) : (
         <ul className="divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white shadow-sm">
-          {filtered.map((b) => (
-            <li key={b.id} className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className="font-medium text-slate-900">{b.venue?.name ?? 'Venue'}</p>
-                <p className="text-sm text-slate-600">
-                  {bookingModelShortLabel(b.booking_model)} · {b.booking_date} · {String(b.booking_time).slice(0, 5)} ·{' '}
-                  {b.party_size} guests · {b.status}
-                </p>
-              </div>
-              <div className="flex gap-3 text-sm font-medium">
-                <Link href={`/account/bookings/${b.id}`} className="text-brand-700 hover:underline">
-                  Details
-                </Link>
-                <a href={b.manage_booking_link} className="text-brand-700 hover:underline">
-                  Manage
-                </a>
-              </div>
-            </li>
-          ))}
+          {displayItems.map((item) =>
+            item.kind === 'group' ? (
+              <li key={item.group_booking_id} className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <p className="font-medium text-slate-900">{item.venue?.name ?? 'Venue'}</p>
+                  <p className="text-sm font-medium text-slate-800">Class multi-session · {item.rows.length} sessions</p>
+                  <ul className="mt-2 space-y-1 text-xs text-slate-600">
+                    {item.rows.map((b) => (
+                      <li key={b.id}>
+                        {b.booking_date} {String(b.booking_time).slice(0, 5)} · {b.party_size} guests · {b.status}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <div className="flex flex-col gap-1 text-sm font-medium sm:items-end">
+                  {item.rows.map((b) => (
+                    <div key={b.id} className="flex gap-3">
+                      <Link href={`/account/bookings/${b.id}`} className="text-brand-700 hover:underline">
+                        Details
+                      </Link>
+                      <a href={b.manage_booking_link} className="text-brand-700 hover:underline">
+                        Manage
+                      </a>
+                    </div>
+                  ))}
+                </div>
+              </li>
+            ) : (
+              <li key={item.row.id} className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="font-medium text-slate-900">{item.row.venue?.name ?? 'Venue'}</p>
+                  <p className="text-sm text-slate-600">
+                    {bookingModelShortLabel(item.row.booking_model)} · {item.row.booking_date} ·{' '}
+                    {String(item.row.booking_time).slice(0, 5)} · {item.row.party_size} guests · {item.row.status}
+                  </p>
+                </div>
+                <div className="flex gap-3 text-sm font-medium">
+                  <Link href={`/account/bookings/${item.row.id}`} className="text-brand-700 hover:underline">
+                    Details
+                  </Link>
+                  <a href={item.row.manage_booking_link} className="text-brand-700 hover:underline">
+                    Manage
+                  </a>
+                </div>
+              </li>
+            ),
+          )}
         </ul>
       )}
       <p className="text-xs text-slate-500">

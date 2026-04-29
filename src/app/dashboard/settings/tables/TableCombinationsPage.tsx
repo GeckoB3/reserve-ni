@@ -643,10 +643,10 @@ export function TableCombinationsPage({
           )}
         </div>
 
-          <div className="hidden lg:block">
+          <aside className="sticky top-24 hidden self-start lg:block">
             <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Preview</p>
             <div
-              className="sticky top-4 overflow-hidden rounded-xl border border-slate-200 bg-slate-50"
+              className="overflow-hidden rounded-xl border border-slate-200 bg-slate-50"
               style={{ minHeight: 320 }}
             >
               <MiniFloorPlanPicker
@@ -658,7 +658,7 @@ export function TableCombinationsPage({
                 previewMode
               />
             </div>
-          </div>
+          </aside>
         </div>
       </div>
 

@@ -103,7 +103,7 @@ export function LoginForm({ redirectTo }: { redirectTo?: string }) {
         <form onSubmit={handleForgotPasswordSubmit} className="space-y-4">
           <div>
             <label htmlFor="forgot-email" className="mb-1.5 block text-sm font-medium text-slate-700">Email</label>
-            <input id="forgot-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" placeholder="you@venue.com" className={inputClass} />
+            <input id="forgot-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" placeholder="you@example.com" className={inputClass} />
           </div>
           {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>}
           {successMessage && <p className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{successMessage}</p>}
@@ -146,7 +146,7 @@ export function LoginForm({ redirectTo }: { redirectTo?: string }) {
         <form onSubmit={handlePasswordSubmit} className="space-y-4">
           <div>
             <label htmlFor="email" className="mb-1.5 block text-sm font-medium text-slate-700">Email</label>
-            <input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" placeholder="you@venue.com" className={inputClass} />
+            <input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" placeholder="you@example.com" className={inputClass} />
           </div>
           <div>
             <label htmlFor="password" className="mb-1.5 block text-sm font-medium text-slate-700">Password</label>
@@ -162,7 +162,7 @@ export function LoginForm({ redirectTo }: { redirectTo?: string }) {
         <form onSubmit={handleMagicSubmit} className="space-y-4">
           <div>
             <label htmlFor="magic-email" className="mb-1.5 block text-sm font-medium text-slate-700">Email</label>
-            <input id="magic-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" placeholder="you@venue.com" className={inputClass} />
+            <input id="magic-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" placeholder="you@example.com" className={inputClass} />
           </div>
           {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>}
           <button type="submit" disabled={loading} className={primaryBtn}>{loading ? 'Sending...' : 'Send Magic Link'}</button>

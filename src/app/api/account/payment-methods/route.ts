@@ -1,34 +1,77 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { createRouteHandlerClient } from '@/lib/supabase/server';
+import { getSupabaseAdminClient } from '@/lib/supabase';
+import { stripe } from '@/lib/stripe';
 
 /**
- * Saved payment methods are intentionally gated until Stripe Connect direct-charge
- * PaymentMethod reuse is validated for the final charge architecture.
+ * GET /api/account/payment-methods?venue_id=...
+ * Lists saved cards for the signed-in user on the **venue's Stripe Connect account**
+ * (per-venue Customer via `venue_customer_stripe`).
  */
-export async function GET() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+export async function GET(request: Request) {
+  try {
+    const supabase = await createRouteHandlerClient(request);
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
 
-  return NextResponse.json({
-    payment_methods: [],
-    capability: 'blocked_connect_direct_charge',
-    message:
-      'Saved cards are not enabled: MVP deposits use direct charges on each venue Stripe Connect account, while PaymentMethods are account-scoped in Stripe.',
-    technical_blocker: {
-      summary:
-        'A platform-level Stripe Customer / PaymentMethod cannot be attached to PaymentIntents created on arbitrary connected accounts without a chosen pattern (e.g. per-connected-account Customer + SetupIntent, destination charges, or cloning).',
-      references: [
-        'src/app/api/booking/pay/route.ts (paymentIntents.retrieve with stripeAccount)',
-        'Docs/ReserveNI_User_Accounts_Reference.md Section 2.2 (Stripe Connect + saved cards)',
-      ],
-      required_before_mvp_ui: [
-        'Decide storage for Stripe customer id per (user_id, stripe_connected_account_id) or an alternative charge path.',
-        'Implement SetupIntent / confirm on the connected account that should own the saved PM.',
-        'Wire booking deposit PaymentIntent creation to reuse that PM on the same connected account only.',
-      ],
-    },
-  });
+    const venueId = new URL(request.url).searchParams.get('venue_id');
+    if (!venueId) {
+      return NextResponse.json({
+        payment_methods: [],
+        capability: 'per_venue_connected_account',
+        message:
+          'Provide venue_id to list cards saved for that venue. Cards are stored on the venue Stripe Connect account only.',
+      });
+    }
+
+    const admin = getSupabaseAdminClient();
+    const { data: venue, error: vErr } = await admin
+      .from('venues')
+      .select('id, stripe_connected_account_id')
+      .eq('id', venueId)
+      .maybeSingle();
+
+    if (vErr || !venue) {
+      return NextResponse.json({ error: 'Venue not found' }, { status: 404 });
+    }
+
+    const acct = (venue as { stripe_connected_account_id?: string | null }).stripe_connected_account_id?.trim();
+    if (!acct) {
+      return NextResponse.json({ error: 'Venue has not connected Stripe' }, { status: 400 });
+    }
+
+    const { data: row } = await admin
+      .from('venue_customer_stripe')
+      .select('stripe_customer_id')
+      .eq('user_id', user.id)
+      .eq('venue_id', venueId)
+      .maybeSingle();
+
+    const customerId = (row as { stripe_customer_id?: string } | null)?.stripe_customer_id;
+    if (!customerId) {
+      return NextResponse.json({ payment_methods: [], stripe_customer_id: null });
+    }
+
+    const list = await stripe.paymentMethods.list(
+      { customer: customerId, type: 'card' },
+      { stripeAccount: acct },
+    );
+
+    return NextResponse.json({
+      payment_methods: list.data.map((pm) => ({
+        id: pm.id,
+        brand: pm.card?.brand ?? null,
+        last4: pm.card?.last4 ?? null,
+        exp_month: pm.card?.exp_month ?? null,
+        exp_year: pm.card?.exp_year ?? null,
+      })),
+      stripe_customer_id: customerId,
+      stripe_connected_account_id: acct,
+    });
+  } catch (e) {
+    console.error('[account/payment-methods] GET', e);
+    return NextResponse.json({ error: 'Internal error' }, { status: 500 });
+  }
 }

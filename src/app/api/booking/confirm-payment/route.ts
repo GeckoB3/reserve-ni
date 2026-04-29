@@ -109,29 +109,28 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ confirmed: true, already_confirmed: true });
     }
 
-    // Save guest_email on the booking if provided
+    const confirmedIds = statusRows.map((r) => r.id).filter(Boolean) as string[];
+
+    // Save guest_email on every row that shares this PaymentIntent (e.g. class multi-session cart).
     if (guestEmail) {
       await supabase
         .from('bookings')
         .update({ guest_email: guestEmail, updated_at: new Date().toISOString() })
-        .eq('id', bookingId);
+        .in('id', confirmedIds);
     }
 
-    // Generate a manage-booking token. Use an atomic WHERE clause so that if
-    // the webhook fires simultaneously, only the first writer wins.
-    const candidateToken = generateConfirmToken();
-    const { data: tokenRows } = await supabase
-      .from('bookings')
-      .update({
-        confirm_token_hash: hashConfirmToken(candidateToken),
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', bookingId)
-      .is('confirm_token_hash', null)
-      .select('id');
-
-    if (!tokenRows?.length) {
-      console.log('confirm-payment: token already set by another process, skipping token write');
+    // Generate a manage-booking token per row (atomic: only if still null).
+    for (const bid of confirmedIds) {
+      const candidateToken = generateConfirmToken();
+      await supabase
+        .from('bookings')
+        .update({
+          confirm_token_hash: hashConfirmToken(candidateToken),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', bid)
+        .is('confirm_token_hash', null)
+        .select('id');
     }
 
     const { data: guest } = await supabase
@@ -140,11 +139,6 @@ export async function POST(request: NextRequest) {
       .eq('id', booking.guest_id)
       .single();
 
-    const manageBookingLink = createShortManageLink(bookingId);
-    const bookingTime = typeof booking.booking_time === 'string'
-      ? booking.booking_time.slice(0, 5)
-      : booking.booking_time;
-
     const recipientEmail = guestEmail || guest?.email;
     const venueData = venueRowToEmailData({
       name: venue.name,
@@ -152,44 +146,59 @@ export async function POST(request: NextRequest) {
       email: venue.email ?? null,
       reply_to_email: venue.reply_to_email ?? null,
     });
-    const bookingData = {
-      id: booking.id,
-      guest_name: guest?.name ?? guestEmail ?? 'Guest',
-      guest_email: recipientEmail ?? null,
-      guest_phone: guest?.phone ?? null,
-      booking_date: booking.booking_date,
-      booking_time: bookingTime,
-      party_size: booking.party_size,
-      deposit_amount_pence: booking.deposit_amount_pence ?? null,
-      deposit_status: 'Paid' as const,
-      refund_cutoff: booking.cancellation_deadline ?? null,
-      manage_booking_link: manageBookingLink,
-    };
 
     after(async () => {
-      try {
-        const enriched = await enrichBookingEmailForComms(supabase, bookingId, bookingData);
-        const { email: confEmail, sms: confSms } = await sendBookingConfirmationNotifications(
-          enriched,
-          venueData,
-          booking.venue_id,
-        );
-        if (!confEmail.sent) console.warn('[after] confirm-payment confirmation email not sent:', confEmail.reason);
-        if (!confSms.sent && confSms.reason !== 'skipped' && confSms.reason !== 'no_phone') {
-          console.warn('[after] confirm-payment confirmation SMS not sent:', confSms.reason);
-        }
-      } catch (err) {
-        console.error('[after] confirm-payment confirmation notifications failed:', err);
-      }
+      for (const bid of confirmedIds) {
+        const { data: bRow } = await supabase
+          .from('bookings')
+          .select(
+            'id, booking_date, booking_time, party_size, cancellation_deadline, deposit_amount_pence, source, guest_email',
+          )
+          .eq('id', bid)
+          .maybeSingle();
+        if (!bRow) continue;
 
-      const skipDepositReceipt = isSelfServeBookingSource(booking.source as string | null);
-      if (recipientEmail && booking.deposit_amount_pence && !skipDepositReceipt) {
+        const manageBookingLink = createShortManageLink(bid);
+        const bookingTime =
+          typeof bRow.booking_time === 'string' ? bRow.booking_time.slice(0, 5) : bRow.booking_time;
+        const bookingData = {
+          id: bRow.id,
+          guest_name: guest?.name ?? guestEmail ?? 'Guest',
+          guest_email: recipientEmail ?? null,
+          guest_phone: guest?.phone ?? null,
+          booking_date: bRow.booking_date,
+          booking_time: bookingTime,
+          party_size: bRow.party_size,
+          deposit_amount_pence: bRow.deposit_amount_pence ?? null,
+          deposit_status: 'Paid' as const,
+          refund_cutoff: bRow.cancellation_deadline ?? null,
+          manage_booking_link: manageBookingLink,
+        };
+
         try {
-          const enrichedDep = await enrichBookingEmailForComms(supabase, bookingId, bookingData);
-          const depResult = await sendDepositConfirmationEmail(enrichedDep, venueData, booking.venue_id);
-          if (!depResult.sent) console.warn('[after] confirm-payment deposit email not sent:', depResult.reason);
+          const enriched = await enrichBookingEmailForComms(supabase, bid, bookingData);
+          const { email: confEmail, sms: confSms } = await sendBookingConfirmationNotifications(
+            enriched,
+            venueData,
+            booking.venue_id,
+          );
+          if (!confEmail.sent) console.warn('[after] confirm-payment confirmation email not sent:', confEmail.reason);
+          if (!confSms.sent && confSms.reason !== 'skipped' && confSms.reason !== 'no_phone') {
+            console.warn('[after] confirm-payment confirmation SMS not sent:', confSms.reason);
+          }
         } catch (err) {
-          console.error('[after] confirm-payment deposit email failed:', err);
+          console.error('[after] confirm-payment confirmation notifications failed:', err);
+        }
+
+        const skipDepositReceipt = isSelfServeBookingSource(bRow.source as string | null);
+        if (recipientEmail && bRow.deposit_amount_pence && !skipDepositReceipt) {
+          try {
+            const enrichedDep = await enrichBookingEmailForComms(supabase, bid, bookingData);
+            const depResult = await sendDepositConfirmationEmail(enrichedDep, venueData, booking.venue_id);
+            if (!depResult.sent) console.warn('[after] confirm-payment deposit email not sent:', depResult.reason);
+          } catch (err) {
+            console.error('[after] confirm-payment deposit email failed:', err);
+          }
         }
       }
     });

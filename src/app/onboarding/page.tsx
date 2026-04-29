@@ -2205,8 +2205,16 @@ export default function OnboardingPage() {
     currentStepKey === 'classes' ||
     currentStepKey === 'resources';
 
+  const extraWideOnboardingStep = currentStepKey === 'r_table_setup';
+  const onboardingWidthClass = extraWideOnboardingStep
+    ? 'max-w-7xl'
+    : wideOnboardingStep
+      ? 'max-w-3xl'
+      : 'max-w-xl';
+  const onboardingCardPaddingClass = extraWideOnboardingStep ? 'p-4 sm:p-6' : 'p-8';
+
   return (
-    <div className={`w-full ${wideOnboardingStep ? 'max-w-3xl' : 'max-w-xl'}`}>
+    <div className={`w-full ${onboardingWidthClass}`}>
       {/* Progress */}
       <div className="mb-8">
         <div className="mb-2 flex justify-between text-xs font-medium text-slate-400">
@@ -2229,7 +2237,7 @@ export default function OnboardingPage() {
         )}
       </div>
 
-      <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
+      <div className={`rounded-2xl border border-slate-200 bg-white shadow-sm ${onboardingCardPaddingClass}`}>
         {error && (
           <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             {error}

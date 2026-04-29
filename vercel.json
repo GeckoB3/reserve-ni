@@ -29,6 +29,10 @@
       "schedule": "0 3 * * *"
     },
     {
+      "path": "/api/cron/class-recurring-materialize",
+      "schedule": "15 4 * * *"
+    },
+    {
       "path": "/api/cron/sms-overage-billing",
       "schedule": "0 2 1 * *"
     },

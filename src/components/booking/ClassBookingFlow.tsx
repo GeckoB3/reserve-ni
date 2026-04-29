@@ -1,6 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { usePathname } from 'next/navigation';
+import Link from 'next/link';
 import type { VenuePublic, GuestDetails } from './types';
 import type { ClassPaymentRequirement } from '@/types/booking-models';
 import { defaultPhoneCountryForVenueCurrency } from '@/lib/phone/default-country';
@@ -17,6 +19,9 @@ import {
   venueBookingsCreateUrl,
 } from '@/lib/booking/booking-flow-api';
 import { formatOnlinePaidRefundPolicyLine } from '@/lib/booking/public-deposit-refund-policy';
+import { RequireAuthModal } from '@/components/auth/RequireAuthModal';
+import { createClient } from '@/lib/supabase/browser';
+import type { ClassOfferingCommerceCatalog } from '@/lib/class-commerce/enrich-class-offerings';
 
 interface ClassOfferingSummary {
   class_type_id: string;
@@ -54,6 +59,31 @@ interface ClassSlot {
 type Step = 'pick-class' | 'pick-date' | 'summary' | 'details' | 'payment' | 'confirmation';
 
 import { currencySymbolFromCode as symForCurrency } from '@/lib/money/currency-symbol';
+
+function formatClassDate(iso: string): string {
+  const d = new Date(`${iso}T12:00:00`);
+  return new Intl.DateTimeFormat('en-GB', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+  }).format(d);
+}
+
+function classPriceLabel(cls: Pick<ClassOfferingSummary, 'price_pence' | 'payment_requirement' | 'deposit_amount_pence'>, sym: string): string {
+  const price = cls.price_pence ?? 0;
+  if (price <= 0) return 'Free';
+  if (cls.payment_requirement === 'deposit' && (cls.deposit_amount_pence ?? 0) > 0) {
+    return `${sym}${((cls.deposit_amount_pence ?? 0) / 100).toFixed(2)} deposit`;
+  }
+  if (cls.payment_requirement === 'none') {
+    return `${sym}${(price / 100).toFixed(2)} pay at venue`;
+  }
+  return `${sym}${(price / 100).toFixed(2)} per person`;
+}
+
+function slotKey(slot: ClassSlot): string {
+  return slot.instance_id;
+}
 
 function paymentSummaryLines(
   slot: ClassSlot,
@@ -156,9 +186,11 @@ export function ClassBookingFlow({
   const [rangeTo, setRangeTo] = useState('');
   const [classSummaries, setClassSummaries] = useState<ClassOfferingSummary[]>([]);
   const [instances, setInstances] = useState<ClassSlot[]>([]);
+  const [commerce, setCommerce] = useState<ClassOfferingCommerceCatalog | null>(null);
   const [selectedClassTypeId, setSelectedClassTypeId] = useState<string | null>(null);
   const [selectedCalendarDate, setSelectedCalendarDate] = useState<string | null>(null);
   const [selectedClass, setSelectedClass] = useState<ClassSlot | null>(null);
+  const [selectedSlots, setSelectedSlots] = useState<ClassSlot[]>([]);
   const [spots, setSpots] = useState(1);
   const [createResult, setCreateResult] = useState<{
     booking_id: string;
@@ -166,10 +198,26 @@ export function ClassBookingFlow({
     stripe_account_id?: string;
     requires_deposit: boolean;
     payment_url?: string;
+    cart_total_amount_pence?: number;
+    cart_primary_booking_id?: string;
+    cart_booking_count?: number;
+    cart_charge_kind?: 'deposit' | 'full_payment';
   } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const pathname = usePathname() ?? '/book';
+  const [payWithClassCredits, setPayWithClassCredits] = useState(false);
+  const [cartPayWithClassCredits, setCartPayWithClassCredits] = useState(false);
+  const [authModalOpen, setAuthModalOpen] = useState(false);
+
+  useEffect(() => {
+    setPayWithClassCredits(false);
+  }, [selectedClass?.instance_id]);
+
+  useEffect(() => {
+    if (selectedSlots.length < 2) setCartPayWithClassCredits(false);
+  }, [selectedSlots.length]);
 
   const fetchOfferings = useCallback(async () => {
     setLoading(true);
@@ -182,12 +230,14 @@ export function ClassBookingFlow({
       setRangeFrom(data.from ?? from);
       setRangeTo(data.to ?? '');
       setClassSummaries((data.classes ?? []) as ClassOfferingSummary[]);
+      setCommerce((data.commerce as ClassOfferingCommerceCatalog | undefined) ?? null);
       const raw = (data.instances ?? []) as Record<string, unknown>[];
       setInstances(raw.map(mapInstanceToSlot));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load classes');
       setClassSummaries([]);
       setInstances([]);
+      setCommerce(null);
     } finally {
       setLoading(false);
     }
@@ -212,16 +262,37 @@ export function ClassBookingFlow({
     return instancesForType.filter((i) => i.instance_date === selectedCalendarDate);
   }, [instancesForType, selectedCalendarDate]);
 
+  const selectedDateSet = useMemo(
+    () => [...new Set(selectedSlots.map((slot) => slot.instance_date))],
+    [selectedSlots],
+  );
+
+  const commerceSummary = useMemo(() => {
+    if (!commerce) return null;
+    const packs = commerce.credit_products.slice(0, 3);
+    const memberships = commerce.membership_products.slice(0, 2);
+    const courses = commerce.course_products.slice(0, 2);
+    if (packs.length === 0 && memberships.length === 0 && courses.length === 0) return null;
+    return { packs, memberships, courses };
+  }, [commerce]);
+
   function handleCalendarSelectDate(iso: string) {
     const candidates = instancesForType.filter((i) => i.instance_date === iso && i.remaining > 0);
     if (candidates.length === 1) {
-      setSelectedClass(candidates[0]!);
-      setSpots(1);
-      setStep('summary');
-      setSelectedCalendarDate(null);
+      toggleSelectedSlot(candidates[0]!);
       return;
     }
     setSelectedCalendarDate(iso);
+  }
+
+  function toggleSelectedSlot(slot: ClassSlot) {
+    setSelectedSlots((current) => {
+      const exists = current.some((s) => slotKey(s) === slotKey(slot));
+      if (exists) return current.filter((s) => slotKey(s) !== slotKey(slot));
+      return [...current, slot].sort(
+        (a, b) => a.instance_date.localeCompare(b.instance_date) || a.start_time.localeCompare(b.start_time),
+      );
+    });
   }
 
   const summary = useMemo(() => {
@@ -274,6 +345,16 @@ export function ClassBookingFlow({
           return;
         }
 
+        if (payWithClassCredits) {
+          const supabase = createClient();
+          const { data: authData } = await supabase.auth.getUser();
+          if (!authData.user) {
+            setAuthModalOpen(true);
+            setSubmitting(false);
+            return;
+          }
+        }
+
         const res = await fetch(bookingCreateUrl(), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -288,9 +369,15 @@ export function ClassBookingFlow({
             source: 'booking_page',
             class_instance_id: selectedClass.instance_id,
             dietary_notes: details.dietary_notes,
+            ...(payWithClassCredits ? { pay_with_class_credits: true } : {}),
           }),
         });
         const data = await res.json();
+        if (res.status === 401 && payWithClassCredits) {
+          setAuthModalOpen(true);
+          setSubmitting(false);
+          return;
+        }
         if (!res.ok) throw new Error(data.error ?? 'Booking failed');
         setCreateResult({
           booking_id: data.booking_id,
@@ -306,8 +393,10 @@ export function ClassBookingFlow({
         setSubmitting(false);
       }
     },
-    [venue.id, selectedClass, spots, isStaff, staffBookingSource, onBookingCreated],
+    [venue.id, selectedClass, spots, isStaff, staffBookingSource, onBookingCreated, payWithClassCredits],
   );
+
+  const depositPenceForDetails = payWithClassCredits ? 0 : (summary?.chargePence ?? 0);
 
   const handlePaymentComplete = useCallback(async () => {
     if (createResult?.booking_id) {
@@ -320,17 +409,119 @@ export function ClassBookingFlow({
       } catch {
         /* webhook fallback */
       }
+    } else if (createResult?.cart_primary_booking_id) {
+      try {
+        const supabase = createClient();
+        const { data: auth } = await supabase.auth.getUser();
+        await fetch(bookingConfirmPaymentUrl(), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            booking_id: createResult.cart_primary_booking_id,
+            ...(auth.user?.email ? { guest_email: auth.user.email } : {}),
+          }),
+        });
+      } catch {
+        /* webhook fallback */
+      }
     }
     setStep('confirmation');
-  }, [createResult?.booking_id]);
+  }, [createResult?.booking_id, createResult?.cart_primary_booking_id]);
 
-  const depositPenceForDetails = summary?.chargePence ?? 0;
+  function continueWithSelectedDates() {
+    setError(null);
+    if (selectedSlots.length === 0) {
+      setError('Choose at least one date.');
+      return;
+    }
+    if (selectedSlots.length === 1) {
+      setSelectedClass(selectedSlots[0]!);
+      setStep('summary');
+      return;
+    }
+    void runMultiDateCheckout();
+  }
 
-  function pickTimeSlot(slot: ClassSlot) {
-    setSelectedClass(slot);
-    setSpots(1);
-    setStep('summary');
-    setSelectedCalendarDate(null);
+  async function runMultiDateCheckout() {
+    if (selectedSlots.length < 2) return;
+    const supabase = createClient();
+    const { data: authData } = await supabase.auth.getUser();
+    if (!authData.user) {
+      setAuthModalOpen(true);
+      return;
+    }
+
+    setSubmitting(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/booking/class-cart/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          venue_id: venue.id,
+          lines: selectedSlots.map((slot) => ({ class_instance_id: slot.instance_id, party_size: spots })),
+          pay_with_class_credits: cartPayWithClassCredits,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? 'Checkout failed');
+
+      if (data.status === 'payment_required') {
+        setCreateResult({
+          booking_id: '',
+          client_secret: data.client_secret,
+          stripe_account_id: data.stripe_account_id,
+          requires_deposit: true,
+          cart_total_amount_pence: data.total_amount_pence,
+          cart_primary_booking_id: data.primary_booking_id,
+          cart_booking_count: Array.isArray(data.booking_ids) ? data.booking_ids.length : selectedSlots.length,
+          cart_charge_kind: data.checkout_charge_kind === 'full_payment' ? 'full_payment' : 'deposit',
+        });
+        setSelectedClass(selectedSlots[0] ?? null);
+        setStep('payment');
+        return;
+      }
+
+      setCreateResult({
+        booking_id: '',
+        requires_deposit: false,
+        cart_booking_count: Array.isArray(data.booking_ids) ? data.booking_ids.length : selectedSlots.length,
+      });
+      setSelectedClass(selectedSlots[0] ?? null);
+      setStep('confirmation');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Checkout failed');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleCreditsToggle(next: boolean) {
+    if (!next) {
+      setPayWithClassCredits(false);
+      return;
+    }
+    const supabase = createClient();
+    const { data: authData } = await supabase.auth.getUser();
+    if (!authData.user) {
+      setAuthModalOpen(true);
+      return;
+    }
+    setPayWithClassCredits(true);
+  }
+
+  async function handleCartCreditsToggle(next: boolean) {
+    if (!next) {
+      setCartPayWithClassCredits(false);
+      return;
+    }
+    const supabase = createClient();
+    const { data: authData } = await supabase.auth.getUser();
+    if (!authData.user) {
+      setAuthModalOpen(true);
+      return;
+    }
+    setCartPayWithClassCredits(true);
   }
 
   return (
@@ -341,10 +532,13 @@ export function ClassBookingFlow({
 
       {step === 'pick-class' && (
         <div>
-          <h2 className="mb-1 text-lg font-semibold text-slate-900">Choose a class</h2>
-          <p className="mb-4 text-sm text-slate-500">
-            Classes with sessions scheduled in the next 3 months. Pick one, then choose a date on the next step.
-          </p>
+          <div className="mb-5 rounded-2xl border border-brand-100 bg-brand-50/70 p-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-brand-700">Classes</p>
+            <h2 className="mt-1 text-xl font-bold text-slate-950">Choose your class first</h2>
+            <p className="mt-2 text-sm leading-6 text-slate-700">
+              Pick the class you want to attend, then choose one or more dates on the calendar.
+            </p>
+          </div>
           {loading ? (
             <div className="space-y-3">
               {[1, 2].map((i) => (
@@ -358,14 +552,7 @@ export function ClassBookingFlow({
           ) : (
             <div className="space-y-3">
               {classSummaries.map((cls) => {
-                const priceLabel =
-                  cls.price_pence == null || cls.price_pence <= 0
-                    ? 'Free'
-                    : cls.payment_requirement === 'deposit' && (cls.deposit_amount_pence ?? 0) > 0
-                      ? `From ${sym}${(cls.deposit_amount_pence! / 100).toFixed(2)} (deposit)`
-                      : cls.payment_requirement === 'none'
-                        ? `${sym}${(cls.price_pence / 100).toFixed(2)} (pay at venue)`
-                        : `${sym}${(cls.price_pence / 100).toFixed(2)} per person`;
+                const priceLabel = classPriceLabel(cls, sym);
                 return (
                   <button
                     key={cls.class_type_id}
@@ -373,22 +560,29 @@ export function ClassBookingFlow({
                     onClick={() => {
                       setSelectedClassTypeId(cls.class_type_id);
                       setSelectedCalendarDate(null);
+                      setSelectedClass(null);
+                      setSelectedSlots([]);
+                      setSpots(1);
                       setStep('pick-date');
                     }}
-                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-4 text-left shadow-sm transition hover:border-brand-300"
+                    className="w-full rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-brand-300 hover:bg-brand-50/30"
                   >
                     <div className="flex items-start gap-3">
                       <div className="mt-1 h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: cls.colour }} />
                       <div className="min-w-0 flex-1">
-                        <div className="font-semibold text-slate-900">{cls.class_name}</div>
-                        <div className="text-sm text-slate-500">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="font-semibold text-slate-900">{cls.class_name}</div>
+                          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
+                            {priceLabel}
+                          </span>
+                        </div>
+                        <div className="mt-1 text-sm text-slate-500">
                           {cls.session_count} session{cls.session_count !== 1 ? 's' : ''} available
                           {cls.instructor_name ? ` · ${cls.instructor_name}` : ''}
                         </div>
                         {cls.description ? (
                           <p className="mt-1 line-clamp-2 text-xs text-slate-600">{cls.description}</p>
                         ) : null}
-                        <div className="mt-2 text-sm font-medium text-slate-700">{priceLabel}</div>
                       </div>
                     </div>
                   </button>
@@ -396,6 +590,57 @@ export function ClassBookingFlow({
               })}
             </div>
           )}
+          {commerceSummary ? (
+            <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Passes, courses & memberships</p>
+                  <h3 className="mt-1 text-base font-semibold text-slate-900">Come often? Save with a pack or plan.</h3>
+                  <p className="mt-1 text-sm text-slate-600">
+                    Sign in to buy packs, enroll in courses, or start a membership — then book classes from your account.
+                  </p>
+                </div>
+                <div className="flex flex-col gap-2 sm:items-end">
+                  <button
+                    type="button"
+                    onClick={() => setAuthModalOpen(true)}
+                    className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-50"
+                  >
+                    Sign in to buy
+                  </button>
+                  <Link
+                    href="/account/classes"
+                    className="text-center text-xs font-semibold text-brand-700 hover:underline sm:text-right"
+                  >
+                    Open class account hub
+                  </Link>
+                </div>
+              </div>
+              <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
+                {commerceSummary.packs.map((p) => (
+                  <div key={p.id} className="rounded-xl bg-slate-50 px-3 py-2">
+                    <span className="font-medium">{p.name}</span>
+                    <span className="text-slate-500"> · {p.credits_count} credits · {sym}{(p.price_pence / 100).toFixed(2)}</span>
+                  </div>
+                ))}
+                {commerceSummary.courses.map((c) => (
+                  <div key={c.id} className="rounded-xl bg-slate-50 px-3 py-2">
+                    <span className="font-medium">{c.name}</span>
+                    <span className="text-slate-500">
+                      {' '}
+                      · course · {c.price_pence <= 0 ? 'free' : `${sym}${(c.price_pence / 100).toFixed(2)}`}
+                    </span>
+                  </div>
+                ))}
+                {commerceSummary.memberships.map((m) => (
+                  <div key={m.id} className="rounded-xl bg-slate-50 px-3 py-2">
+                    <span className="font-medium">{m.name}</span>
+                    <span className="text-slate-500"> · membership</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </div>
       )}
 
@@ -407,39 +652,131 @@ export function ClassBookingFlow({
               setStep('pick-class');
               setSelectedClassTypeId(null);
               setSelectedCalendarDate(null);
+              setSelectedSlots([]);
             }}
             className="mb-4 text-sm text-brand-600 hover:underline"
           >
             &larr; Back to classes
           </button>
-          <h2 className="mb-1 text-lg font-semibold text-slate-900">{selectedSummary.class_name}</h2>
-          <p className="mb-4 text-sm text-slate-500">Select a date when this class is running.</p>
+          <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900">{selectedSummary.class_name}</h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  Select one date to book as a guest, or multiple dates to buy through your account.
+                </p>
+              </div>
+              <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
+                {classPriceLabel(selectedSummary, sym)}
+              </span>
+            </div>
+          </div>
 
           <ClassOfferingsCalendar
             rangeFrom={rangeFrom}
             rangeTo={rangeTo}
             highlightedDates={selectedSummary.dates}
             selectedDate={selectedCalendarDate}
+            selectedDates={selectedDateSet}
             onSelectDate={handleCalendarSelectDate}
+            footerMessage="Dates with a session are highlighted in green. Select one date for a standard booking, or multiple dates for account checkout."
           />
 
           {selectedCalendarDate && candidatesForCalendarDate.length > 1 && (
             <div className="mt-4">
               <p className="mb-2 text-sm font-medium text-slate-800">Choose a time</p>
-              <div className="flex flex-wrap gap-2">
-                {candidatesForCalendarDate.map((slot) => (
-                  <button
-                    key={slot.instance_id}
-                    type="button"
-                    onClick={() => pickTimeSlot(slot)}
-                    className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-900 shadow-sm hover:border-brand-400 hover:bg-brand-50"
-                  >
-                    {slot.start_time.slice(0, 5)}
-                  </button>
-                ))}
+              <div className="grid gap-2 sm:grid-cols-2">
+                {candidatesForCalendarDate.map((slot) => {
+                  const selected = selectedSlots.some((s) => slotKey(s) === slotKey(slot));
+                  return (
+                    <button
+                      key={slot.instance_id}
+                      type="button"
+                      onClick={() => toggleSelectedSlot(slot)}
+                      className={`rounded-xl border px-4 py-3 text-left text-sm font-medium shadow-sm ${
+                        selected
+                          ? 'border-brand-500 bg-brand-50 text-brand-950'
+                          : 'border-slate-200 bg-white text-slate-900 hover:border-brand-400 hover:bg-brand-50'
+                      }`}
+                    >
+                      <span className="block">{slot.start_time.slice(0, 5)}</span>
+                      <span className="mt-1 block text-xs font-normal text-slate-500">
+                        {slot.remaining} spot{slot.remaining !== 1 ? 's' : ''} left
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
           )}
+
+          <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-slate-900">
+                  {selectedSlots.length === 0
+                    ? 'No dates selected'
+                    : `${selectedSlots.length} date${selectedSlots.length !== 1 ? 's' : ''} selected`}
+                </p>
+                <p className="mt-1 text-xs text-slate-500">
+                  {selectedSlots.length > 1
+                    ? 'Multiple dates require sign in so your purchases and bookings stay linked to your account.'
+                    : 'Single dates can be booked quickly without creating an account.'}
+                </p>
+              </div>
+              {selectedSlots.length > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => setSelectedSlots([])}
+                  className="text-xs font-semibold text-slate-500 hover:text-slate-800"
+                >
+                  Clear
+                </button>
+              ) : null}
+            </div>
+            {selectedSlots.length > 0 ? (
+              <div className="mt-3 space-y-2">
+                {selectedSlots.map((slot) => (
+                  <div key={slot.instance_id} className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2 text-sm">
+                    <span className="font-medium text-slate-900">
+                      {formatClassDate(slot.instance_date)} · {slot.start_time.slice(0, 5)}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => toggleSelectedSlot(slot)}
+                      className="text-xs font-semibold text-slate-500 hover:text-red-600"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            {!isStaff && selectedSlots.length > 1 ? (
+              <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/80 p-3 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={cartPayWithClassCredits}
+                  onChange={(e) => void handleCartCreditsToggle(e.target.checked)}
+                  className="mt-1 h-4 w-4 rounded border-slate-300"
+                />
+                <span>
+                  <span className="block font-semibold text-slate-900">Use class credits for all paid sessions</span>
+                  <span className="block text-xs text-slate-600">
+                    Applies only to sessions that accept credits. Remaining balance will be charged by card.
+                  </span>
+                </span>
+              </label>
+            ) : null}
+            <button
+              type="button"
+              disabled={selectedSlots.length === 0 || submitting}
+              onClick={continueWithSelectedDates}
+              className="mt-4 w-full rounded-xl bg-brand-600 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {submitting ? 'Preparing checkout...' : selectedSlots.length > 1 ? 'Sign In To Buy' : 'Book the class'}
+            </button>
+          </div>
         </div>
       )}
 
@@ -491,20 +828,48 @@ export function ClassBookingFlow({
 
           <div className="mb-4 rounded-xl border border-slate-100 bg-slate-50 p-4">
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Payment summary</p>
-            <ul className="mt-2 space-y-1 text-sm text-slate-800">
-              {(summary?.lines ?? []).map((line) => (
-                <li key={line}>{line}</li>
-              ))}
-            </ul>
+            {payWithClassCredits && (selectedClass.price_pence ?? 0) > 0 ? (
+              <ul className="mt-2 space-y-1 text-sm text-slate-800">
+                <li>
+                  Pay with class credits — {spots} credit{spots !== 1 ? 's' : ''} (same email as your account).
+                </li>
+              </ul>
+            ) : (
+              <ul className="mt-2 space-y-1 text-sm text-slate-800">
+                {(summary?.lines ?? []).map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+            )}
           </div>
+
+          {!isStaff && (selectedClass.price_pence ?? 0) > 0 ? (
+            <label className="mb-4 flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-white p-3 text-sm text-slate-700 shadow-sm">
+              <input
+                type="checkbox"
+                checked={payWithClassCredits}
+                onChange={(e) => void handleCreditsToggle(e.target.checked)}
+                className="mt-1 h-4 w-4 rounded border-slate-300"
+              />
+              <span>
+                <span className="block font-semibold text-slate-900">Use class credits or a pack</span>
+                <span className="block text-slate-600">
+                  Optional. Sign in only if you already have credits; otherwise continue as a guest.
+                </span>
+              </span>
+            </label>
+          ) : null}
 
           <button
             type="button"
             onClick={() => setStep('details')}
             className="w-full rounded-xl bg-brand-600 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-brand-700"
           >
-            Continue to guest details
+            Book the class
           </button>
+          <p className="mt-2 text-center text-xs text-slate-500">
+            You only need your name, email, and phone to reserve this single class.
+          </p>
         </div>
       )}
 
@@ -539,6 +904,12 @@ export function ClassBookingFlow({
               variant="class"
               appointmentDepositPence={depositPenceForDetails > 0 ? depositPenceForDetails : null}
               appointmentChargeLabel={selectedClass.payment_requirement === 'full_payment' ? 'full_payment' : 'deposit'}
+              payAtVenueBalancePence={
+                selectedClass.payment_requirement === 'none' && (selectedClass.price_pence ?? 0) > 0
+                  ? (selectedClass.price_pence ?? 0) * spots
+                  : null
+              }
+              payAtVenuePaymentRequirement={selectedClass.payment_requirement}
               currencySymbol={sym}
               refundNoticeHours={classRefundNoticeHours}
               phoneDefaultCountry={phoneDefaultCountry}
@@ -548,17 +919,20 @@ export function ClassBookingFlow({
         </div>
       )}
 
-      {step === 'payment' && !isStaff && createResult?.client_secret && selectedClass && summary && (
+      {step === 'payment' && !isStaff && createResult?.client_secret && selectedClass && (
         <PaymentStep
           clientSecret={createResult.client_secret}
           stripeAccountId={createResult.stripe_account_id}
-          amountPence={summary.chargePence}
+          amountPence={createResult.cart_total_amount_pence ?? summary?.chargePence ?? 0}
           partySize={spots}
           onComplete={handlePaymentComplete}
-          onBack={() => setStep('details')}
+          onBack={() => setStep(createResult.cart_primary_booking_id ? 'pick-date' : 'details')}
           cancellationPolicy={classPaymentRefundPolicy}
           summaryMode="total"
-          chargeKind={selectedClass.payment_requirement === 'full_payment' ? 'full_payment' : 'deposit'}
+          chargeKind={
+            createResult.cart_charge_kind ??
+            (selectedClass.payment_requirement === 'full_payment' ? 'full_payment' : 'deposit')
+          }
         />
       )}
 
@@ -570,13 +944,21 @@ export function ClassBookingFlow({
             </svg>
           </div>
           <h2 className="text-xl font-bold text-green-900">{terms.booking} confirmed</h2>
-          <p className="mt-2 text-sm text-green-800">
-            {selectedClass?.class_name}
-            <br />
-            {selectedClass?.instance_date} at {selectedClass?.start_time.slice(0, 5)}
-            <br />
-            {spots} spot{spots !== 1 ? 's' : ''}
-          </p>
+          {createResult?.cart_booking_count && createResult.cart_booking_count > 1 ? (
+            <p className="mt-2 text-sm text-green-800">
+              {selectedClass?.class_name}
+              <br />
+              {createResult.cart_booking_count} dates booked through your account.
+            </p>
+          ) : (
+            <p className="mt-2 text-sm text-green-800">
+              {selectedClass?.class_name}
+              <br />
+              {selectedClass?.instance_date} at {selectedClass?.start_time.slice(0, 5)}
+              <br />
+              {spots} spot{spots !== 1 ? 's' : ''}
+            </p>
+          )}
           {isStaff && createResult?.payment_url ? (
             <p className="mt-4 text-xs text-green-800">Deposit link sent to the guest.</p>
           ) : (
@@ -584,6 +966,8 @@ export function ClassBookingFlow({
           )}
         </div>
       )}
+
+      <RequireAuthModal open={authModalOpen} redirectTo={pathname} onClose={() => setAuthModalOpen(false)} />
     </div>
   );
 }

@@ -52,6 +52,9 @@ import { getResourceBookingEmailLabels } from '@/lib/booking/resource-booking-em
 import { DEFAULT_RESOURCE_SLOT_INTERVAL_MINUTES } from '@/lib/booking/resource-booking-defaults';
 import { listActiveAreasForVenue } from '@/lib/areas/resolve-default-area';
 import { isOnlineBookingBlockedForLightPastDue } from '@/lib/booking/light-plan-public-block';
+import { createRouteHandlerClient } from '@/lib/supabase/server';
+import { sumAvailableClassCreditsForClassType } from '@/lib/class-commerce/available-class-credits';
+import { consumeClassCreditsForBooking } from '@/lib/class-commerce/consume-class-credits';
 
 const createBookingSchema = z.object({
   venue_id: z.string().uuid(),
@@ -80,6 +83,8 @@ const createBookingSchema = z.object({
   })).optional(),
   // Model D: class session fields
   class_instance_id: z.string().uuid().optional(),
+  /** When true (class_session only), authenticated user pays with venue class credits instead of Stripe. */
+  pay_with_class_credits: z.boolean().optional(),
   // Model E: resource fields
   resource_id: z.string().uuid().optional(),
   booking_end_time: z.string().regex(/^([01]?[0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$/).optional(),
@@ -537,10 +542,25 @@ async function handleNonTableBooking(
     practitioner_id, appointment_service_id,
     experience_event_id, ticket_lines,
     class_instance_id,
+    pay_with_class_credits,
     resource_id, booking_end_time,
     event_session_id,
     capacity_used,
   } = data;
+
+  const routeAuthClient = await createRouteHandlerClient(request);
+  const {
+    data: { user: routeAuthUser },
+  } = await routeAuthClient.auth.getUser();
+
+  let pendingClassCreditRedemption: { userId: string; credits: number; classTypeId: string } | null = null;
+
+  if (pay_with_class_credits && effectiveModel !== 'class_session') {
+    return NextResponse.json(
+      { error: 'pay_with_class_credits is only valid for class session bookings.' },
+      { status: 400 },
+    );
+  }
 
   const isOnlineLikeSource =
     source === 'online' || source === 'widget' || source === 'booking_page';
@@ -835,6 +855,46 @@ async function handleNonTableBooking(
       practitioner_name: null,
       appointment_price_display: classPriceDisplay,
     };
+
+    if (pay_with_class_credits) {
+      if (!routeAuthUser?.id || !routeAuthUser.email) {
+        return NextResponse.json({ error: 'Sign in to pay with class credits.' }, { status: 401 });
+      }
+      const emailNorm = String(email ?? '').trim().toLowerCase();
+      const authEmail = routeAuthUser.email.trim().toLowerCase();
+      if (!emailNorm || emailNorm !== authEmail) {
+        return NextResponse.json(
+          { error: 'Use the same email as your signed-in account to redeem class credits.' },
+          { status: 403 },
+        );
+      }
+      const priceP = cls.price_pence ?? 0;
+      if (priceP <= 0) {
+        return NextResponse.json({ error: 'Class credits cannot be used for free classes.' }, { status: 400 });
+      }
+      const avail = await sumAvailableClassCreditsForClassType(supabase, {
+        userId: routeAuthUser.id,
+        venueId: venue_id,
+        classTypeId: cls.class_type_id,
+      });
+      if (avail < party_size) {
+        return NextResponse.json(
+          {
+            error: 'Not enough class credits for this booking.',
+            credits_available: avail,
+            credits_required: party_size,
+          },
+          { status: 409 },
+        );
+      }
+      requiresDeposit = false;
+      depositAmountPence = null;
+      pendingClassCreditRedemption = {
+        userId: routeAuthUser.id,
+        credits: party_size,
+        classTypeId: cls.class_type_id,
+      };
+    }
   } else if (effectiveModel === 'resource_booking') {
     if (!resource_id || !booking_end_time) {
       return NextResponse.json({ error: 'resource_id and booking_end_time are required' }, { status: 400 });
@@ -1000,6 +1060,26 @@ async function handleNonTableBooking(
   if (bookErr) {
     console.error('Booking insert failed:', bookErr);
     return NextResponse.json({ error: 'Failed to create booking' }, { status: 500 });
+  }
+
+  if (pendingClassCreditRedemption) {
+    const consumed = await consumeClassCreditsForBooking({
+      admin: supabase,
+      userId: pendingClassCreditRedemption.userId,
+      venueId: venue_id,
+      credits: pendingClassCreditRedemption.credits,
+      bookingId: booking.id,
+      idempotencyKey: `redeem_booking:${booking.id}`,
+      classTypeId: pendingClassCreditRedemption.classTypeId,
+    });
+    if (!consumed.ok) {
+      console.error('[booking/create] class credit redeem failed', consumed);
+      await supabase.from('bookings').delete().eq('id', booking.id);
+      return NextResponse.json(
+        { error: 'Could not apply class credits. Refresh and try again.' },
+        { status: 409 },
+      );
+    }
   }
 
   // Insert ticket lines for event/class bookings

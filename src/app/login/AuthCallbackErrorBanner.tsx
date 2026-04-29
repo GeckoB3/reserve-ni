@@ -3,17 +3,13 @@
 import { useLayoutEffect, useState } from 'react';
 
 const OTP_EXPIRED_MSG =
-  'This sign-in link was already used or has expired. Email links are usually one-time: opening the same link twice, ' +
-  'or waiting too long, will show this error. Some workplace email systems also open links automatically to scan them, ' +
-  'which can use the link before you do. Ask your admin to use “Resend invitation” on Settings → Staff, or use ' +
-  'Forgot password on this page.';
+  'This sign-in link was already used or has expired. Please request a new link.';
 
 const EXCHANGE_FAILED_MSG =
-  'We could not complete sign-in from that link. Try the latest link from your email, sign in with your password, ' +
-  'or ask your admin to resend the invitation.';
+  'We could not complete sign-in from that link. Use the latest link from your email, request a new sign-in link, or sign in with your password if you have one.';
 
 const GENERIC_MSG =
-  'Sign-in link invalid or expired. Request a new link from your admin or use Forgot password.';
+  'This sign-in link is invalid or has expired. Please request a new link or sign in with your password.';
 
 /**
  * Supabase often redirects here with `?error=auth_callback_error&detail=otp_expired` after a failed PKCE exchange.

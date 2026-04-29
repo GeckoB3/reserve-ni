@@ -46,6 +46,7 @@ export function FloorPlanEditorTabs({
   const [tables, setTables] = useState<VenueTable[]>([]);
   const [combinations, setCombinations] = useState<TableCombination[]>([]);
   const [loading, setLoading] = useState(true);
+  const [visitedTabs, setVisitedTabs] = useState<Set<FloorPlanEditorTabKey>>(() => new Set([activeTab]));
 
   const fetchManagementData = useCallback(async (options?: { silent?: boolean }) => {
     const showSpinner = !options?.silent;
@@ -80,6 +81,15 @@ export function FloorPlanEditorTabs({
   useEffect(() => {
     void fetchManagementData();
   }, [fetchManagementData]);
+
+  useEffect(() => {
+    setVisitedTabs((current) => {
+      if (current.has(activeTab)) return current;
+      const next = new Set(current);
+      next.add(activeTab);
+      return next;
+    });
+  }, [activeTab]);
 
   const tabLabel = useMemo(() => {
     if (activeTab === 'layout') return 'Layout';
@@ -124,44 +134,50 @@ export function FloorPlanEditorTabs({
       </div>
 
       <div className="mt-4">
-        {activeTab === 'layout' && advancedTableManagement && (
-          <FloorPlanEditor embedded onLayoutSaved={handleLayoutSaved} diningAreaId={diningAreaId} />
-        )}
-
-        {activeTab === 'tables' && (
-          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-            {loading ? (
-              <FloorPlanTablesPanelSkeleton />
-            ) : (
-              <TableList
-                tables={tables}
-                setTables={setTables}
-                isAdmin={isAdmin}
-                onRefresh={fetchManagementData}
-                variant={advancedTableManagement ? 'full' : 'covers'}
-                diningAreaId={diningAreaId}
-              />
-            )}
+        {visitedTabs.has('layout') && advancedTableManagement && (
+          <div className={activeTab === 'layout' ? undefined : 'hidden'}>
+            <FloorPlanEditor embedded onLayoutSaved={handleLayoutSaved} diningAreaId={diningAreaId} />
           </div>
         )}
 
-        {activeTab === 'combinations' && advancedTableManagement && (
-          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-            {loading ? (
-              <FloorPlanTablesPanelSkeleton />
-            ) : (
-              <TableCombinationsPage
-                combinations={combinations}
-                setCombinations={setCombinations}
-                tables={tables}
-                isAdmin={isAdmin}
-                onRefresh={fetchManagementData}
-                combinationThreshold={combinationThreshold}
-                layoutSaveCount={layoutSaveCount}
-                onCombinationThresholdSaved={onCombinationThresholdSaved}
-                diningAreaId={diningAreaId}
-              />
-            )}
+        {visitedTabs.has('tables') && (
+          <div className={activeTab === 'tables' ? undefined : 'hidden'}>
+            <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              {loading ? (
+                <FloorPlanTablesPanelSkeleton />
+              ) : (
+                <TableList
+                  tables={tables}
+                  setTables={setTables}
+                  isAdmin={isAdmin}
+                  onRefresh={fetchManagementData}
+                  variant={advancedTableManagement ? 'full' : 'covers'}
+                  diningAreaId={diningAreaId}
+                />
+              )}
+            </div>
+          </div>
+        )}
+
+        {visitedTabs.has('combinations') && advancedTableManagement && (
+          <div className={activeTab === 'combinations' ? undefined : 'hidden'}>
+            <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              {loading ? (
+                <FloorPlanTablesPanelSkeleton />
+              ) : (
+                <TableCombinationsPage
+                  combinations={combinations}
+                  setCombinations={setCombinations}
+                  tables={tables}
+                  isAdmin={isAdmin}
+                  onRefresh={fetchManagementData}
+                  combinationThreshold={combinationThreshold}
+                  layoutSaveCount={layoutSaveCount}
+                  onCombinationThresholdSaved={onCombinationThresholdSaved}
+                  diningAreaId={diningAreaId}
+                />
+              )}
+            </div>
           </div>
         )}
       </div>

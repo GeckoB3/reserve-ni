@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import { createRouteHandlerClient } from '@/lib/supabase/server';
 import { resolveVenueMode } from '@/lib/venue-mode';
 import { venueExposesBookingModel } from '@/lib/booking/enabled-models';
 import {
@@ -8,6 +9,7 @@ import {
   fetchClassInputForRange,
 } from '@/lib/availability/class-session-engine';
 import { nextResponseIfPublicBookingBlockedForVenue } from '@/lib/booking/light-plan-public-block';
+import { loadClassOfferingCommerceCatalog } from '@/lib/class-commerce/enrich-class-offerings';
 
 function addDaysIso(from: string, days: number): string {
   const [y, m, d] = from.split('-').map(Number);
@@ -54,12 +56,24 @@ export async function GET(request: NextRequest) {
     const slots = computeClassAvailability(input);
     const classes = buildClassOfferingSummaries(slots);
 
+    let viewerUserId: string | null = null;
+    try {
+      const routeClient = await createRouteHandlerClient(request);
+      const { data: auth } = await routeClient.auth.getUser();
+      viewerUserId = auth.user?.id ?? null;
+    } catch {
+      viewerUserId = null;
+    }
+
+    const commerce = await loadClassOfferingCommerceCatalog(supabase, { venueId, viewerUserId });
+
     return NextResponse.json({
       venue_id: venueId,
       from,
       to,
       classes,
       instances: slots,
+      commerce,
     });
   } catch (err) {
     console.error('GET /api/booking/class-offerings failed:', err);
