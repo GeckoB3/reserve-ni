@@ -30,6 +30,8 @@ interface BookingWithTime {
   party_size: number;
   status: string;
   deposit_status?: string | null;
+  guest_attendance_confirmed_at?: string | null;
+  staff_attendance_confirmed_at?: string | null;
   guest_name: string;
   dietary_notes: string | null;
   occasion: string | null;
@@ -319,7 +321,7 @@ export async function getTableAvailabilityGrid(
   let bookingsQuery = supabase
     .from('bookings')
     .select(
-      'id, booking_time, estimated_end_time, party_size, status, deposit_status, dietary_notes, occasion, experience_event_id, class_instance_id, resource_id, event_session_id, calendar_id, service_item_id, practitioner_id, appointment_service_id, guest:guests!inner(name)',
+      'id, booking_time, estimated_end_time, party_size, status, deposit_status, guest_attendance_confirmed_at, staff_attendance_confirmed_at, dietary_notes, occasion, experience_event_id, class_instance_id, resource_id, event_session_id, calendar_id, service_item_id, practitioner_id, appointment_service_id, guest:guests!inner(name)',
     )
     .eq('venue_id', venueId)
     .eq('booking_date', date)
@@ -352,6 +354,8 @@ export async function getTableAvailabilityGrid(
     party_size: number;
     status: string;
     deposit_status?: string | null;
+    guest_attendance_confirmed_at?: string | null;
+    staff_attendance_confirmed_at?: string | null;
     dietary_notes: string | null;
     occasion: string | null;
     experience_event_id?: string | null;
@@ -400,6 +404,8 @@ export async function getTableAvailabilityGrid(
       party_size: b.party_size,
       status: b.status,
       deposit_status: b.deposit_status ?? null,
+      guest_attendance_confirmed_at: b.guest_attendance_confirmed_at ?? null,
+      staff_attendance_confirmed_at: b.staff_attendance_confirmed_at ?? null,
       guest_name: guestName,
       dietary_notes: b.dietary_notes,
       occasion: b.occasion,
@@ -462,6 +468,8 @@ export async function getTableAvailabilityGrid(
               party_size: matchedBooking.party_size,
               status: matchedBooking.status,
               deposit_status: (matchedBooking as BookingWithTime & { deposit_status?: string | null }).deposit_status ?? null,
+              guest_attendance_confirmed_at: matchedBooking.guest_attendance_confirmed_at ?? null,
+              staff_attendance_confirmed_at: matchedBooking.staff_attendance_confirmed_at ?? null,
               start_time: matchedBooking.booking_time,
               end_time: minutesToTime(getBookingTimeRange(matchedBooking).endMin),
               dietary_notes: matchedBooking.dietary_notes,
@@ -493,6 +501,8 @@ export async function getTableAvailabilityGrid(
         start_time: b.booking_time,
         end_time: minutesToTime(range.endMin),
         status: b.status,
+        guest_attendance_confirmed_at: b.guest_attendance_confirmed_at ?? null,
+        staff_attendance_confirmed_at: b.staff_attendance_confirmed_at ?? null,
         dietary_notes: b.dietary_notes,
         occasion: b.occasion,
       };

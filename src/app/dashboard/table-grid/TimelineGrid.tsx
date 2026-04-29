@@ -29,16 +29,17 @@ import {
   type BookingStatus,
 } from '@/lib/table-management/booking-status';
 import { resolveDropTarget, type CombinationInfo } from '@/lib/table-management/move-validation';
+import { isAttendanceConfirmed } from '@/lib/booking/booking-staff-indicators';
 
 const STATUS_COLORS: Record<string, string> = {
-  Pending: 'bg-amber-100 border-amber-300 text-amber-800',
-  Booked: 'bg-sky-100 border-sky-300 text-sky-800',
-  Confirmed: 'bg-emerald-100 border-emerald-300 text-emerald-800',
-  Seated: 'bg-brand-100 border-brand-300 text-brand-900',
-  Arrived: 'bg-emerald-100 border-emerald-300 text-emerald-800',
-  Completed: 'bg-slate-100 border-slate-300 text-slate-600',
-  'No-Show': 'bg-red-100 border-red-300 text-red-800',
-  Cancelled: 'bg-slate-100 border-slate-300 text-slate-500',
+  Pending: 'bg-[#EFF6FF] border-[#BFDBFE] border-l-[#3B82F6] text-[#1E40AF]',
+  Booked: 'bg-[#EFF6FF] border-[#BFDBFE] border-l-[#3B82F6] text-[#1E40AF]',
+  Confirmed: 'bg-[#F0FDFA] border-[#99F6E4] border-l-[#0D9488] text-[#134E4A]',
+  Seated: 'bg-[#F5F3FF] border-[#DDD6FE] border-l-[#8B5CF6] text-[#5B21B6]',
+  Arrived: 'bg-[#FFFBEB] border-[#FDE68A] border-l-[#F59E0B] text-[#92400E]',
+  Completed: 'bg-[#FEE2E2] border-[#FCA5A5] border-l-[#EF4444] text-[#991B1B]',
+  'No-Show': 'bg-[#FEF2F2] border-[#FECACA] border-l-[#EF4444] text-[#991B1B]',
+  Cancelled: 'bg-[#F3F4F6] border-[#E5E7EB] border-l-[#6B7280] text-[#6B7280]',
   'Deposit Pending': 'bg-orange-100 border-orange-300 text-orange-800',
 };
 
@@ -46,14 +47,14 @@ const STATUS_COLORS: Record<string, string> = {
 const CONTEXT_MENU_MAX_POINTER_MOVE_PX = 10;
 
 const STATUS_DOTS: Record<string, string> = {
-  Pending: 'bg-amber-500',
-  Booked: 'bg-sky-500',
-  Confirmed: 'bg-emerald-500',
-  Seated: 'bg-brand-600',
-  Arrived: 'bg-emerald-500',
-  Completed: 'bg-slate-500',
-  'No-Show': 'bg-red-500',
-  Cancelled: 'bg-slate-400',
+  Pending: 'bg-[#3B82F6]',
+  Booked: 'bg-[#3B82F6]',
+  Confirmed: 'bg-[#0D9488]',
+  Seated: 'bg-[#8B5CF6]',
+  Arrived: 'bg-[#F59E0B]',
+  Completed: 'bg-[#EF4444]',
+  'No-Show': 'bg-[#EF4444]',
+  Cancelled: 'bg-[#6B7280]',
   'Deposit Pending': 'bg-orange-500',
 };
 
@@ -81,6 +82,8 @@ interface BookingBlock {
   party_size: number;
   status: string;
   deposit_status?: string | null;
+  guest_attendance_confirmed_at?: string | null;
+  staff_attendance_confirmed_at?: string | null;
   start_time: string;
   end_time: string;
   table_id: string | null;
@@ -109,6 +112,8 @@ interface Props {
     start_time: string;
     end_time: string;
     status: string;
+    guest_attendance_confirmed_at?: string | null;
+    staff_attendance_confirmed_at?: string | null;
     dietary_notes: string | null;
     occasion: string | null;
   }>;
@@ -280,6 +285,8 @@ export function TimelineGrid({
           party_size: cell.booking_details.party_size,
           status: cell.booking_details.status,
           deposit_status: cell.booking_details.deposit_status ?? null,
+          guest_attendance_confirmed_at: cell.booking_details.guest_attendance_confirmed_at ?? null,
+          staff_attendance_confirmed_at: cell.booking_details.staff_attendance_confirmed_at ?? null,
           start_time: cell.booking_details.start_time,
           end_time: cell.booking_details.end_time ?? '',
           table_id: tableId,
@@ -319,6 +326,8 @@ export function TimelineGrid({
         party_size: b.party_size,
         status: b.status,
         deposit_status: null,
+        guest_attendance_confirmed_at: b.guest_attendance_confirmed_at ?? null,
+        staff_attendance_confirmed_at: b.staff_attendance_confirmed_at ?? null,
         start_time: b.start_time,
         end_time: b.end_time,
         table_id: null,
@@ -1095,7 +1104,7 @@ export function TimelineGrid({
                 </div>
               )}
               <div
-                className={`flex flex-col gap-0.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium shadow-lg ${
+                className={`flex flex-col gap-0.5 rounded-lg border border-l-[3px] px-2.5 py-1.5 text-xs font-medium shadow-lg ${
                   STATUS_COLORS[activeDrag.status] ?? 'bg-slate-100 border-slate-300 text-slate-800'
                 }`}
               >
@@ -1408,11 +1417,17 @@ function DraggableBlock({ block, dragId, slotWidth, rowHeight, highlighted, isMu
   const comboLabel = block.table_names.length > 1 ? block.table_names.join('+') : '';
   const depositIcon = block.deposit_status === 'Paid' ? '£' : block.deposit_status === 'Pending' ? '!' : null;
   const primaryAction = isBookingStatus(block.status) ? BOOKING_PRIMARY_ACTIONS[block.status] : undefined;
-  const canShowPrimaryAction = Boolean(primaryAction) && width >= 132;
-  const canShowNoShowAction =
+  const primaryActionLabel =
+    block.status === 'Pending' && primaryAction?.target === 'Booked' ? 'Book' : primaryAction?.label;
+  const isConfirmed = isAttendanceConfirmed(block);
+  const canConfirmBooking =
     isBookingStatus(block.status) &&
-    canTransitionBookingStatus(block.status, 'No-Show') &&
-    width >= 228;
+    canTransitionBookingStatus(block.status, 'Confirmed') &&
+    !isConfirmed &&
+    width >= 132;
+  const canShowPrimaryAction =
+    Boolean(primaryAction) &&
+    width >= (canConfirmBooking && block.status === 'Booked' ? 184 : 132);
 
   const startResize = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -1478,7 +1493,7 @@ function DraggableBlock({ block, dragId, slotWidth, rowHeight, highlighted, isMu
       }}
       onContextMenu={(e) => onContextMenu(e, block)}
       onClick={() => { if (!justResizedRef.current) onClick(block.id); }}
-      className={`absolute flex cursor-grab touch-none select-none items-center gap-1 overflow-hidden rounded-md border px-2 text-xs font-medium transition-shadow active:cursor-grabbing ${colorClass} ${
+      className={`absolute flex cursor-grab touch-none select-none items-center gap-1 overflow-hidden rounded-md border border-l-[3px] px-2 text-xs font-medium transition-shadow active:cursor-grabbing ${colorClass} ${
         isDragging ? 'z-30 opacity-50' : ''
       } ${highlighted ? 'ring-2 ring-amber-400 ring-offset-1' : ''} ${
         isMultiTable ? 'border-l-[3px] border-l-purple-500' : ''
@@ -1490,6 +1505,14 @@ function DraggableBlock({ block, dragId, slotWidth, rowHeight, highlighted, isMu
         {isCondensed ? (
           <>
             <span className="text-[10px] font-semibold">{block.party_size}</span>
+            {isConfirmed && (
+              <span
+                className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-[8px] font-black lowercase leading-none text-white shadow-sm ring-1 ring-white/70"
+                title="Confirmed"
+              >
+                c
+              </span>
+            )}
             {isMultiTable && <span className="text-[10px]" title="Linked combination booking">🔗</span>}
             {depositIcon && <span className="text-[10px]" title={`Deposit: ${block.deposit_status}`}>{depositIcon}</span>}
           </>
@@ -1500,6 +1523,14 @@ function DraggableBlock({ block, dragId, slotWidth, rowHeight, highlighted, isMu
             <span className="shrink-0 rounded-full bg-white/50 px-1 py-0.5 text-[10px] font-bold">
               {block.party_size}
             </span>
+            {isConfirmed && (
+              <span
+                className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-[9px] font-black lowercase leading-none text-white shadow-sm ring-1 ring-white/70"
+                title="Confirmed"
+              >
+                c
+              </span>
+            )}
             {isMultiTable && (
               <span className="shrink-0 text-[10px]" title="Linked combination booking">🔗</span>
             )}
@@ -1524,8 +1555,24 @@ function DraggableBlock({ block, dragId, slotWidth, rowHeight, highlighted, isMu
           </>
         )}
       </div>
-      {(canShowPrimaryAction || canShowNoShowAction) && (
+      {(canConfirmBooking || canShowPrimaryAction) && (
         <div className="flex shrink-0 items-center gap-1 pr-1">
+          {canConfirmBooking && (
+            <button
+              type="button"
+              onPointerDown={(e) => {
+                e.stopPropagation();
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                onQuickStatusChange('Confirmed');
+              }}
+              className="rounded-md bg-emerald-600 px-1.5 py-0.5 text-[10px] font-bold text-white shadow-sm ring-1 ring-emerald-700/10 transition-colors hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-400/50"
+              aria-label={`Confirm booking for ${block.guest_name}`}
+            >
+              Confirm
+            </button>
+          )}
           {primaryAction && canShowPrimaryAction && (
             <button
               type="button"
@@ -1537,25 +1584,9 @@ function DraggableBlock({ block, dragId, slotWidth, rowHeight, highlighted, isMu
                 onQuickStatusChange(primaryAction.target);
               }}
               className="rounded-md bg-white/80 px-1.5 py-0.5 text-[10px] font-bold text-slate-800 shadow-sm ring-1 ring-black/5 transition-colors hover:bg-white focus:outline-none focus:ring-2 focus:ring-brand-400/40"
-              aria-label={`${primaryAction.label} booking for ${block.guest_name}`}
+              aria-label={`${primaryActionLabel} booking for ${block.guest_name}`}
             >
-              {primaryAction.label}
-            </button>
-          )}
-          {canShowNoShowAction && (
-            <button
-              type="button"
-              onPointerDown={(e) => {
-                e.stopPropagation();
-              }}
-              onClick={(e) => {
-                e.stopPropagation();
-                onQuickStatusChange('No-Show');
-              }}
-              className="rounded-md bg-white/70 px-1.5 py-0.5 text-[10px] font-bold text-rose-700 shadow-sm ring-1 ring-rose-200/70 transition-colors hover:bg-rose-50 focus:outline-none focus:ring-2 focus:ring-rose-400/40"
-              aria-label={`Mark no-show for ${block.guest_name}`}
-            >
-              No-show
+              {primaryActionLabel}
             </button>
           )}
         </div>

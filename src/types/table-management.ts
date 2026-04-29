@@ -127,6 +127,8 @@ export interface TableGridCell {
     party_size: number;
     status: string;
     deposit_status?: string | null;
+    guest_attendance_confirmed_at?: string | null;
+    staff_attendance_confirmed_at?: string | null;
     start_time: string;
     end_time: string;
     dietary_notes: string | null;
@@ -145,6 +147,8 @@ export interface TableGridData {
     start_time: string;
     end_time: string;
     status: string;
+    guest_attendance_confirmed_at?: string | null;
+    staff_attendance_confirmed_at?: string | null;
     dietary_notes: string | null;
     occasion: string | null;
   }[];

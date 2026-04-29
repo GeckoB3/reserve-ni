@@ -92,6 +92,47 @@ function withOptimisticBookingMove(
   };
 }
 
+function withOptimisticBookingStatus(
+  prev: TableGridData | null,
+  bookingId: string,
+  status: BookingStatus,
+): TableGridData | null {
+  if (!prev) return prev;
+
+  return {
+    ...prev,
+    cells: prev.cells.map((cell) => {
+      if (cell.booking_id !== bookingId || !cell.booking_details) return cell;
+      return {
+        ...cell,
+        booking_details: {
+          ...cell.booking_details,
+          status,
+          staff_attendance_confirmed_at:
+            status === 'Confirmed'
+              ? cell.booking_details.staff_attendance_confirmed_at ?? new Date().toISOString()
+              : cell.booking_details.status === 'Confirmed' && status === 'Booked'
+                ? null
+              : cell.booking_details.staff_attendance_confirmed_at ?? null,
+        },
+      };
+    }),
+    unassigned_bookings: prev.unassigned_bookings.map((booking) => {
+      if (booking.id !== bookingId) return booking;
+      return {
+        ...booking,
+        status,
+        staff_attendance_confirmed_at:
+          status === 'Confirmed'
+            ? booking.staff_attendance_confirmed_at ?? new Date().toISOString()
+            : booking.status === 'Confirmed' && status === 'Booked'
+              ? null
+            : booking.staff_attendance_confirmed_at ?? null,
+      };
+    }),
+  };
+}
+
 interface CombinationInfo {
   id: string;
   name: string;
@@ -863,14 +904,24 @@ export function TableGridView({
         return;
       }
     }
-    const res = await fetch(`/api/venue/bookings/${bookingId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: nextStatus }),
-    });
-    if (!res.ok) {
-      const payload = await res.json().catch(() => ({}));
-      addToast(payload.error ?? 'Failed to update status', 'error');
+    const rollback = gridDataRef.current;
+    setGridData((prev) => withOptimisticBookingStatus(prev, bookingId, nextStatus));
+    try {
+      const res = await fetch(`/api/venue/bookings/${bookingId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: nextStatus }),
+      });
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({}));
+        setGridData(rollback);
+        addToast(payload.error ?? 'Failed to update status', 'error');
+        return;
+      }
+    } catch (err) {
+      console.error('Booking status update failed:', err);
+      setGridData(rollback);
+      addToast('Failed to update status', 'error');
       return;
     }
     if (!isUndo) {
@@ -1402,24 +1453,25 @@ export function TableGridView({
       )}
       {showLegend && (
         <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm shadow-slate-900/5">
-          <Pill variant="warning" size="sm" dot>
-            Pending
-          </Pill>
-          <Pill variant="info" size="sm" dot>
-            Booked
-          </Pill>
-          <Pill variant="success" size="sm" dot>
-            Confirmed
-          </Pill>
-          <Pill variant="brand" size="sm" dot>
-            Seated
-          </Pill>
-          <Pill variant="danger" size="sm" dot>
-            No-Show
-          </Pill>
-          <Pill variant="neutral" size="sm" dot>
-            Blocked
-          </Pill>
+          {[
+            { label: 'Pending', className: 'border-[#BFDBFE] bg-[#EFF6FF] text-[#1E40AF]', dot: 'bg-[#3B82F6]' },
+            { label: 'Booked', className: 'border-[#BFDBFE] bg-[#EFF6FF] text-[#1E40AF]', dot: 'bg-[#3B82F6]' },
+            { label: 'Confirmed', className: 'border-[#99F6E4] bg-[#F0FDFA] text-[#134E4A]', dot: 'bg-[#0D9488]' },
+            { label: 'Arrived', className: 'border-[#FDE68A] bg-[#FFFBEB] text-[#92400E]', dot: 'bg-[#F59E0B]' },
+            { label: 'Seated', className: 'border-[#DDD6FE] bg-[#F5F3FF] text-[#5B21B6]', dot: 'bg-[#8B5CF6]' },
+            { label: 'Completed', className: 'border-[#FCA5A5] bg-[#FEE2E2] text-[#991B1B]', dot: 'bg-[#EF4444]' },
+            { label: 'No-Show', className: 'border-[#FECACA] bg-[#FEF2F2] text-[#991B1B]', dot: 'bg-[#EF4444]' },
+            { label: 'Cancelled', className: 'border-[#E5E7EB] bg-[#F3F4F6] text-[#6B7280]', dot: 'bg-[#6B7280]' },
+            { label: 'Blocked', className: 'border-slate-200 bg-slate-50 text-slate-700', dot: 'bg-slate-400' },
+          ].map((item) => (
+            <span
+              key={item.label}
+              className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-medium ${item.className}`}
+            >
+              <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${item.dot}`} />
+              {item.label}
+            </span>
+          ))}
         </div>
       )}
 
