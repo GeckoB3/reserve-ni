@@ -34,7 +34,11 @@ import {
   isTableReservationBooking,
   bookingStatusDisplayLabel,
 } from '@/lib/booking/infer-booking-row-model';
-import { showAttendanceConfirmedPill, showDepositPendingPill } from '@/lib/booking/booking-staff-indicators';
+import {
+  isAttendanceConfirmed,
+  showAttendanceConfirmedPill,
+  showDepositPendingPill,
+} from '@/lib/booking/booking-staff-indicators';
 import { CalendarDateTimePicker } from '@/components/calendar/CalendarDateTimePicker';
 import { getCalendarGridBounds } from '@/lib/venue-calendar-bounds';
 import { isBookingTimeInHourRange } from '@/lib/booking-time-window';
@@ -63,6 +67,7 @@ interface BookingRow {
   guest_phone: string | null;
   guest_id?: string;
   table_assignments?: Array<{ id: string; name: string }>;
+  service_id?: string | null;
   practitioner_id?: string | null;
   appointment_service_id?: string | null;
   group_booking_id?: string | null;
@@ -128,6 +133,13 @@ const GUEST_UUID_RE =
 interface FetchBookingsOptions {
   silent?: boolean;
   ids?: string[];
+}
+
+interface DiningService {
+  id: string;
+  name: string;
+  is_active: boolean;
+  area_id?: string | null;
 }
 
 function todayISO(): string {
@@ -222,6 +234,7 @@ export function BookingsDashboard({
   const [statusFilter, setStatusFilter] = useState<string>('All');
   const [modelFilter, setModelFilter] = useState<'all' | BookingModel>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [serviceFilter, setServiceFilter] = useState<string>('all');
   const [bookings, setBookings] = useState<BookingRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -313,22 +326,31 @@ export function BookingsDashboard({
   }, [router, searchParams]);
 
   const [diningAreas, setDiningAreas] = useState<Array<{ id: string; name: string; colour: string; is_active: boolean }>>([]);
+  const [diningServices, setDiningServices] = useState<DiningService[]>([]);
   useEffect(() => {
     if (primaryBookingModel !== 'table_reservation') return;
     let cancelled = false;
-    void fetch('/api/venue/areas')
-      .then((res) => (res.ok ? res.json() : null))
-      .then((j) => {
-        if (cancelled || !j?.areas) return;
-        setDiningAreas(j.areas as typeof diningAreas);
+    void Promise.all([
+      fetch('/api/venue/areas').then((res) => (res.ok ? res.json() : null)),
+      fetch('/api/venue/services').then((res) => (res.ok ? res.json() : null)),
+    ])
+      .then(([areasJson, servicesJson]) => {
+        if (cancelled) return;
+        if (areasJson?.areas) setDiningAreas(areasJson.areas as typeof diningAreas);
+        if (servicesJson?.services) setDiningServices(servicesJson.services as DiningService[]);
       })
-      .catch((e) => console.error('[BookingsDashboard] /api/venue/areas preload failed:', e));
+      .catch((e) => console.error('[BookingsDashboard] table filter preload failed:', e));
     return () => {
       cancelled = true;
     };
   }, [primaryBookingModel]);
 
   const showAreaBookingsChrome = primaryBookingModel === 'table_reservation' && diningAreas.filter((a) => a.is_active).length > 1;
+  const activeDiningServices = useMemo(
+    () => diningServices.filter((service) => service.is_active),
+    [diningServices],
+  );
+  const showServiceBookingsChrome = primaryBookingModel === 'table_reservation' && activeDiningServices.length > 1;
 
   const setAreaFilter = useCallback(
     (value: string) => {
@@ -366,6 +388,12 @@ export function BookingsDashboard({
     }
     areaHydrated.current = true;
   }, [router, searchParams, showAreaBookingsChrome, venueId]);
+
+  useEffect(() => {
+    if (serviceFilter === 'all') return;
+    if (activeDiningServices.some((service) => service.id === serviceFilter)) return;
+    setServiceFilter('all');
+  }, [activeDiningServices, serviceFilter]);
 
   useEffect(() => {
     const ob = searchParams.get('openBooking');
@@ -494,6 +522,7 @@ export function BookingsDashboard({
       }
       if (!ids && filterGuestId) params.set('guest', filterGuestId);
       if (!ids && filterAreaId) params.set('area', filterAreaId);
+      if (!ids && serviceFilter !== 'all') params.set('service', serviceFilter);
       const res = await fetch(`/api/venue/bookings/list?${params}`);
       if (!res.ok) {
         const json = await res.json().catch(() => ({}));
@@ -517,7 +546,7 @@ export function BookingsDashboard({
       if (silent) setIsRefreshing(false);
       else setLoading(false);
     }
-  }, [filterAreaId, filterGuestId, from, invalidCustomRange, statusFilter, to, viewMode]);
+  }, [filterAreaId, filterGuestId, from, invalidCustomRange, serviceFilter, statusFilter, to, viewMode]);
 
   const changeTableSaveLock = useRef(false);
 
@@ -1102,7 +1131,7 @@ export function BookingsDashboard({
     const active = filteredBookings.filter(
       (b) => b.status === 'Booked' || b.status === 'Confirmed' || b.status === 'Seated' || b.status === 'Completed',
     ).length;
-    const confirmed = filteredBookings.filter((b) => b.status === 'Confirmed').length;
+    const confirmed = filteredBookings.filter(isAttendanceConfirmed).length;
     const pending = filteredBookings.filter((b) => b.status === 'Pending').length;
     return { total, totalCovers, active, confirmed, pending };
   }, [filteredBookings]);
@@ -1144,7 +1173,7 @@ export function BookingsDashboard({
       <PageHeader
         eyebrow="Operations"
         title="Bookings"
-        subtitle="Filter by date, status, and area. Expand any row for full guest details and actions."
+        subtitle="Filter by date, status, service, and area. Expand any row for full guest details and actions."
       />
       <div className="space-y-6">
       {realtimeConnected === false && (
@@ -1293,14 +1322,29 @@ export function BookingsDashboard({
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:gap-4">
         <DashboardStatCard label="Bookings" value={stats.total} color="brand" />
         <DashboardStatCard label="Total covers" value={stats.totalCovers} color="violet" />
-        <DashboardStatCard label="Confirmed" value={stats.confirmed} color="emerald" />
+        <DashboardStatCard label="Confirmed" value={`${stats.confirmed}/${stats.total}`} color="emerald" />
         <DashboardStatCard label="Pending" value={stats.pending} color="amber" />
       </div>
-      {/* `Confirmed` here means status === 'Confirmed' (guest or staff confirmed attendance). */}
+      {/* Confirmed means staff-confirmed, guest-confirmed, or legacy rows with status === 'Confirmed'. */}
 
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm shadow-slate-900/5">
         <div className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
           <div className="flex flex-wrap items-center gap-1.5">
+            {showServiceBookingsChrome && (
+              <select
+                value={serviceFilter}
+                onChange={(e) => setServiceFilter(e.target.value)}
+                className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                aria-label="Filter by booking service"
+              >
+                <option value="all">All services</option>
+                {activeDiningServices.map((service) => (
+                  <option key={service.id} value={service.id}>
+                    {service.name}
+                  </option>
+                ))}
+              </select>
+            )}
             {showAreaBookingsChrome && (
               <select
                 value={filterAreaId ?? ''}
@@ -1823,7 +1867,7 @@ function BookingsAccordionList({
                     )}
                     {booking.dietary_notes && (
                       <span className="hidden sm:inline-flex">
-                        <Pill variant="warning" size="sm" className="hidden sm:inline-flex">{booking.dietary_notes.length > 20 ? 'Dietary' : booking.dietary_notes}</Pill>
+                        <Pill variant="warning" size="sm" dot>Dietary</Pill>
                       </span>
                     )}
                     {booking.table_assignments && booking.table_assignments.length > 0 && (

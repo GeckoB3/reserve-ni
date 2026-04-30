@@ -34,7 +34,7 @@ import { isAttendanceConfirmed } from '@/lib/booking/booking-staff-indicators';
 const STATUS_COLORS: Record<string, string> = {
   Pending: 'bg-[#EFF6FF] border-[#BFDBFE] border-l-[#3B82F6] text-[#1E40AF]',
   Booked: 'bg-[#EFF6FF] border-[#BFDBFE] border-l-[#3B82F6] text-[#1E40AF]',
-  Confirmed: 'bg-[#F0FDFA] border-[#99F6E4] border-l-[#0D9488] text-[#134E4A]',
+  Confirmed: 'bg-[#ECFDF5] border-[#A7F3D0] border-l-[#059669] text-[#065F46]',
   Seated: 'bg-[#F5F3FF] border-[#DDD6FE] border-l-[#8B5CF6] text-[#5B21B6]',
   Arrived: 'bg-[#FFFBEB] border-[#FDE68A] border-l-[#F59E0B] text-[#92400E]',
   Completed: 'bg-[#FEE2E2] border-[#FCA5A5] border-l-[#EF4444] text-[#991B1B]',
@@ -49,7 +49,7 @@ const CONTEXT_MENU_MAX_POINTER_MOVE_PX = 10;
 const STATUS_DOTS: Record<string, string> = {
   Pending: 'bg-[#3B82F6]',
   Booked: 'bg-[#3B82F6]',
-  Confirmed: 'bg-[#0D9488]',
+  Confirmed: 'bg-[#059669]',
   Seated: 'bg-[#8B5CF6]',
   Arrived: 'bg-[#F59E0B]',
   Completed: 'bg-[#EF4444]',
@@ -100,6 +100,13 @@ interface BookingBlock {
   rowSpan: number;
   laneIndex: number;
   laneCount: number;
+}
+
+function statusColorKeyForBooking(block: BookingBlock): string {
+  if (isAttendanceConfirmed(block) && (block.status === 'Booked' || block.status === 'Confirmed')) {
+    return 'Confirmed';
+  }
+  return block.status;
 }
 
 interface Props {
@@ -1105,7 +1112,7 @@ export function TimelineGrid({
               )}
               <div
                 className={`flex flex-col gap-0.5 rounded-lg border border-l-[3px] px-2.5 py-1.5 text-xs font-medium shadow-lg ${
-                  STATUS_COLORS[activeDrag.status] ?? 'bg-slate-100 border-slate-300 text-slate-800'
+                  STATUS_COLORS[statusColorKeyForBooking(activeDrag)] ?? 'bg-slate-100 border-slate-300 text-slate-800'
                 }`}
               >
                 <div className="flex items-center gap-1.5">
@@ -1405,7 +1412,8 @@ function DraggableBlock({ block, dragId, slotWidth, rowHeight, highlighted, isMu
   const resizeStartEndRef = useRef(0);
   const [resizePreviewEnd, setResizePreviewEnd] = useState<string | null>(null);
 
-  const colorClass = STATUS_COLORS[block.status] ?? 'bg-slate-100 border-slate-300 text-slate-800';
+  const isConfirmed = isAttendanceConfirmed(block);
+  const colorClass = STATUS_COLORS[statusColorKeyForBooking(block)] ?? 'bg-slate-100 border-slate-300 text-slate-800';
   const left = block.leftPx + 2;
   const resizeDelta = resizeVisual?.bookingId === block.id ? resizeVisual.deltaSlots * slotWidth : 0;
   const width = Math.max(16, block.widthPx - 4 + resizeDelta);
@@ -1419,7 +1427,6 @@ function DraggableBlock({ block, dragId, slotWidth, rowHeight, highlighted, isMu
   const primaryAction = isBookingStatus(block.status) ? BOOKING_PRIMARY_ACTIONS[block.status] : undefined;
   const primaryActionLabel =
     block.status === 'Pending' && primaryAction?.target === 'Booked' ? 'Book' : primaryAction?.label;
-  const isConfirmed = isAttendanceConfirmed(block);
   const canConfirmBooking =
     isBookingStatus(block.status) &&
     canTransitionBookingStatus(block.status, 'Confirmed') &&

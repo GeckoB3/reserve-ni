@@ -15,7 +15,7 @@ import { canMarkNoShowForSlot, canTransitionBookingStatus, type BookingStatus } 
 import { computeValidMoveTargets, type BookingMoveContext } from '@/lib/table-management/move-validation';
 import { ViewToolbar } from '@/components/dashboard/ViewToolbar';
 import type { ViewToolbarSummary } from '@/components/dashboard/ViewToolbar';
-import { coversInUseAtTime } from '@/lib/table-management/covers-at-time';
+import { coversInUseAtTime, tablesInUseAtTime } from '@/lib/table-management/covers-at-time';
 import { computeNextBookingsSlot } from '@/lib/table-management/next-bookings-slot';
 import { bookingStatusDisplayLabel } from '@/lib/booking/infer-booking-row-model';
 import { CalendarDateTimePicker } from '@/components/calendar/CalendarDateTimePicker';
@@ -635,10 +635,11 @@ export function TableGridView({
     const now = new Date();
     const nowMin = now.getHours() * 60 + now.getMinutes();
     const visibleTableIds = new Set(filteredTables.map((t) => t.id));
-    const inUse = isToday ? coversInUseAtTime(gridData, nowMin, visibleTableIds) : 0;
+    const coversInUse = isToday ? coversInUseAtTime(gridData, nowMin, visibleTableIds) : 0;
+    const tablesInUse = isToday ? tablesInUseAtTime(gridData, nowMin, visibleTableIds) : 0;
     const refMin = isToday ? nowMin : 0;
     const next_bookings_slot = computeNextBookingsSlot(gridData, refMin);
-    return { ...gridData.summary, covers_in_use_now: inUse, next_bookings_slot };
+    return { ...gridData.summary, covers_in_use_now: coversInUse, tables_in_use: tablesInUse, next_bookings_slot };
   }, [gridData, date, filteredTables, coversClockTick]);
 
   const highlightedBookingIds = useMemo(() => {
@@ -1581,7 +1582,7 @@ export function TableGridView({
           initialSnapshot={selectedBookingSnapshot}
           onClose={() => setSelectedBookingId(null)}
           onUpdated={() => {
-            fetchGrid();
+            fetchGrid({ silent: true });
           }}
         />
       )}

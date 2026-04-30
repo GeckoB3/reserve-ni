@@ -45,3 +45,37 @@ export function coversInUseAtTime(
 
   return total;
 }
+
+/**
+ * Unique tables whose assigned booking overlaps `timeMinutes` (minutes from
+ * midnight) on the grid's date, optionally limited to visible tables.
+ */
+export function tablesInUseAtTime(
+  grid: TableGridData,
+  timeMinutes: number,
+  visibleTableIds?: Set<string>,
+): number {
+  const inUse = new Set<string>();
+
+  for (const cell of grid.cells) {
+    if (visibleTableIds && !visibleTableIds.has(cell.table_id)) continue;
+    if (!cell.booking_id || !cell.booking_details) continue;
+
+    const bd = cell.booking_details;
+    if (!BOOKING_ACTIVE_STATUSES.includes(bd.status as (typeof BOOKING_ACTIVE_STATUSES)[number])) {
+      continue;
+    }
+
+    const start = timeToMinutes(bd.start_time);
+    let end = bd.end_time ? timeToMinutes(bd.end_time) : start + 90;
+    if (end <= start) {
+      end = start + 90;
+    }
+
+    if (timeMinutes >= start && timeMinutes < end) {
+      inUse.add(cell.table_id);
+    }
+  }
+
+  return inUse.size;
+}

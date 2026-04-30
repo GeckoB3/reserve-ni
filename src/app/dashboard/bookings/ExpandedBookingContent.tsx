@@ -208,9 +208,11 @@ export function ExpandedBookingContent({
       BOOKING_PRIMARY_ACTIONS.Confirmed,
       BOOKING_PRIMARY_ACTIONS.Seated,
     ] as Array<{ label: string; target: BookingStatus } | undefined>
-  ).filter((a): a is { label: string; target: BookingStatus } =>
-    Boolean(a) && canTransitionBookingStatus(booking.status, a!.target)
-  );
+  ).reduce<Array<{ label: string; target: BookingStatus }>>((actions, action) => {
+    if (!action || !canTransitionBookingStatus(booking.status, action.target)) return actions;
+    if (actions.some((existing) => existing.target === action.target)) return actions;
+    return [...actions, action];
+  }, []);
 
   const handleStatusClick = (status: BookingStatus, label: string) => {
     if (isDestructiveBookingStatus(status) || isRevertTransition(booking.status as BookingStatus, status)) {

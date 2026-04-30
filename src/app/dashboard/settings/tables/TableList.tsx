@@ -149,9 +149,41 @@ export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'fu
   const [batchPrefix, setBatchPrefix] = useState('Table');
   const [batchMaxCovers, setBatchMaxCovers] = useState(4);
   const [batchShape, setBatchShape] = useState<TableShape>('rectangle');
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [deleteDialogIds, setDeleteDialogIds] = useState<string[] | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const zones = [...new Set(tables.map((t) => t.zone).filter(Boolean))] as string[];
   const showZoneColumn = !isCovers && zones.length > 0;
+  const selectedTables = useMemo(
+    () => tables.filter((table) => selectedIds.includes(table.id)),
+    [selectedIds, tables],
+  );
+  const deleteDialogTables = useMemo(
+    () => tables.filter((table) => deleteDialogIds?.includes(table.id)),
+    [deleteDialogIds, tables],
+  );
+  const allVisibleSelected =
+    orderedTables.length > 0 && orderedTables.every((table) => selectedIds.includes(table.id));
+
+  useEffect(() => {
+    setSelectedIds((current) => current.filter((id) => tables.some((table) => table.id === id)));
+  }, [tables]);
+
+  const toggleSelected = useCallback((id: string, checked: boolean) => {
+    setSelectedIds((current) => {
+      if (checked) return current.includes(id) ? current : [...current, id];
+      return current.filter((selectedId) => selectedId !== id);
+    });
+  }, []);
+
+  const toggleAllVisible = useCallback((checked: boolean) => {
+    const visibleIds = orderedTables.map((table) => table.id);
+    setSelectedIds((current) => {
+      if (checked) return Array.from(new Set([...current, ...visibleIds]));
+      return current.filter((id) => !visibleIds.includes(id));
+    });
+  }, [orderedTables]);
 
   const persistTableOrder = useCallback(
     async (nextIds: string[], previousIds: string[]) => {
@@ -283,16 +315,50 @@ export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'fu
     }
   };
 
-  const deleteTable = async (id: string) => {
-    if (!confirm('Delete this table? This cannot be undone.')) return;
+  const requestDeleteTables = (ids: string[]) => {
+    if (ids.length === 0) return;
+    setDeleteDialogIds(ids);
+  };
 
+  const deleteTables = async (ids: string[]) => {
+    if (ids.length === 0) return;
+    setDeleting(true);
+    setError(null);
     try {
-      const res = await fetch(`/api/venue/tables?id=${id}`, { method: 'DELETE' });
-      if (res.ok) {
-        setTables(tables.filter((t) => t.id !== id));
+      const results = await Promise.all(
+        ids.map(async (id) => {
+          try {
+            const res = await fetch(`/api/venue/tables?id=${id}`, { method: 'DELETE' });
+            const payload = !res.ok ? await res.json().catch(() => ({})) : null;
+            return {
+              id,
+              ok: res.ok,
+              error: (payload as { error?: string } | null)?.error ?? null,
+            };
+          } catch {
+            return { id, ok: false, error: 'Network error deleting table' };
+          }
+        }),
+      );
+      const okIds = new Set(results.filter((result) => result.ok).map((result) => result.id));
+      if (okIds.size > 0) {
+        setTables(tables.filter((table) => !okIds.has(table.id)));
+        setSelectedIds((current) => current.filter((id) => !okIds.has(id)));
+      }
+      const failed = results.filter((result) => !result.ok);
+      if (failed.length > 0) {
+        const firstError = failed.find((result) => result.error)?.error;
+        setError(
+          firstError ??
+            `Failed to delete ${failed.length === 1 ? '1 table' : `${failed.length} tables`}.`,
+        );
       }
     } catch (err) {
-      console.error('Delete table error:', err);
+      console.error('Delete tables error:', err);
+      setError('Failed to delete tables');
+    } finally {
+      setDeleting(false);
+      setDeleteDialogIds(null);
     }
   };
 
@@ -382,7 +448,7 @@ export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'fu
       )}
 
       {isAdmin && (
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <button
             onClick={() => setEditing({ ...emptyTable })}
             className="rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-brand-700"
@@ -395,6 +461,15 @@ export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'fu
           >
             + Add Multiple
           </button>
+          {selectedTables.length > 0 && (
+            <button
+              type="button"
+              onClick={() => requestDeleteTables(selectedTables.map((table) => table.id))}
+              className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 shadow-sm hover:bg-red-100"
+            >
+              Delete selected ({selectedTables.length})
+            </button>
+          )}
         </div>
       )}
 
@@ -610,6 +685,16 @@ export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'fu
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-slate-100 bg-slate-50/50">
+                      {isAdmin && (
+                        <th className="w-[1%] whitespace-nowrap px-3 py-2.5 text-center">
+                          <input
+                            type="checkbox"
+                            checked={allVisibleSelected}
+                            onChange={(event) => toggleAllVisible(event.target.checked)}
+                            aria-label="Select all visible tables"
+                          />
+                        </th>
+                      )}
                       <th className="w-[1%] whitespace-nowrap px-2 py-2.5 text-center text-xs font-medium text-slate-500">
                         Order
                       </th>
@@ -639,6 +724,16 @@ export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'fu
                         >
                           {(dragHandle) => (
                             <>
+                              {isAdmin && (
+                                <td className="w-[1%] px-3 py-2.5 text-center align-top">
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedIds.includes(t.id)}
+                                    onChange={(event) => toggleSelected(t.id, event.target.checked)}
+                                    aria-label={`Select ${t.name}`}
+                                  />
+                                </td>
+                              )}
                               <td className="w-[1%] px-2 py-2.5 align-top">{dragHandle}</td>
                               <td className="px-4 py-2.5 font-medium text-slate-900">{t.name}</td>
                               {showZoneColumn && (
@@ -689,7 +784,7 @@ export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'fu
                                     </button>
                                     <button
                                       type="button"
-                                      onClick={() => deleteTable(t.id)}
+                                      onClick={() => requestDeleteTables([t.id])}
                                       className="flex h-10 w-10 items-center justify-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600"
                                       title="Delete"
                                     >
@@ -712,6 +807,16 @@ export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'fu
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-slate-100 bg-slate-50/50">
+                    {isAdmin && (
+                      <th className="w-[1%] whitespace-nowrap px-3 py-2.5 text-center">
+                        <input
+                          type="checkbox"
+                          checked={allVisibleSelected}
+                          onChange={(event) => toggleAllVisible(event.target.checked)}
+                          aria-label="Select all visible tables"
+                        />
+                      </th>
+                    )}
                     <th className="px-4 py-2.5 text-left text-xs font-medium text-slate-500">Name</th>
                     {showZoneColumn && (
                       <th className="px-4 py-2.5 text-left text-xs font-medium text-slate-500">Zone</th>
@@ -728,6 +833,16 @@ export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'fu
                 <tbody className="divide-y divide-slate-100">
                   {orderedTables.map((t) => (
                     <tr key={t.id} className={`hover:bg-slate-50/50 ${!t.is_active ? 'opacity-50' : ''}`}>
+                      {isAdmin && (
+                        <td className="w-[1%] px-3 py-2.5 text-center">
+                          <input
+                            type="checkbox"
+                            checked={selectedIds.includes(t.id)}
+                            onChange={(event) => toggleSelected(t.id, event.target.checked)}
+                            aria-label={`Select ${t.name}`}
+                          />
+                        </td>
+                      )}
                       <td className="px-4 py-2.5 font-medium text-slate-900">{t.name}</td>
                       {showZoneColumn && (
                         <td className="px-4 py-2.5 text-slate-600">{t.zone ?? '—'}</td>
@@ -777,7 +892,7 @@ export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'fu
                             </button>
                             <button
                               type="button"
-                              onClick={() => deleteTable(t.id)}
+                              onClick={() => requestDeleteTables([t.id])}
                               className="flex h-10 w-10 items-center justify-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600"
                               title="Delete"
                             >
@@ -793,6 +908,69 @@ export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'fu
                 </tbody>
               </table>
             )}
+          </div>
+        </div>
+      )}
+      {deleteDialogIds && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4 py-6 backdrop-blur-sm">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-tables-title"
+            className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl shadow-slate-900/20"
+          >
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-red-50 text-red-600 ring-1 ring-red-100">
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v4m0 4h.01M10.29 3.86 1.82 18a2.25 2.25 0 0 0 1.93 3.36h16.5A2.25 2.25 0 0 0 22.18 18L13.71 3.86a2.25 2.25 0 0 0-3.42 0Z" />
+                </svg>
+              </div>
+              <div className="min-w-0 flex-1">
+                <h3 id="delete-tables-title" className="text-base font-semibold text-slate-950">
+                  {deleteDialogIds.length === 1 ? 'Delete table?' : `Delete ${deleteDialogIds.length} tables?`}
+                </h3>
+                <p className="mt-1 text-sm text-slate-600">
+                  This cannot be undone. Tables with future assigned bookings will not be deleted until those bookings are reassigned.
+                </p>
+              </div>
+            </div>
+            <div className="mt-4 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+              <p className="text-[11px] font-semibold uppercase tracking-widest text-slate-500">
+                Selected tables
+              </p>
+              <div className="mt-2 flex max-h-28 flex-wrap gap-1.5 overflow-y-auto">
+                {deleteDialogTables.map((table) => (
+                  <span
+                    key={table.id}
+                    className="rounded-full bg-white px-2 py-1 text-xs font-medium text-slate-700 ring-1 ring-slate-200"
+                  >
+                    {table.name}
+                  </span>
+                ))}
+              </div>
+            </div>
+            <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => setDeleteDialogIds(null)}
+                disabled={deleting}
+                className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                Keep tables
+              </button>
+              <button
+                type="button"
+                onClick={() => void deleteTables(deleteDialogIds)}
+                disabled={deleting}
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-red-700 disabled:opacity-50"
+              >
+                {deleting
+                  ? 'Deleting...'
+                  : deleteDialogIds.length === 1
+                    ? 'Delete table'
+                    : `Delete ${deleteDialogIds.length} tables`}
+              </button>
+            </div>
           </div>
         </div>
       )}

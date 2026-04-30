@@ -642,6 +642,7 @@ export function BookingDetailPanel({
   const forwardStatuses = nextStatuses.filter((status) => !isRevertTransition(currentStatus, status));
   const statusRevertAction = BOOKING_REVERT_ACTIONS[currentStatus];
   const forwardLabel = (status: BookingStatus) => {
+    if (status === 'Confirmed') return 'Confirm';
     if (status === 'Seated') return bookingStyleIsTable ? 'Seat' : 'Start';
     if (status === 'Completed') return 'Complete';
     if (status === 'Cancelled') return 'Cancel';

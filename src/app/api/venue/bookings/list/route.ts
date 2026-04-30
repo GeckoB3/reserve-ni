@@ -8,6 +8,7 @@ import { isTableReservationBooking } from '@/lib/booking/infer-booking-row-model
  * GET /api/venue/bookings/list?date=YYYY-MM-DD&status=Pending|Seated|...
  * or  /api/venue/bookings/list?from=YYYY-MM-DD&to=YYYY-MM-DD&status=...
  * Optional: guest=<uuid> filters to that guest_id (with date/from-to or ids).
+ * Optional: service=<uuid> filters table reservations by venue_services.id.
  * Optional: attendance_confirmed=1 — bookings where the guest confirmed via reminder link (guest_attendance_confirmed_at)
  *   or staff pressed Confirm Booking (staff_attendance_confirmed_at). When set, `status` is ignored.
  * Returns bookings for the authenticated venue, with guest name.
@@ -16,11 +17,11 @@ import { isTableReservationBooking } from '@/lib/booking/infer-booking-row-model
  * `view=calendar` — staff schedule grid: narrower row shape, skips table-assignment query (faster for wide date ranges).
  */
 const BOOKINGS_LIST_SELECT_FULL =
-  'id, booking_date, booking_time, party_size, status, source, deposit_status, deposit_amount_pence, dietary_notes, occasion, special_requests, internal_notes, client_arrived_at, guest_attendance_confirmed_at, staff_attendance_confirmed_at, estimated_end_time, created_at, guest_id, practitioner_id, appointment_service_id, calendar_id, service_item_id, experience_event_id, class_instance_id, resource_id, booking_end_time, event_session_id, group_booking_id, person_label, area_id';
+  'id, booking_date, booking_time, party_size, status, source, deposit_status, deposit_amount_pence, dietary_notes, occasion, special_requests, internal_notes, client_arrived_at, guest_attendance_confirmed_at, staff_attendance_confirmed_at, estimated_end_time, created_at, guest_id, service_id, practitioner_id, appointment_service_id, calendar_id, service_item_id, experience_event_id, class_instance_id, resource_id, booking_end_time, event_session_id, group_booking_id, person_label, area_id';
 
 /** Omits columns not used by the practitioner calendar grid to reduce payload and DB I/O. */
 const BOOKINGS_LIST_SELECT_CALENDAR =
-  'id, booking_date, booking_time, party_size, status, source, deposit_status, deposit_amount_pence, special_requests, internal_notes, client_arrived_at, guest_attendance_confirmed_at, staff_attendance_confirmed_at, estimated_end_time, guest_id, practitioner_id, appointment_service_id, calendar_id, service_item_id, experience_event_id, class_instance_id, resource_id, booking_end_time, event_session_id, group_booking_id, person_label, area_id';
+  'id, booking_date, booking_time, party_size, status, source, deposit_status, deposit_amount_pence, special_requests, internal_notes, client_arrived_at, guest_attendance_confirmed_at, staff_attendance_confirmed_at, estimated_end_time, guest_id, service_id, practitioner_id, appointment_service_id, calendar_id, service_item_id, experience_event_id, class_instance_id, resource_id, booking_end_time, event_session_id, group_booking_id, person_label, area_id';
 
 export async function GET(request: NextRequest) {
   try {
@@ -42,6 +43,7 @@ export async function GET(request: NextRequest) {
     const unassignedTables = request.nextUrl.searchParams.get('unassigned_tables') === '1';
     const guestIdParam = request.nextUrl.searchParams.get('guest');
     const areaIdParam = request.nextUrl.searchParams.get('area');
+    const serviceIdParam = request.nextUrl.searchParams.get('service');
     const isoRe = /^\d{4}-\d{2}-\d{2}$/;
     const guestUuidRe =
       /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -67,6 +69,10 @@ export async function GET(request: NextRequest) {
 
     if (areaIdParam && guestUuidRe.test(areaIdParam)) {
       query = query.eq('area_id', areaIdParam);
+    }
+
+    if (serviceIdParam && guestUuidRe.test(serviceIdParam)) {
+      query = query.eq('service_id', serviceIdParam);
     }
 
     if (groupBookingId) {
@@ -149,6 +155,7 @@ export async function GET(request: NextRequest) {
         guest_phone: guest?.phone ?? null,
         guest_visit_count: guest?.visit_count ?? null,
         guest_tags: Array.isArray(guest?.tags) ? guest.tags : [],
+        service_id: r.service_id ?? null,
         practitioner_id: r.practitioner_id ?? null,
         calendar_id: r.calendar_id ?? null,
         appointment_service_id: r.appointment_service_id ?? null,
