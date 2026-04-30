@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { flushSync } from 'react-dom';
 import { useRouter, useSearchParams } from 'next/navigation';
 import type { TableGridData, UndoAction } from '@/types/table-management';
 import { TimelineGrid } from './TimelineGrid';
@@ -13,8 +14,8 @@ import type { BookingModel } from '@/types/booking-models';
 import { detectAdjacentTables, type CombinationTable } from '@/lib/table-management/combination-engine';
 import { canMarkNoShowForSlot, canTransitionBookingStatus, type BookingStatus } from '@/lib/table-management/booking-status';
 import { computeValidMoveTargets, type BookingMoveContext } from '@/lib/table-management/move-validation';
-import { ViewToolbar } from '@/components/dashboard/ViewToolbar';
 import type { ViewToolbarSummary } from '@/components/dashboard/ViewToolbar';
+import { OperationsWorkspaceToolbar } from '@/components/dashboard/OperationsWorkspaceToolbar';
 import { coversInUseAtTime, tablesInUseAtTime } from '@/lib/table-management/covers-at-time';
 import { computeNextBookingsSlot } from '@/lib/table-management/next-bookings-slot';
 import { bookingStatusDisplayLabel } from '@/lib/booking/infer-booking-row-model';
@@ -23,9 +24,7 @@ import { getCalendarGridBounds } from '@/lib/venue-calendar-bounds';
 import { isBookingTimeInHourRange } from '@/lib/booking-time-window';
 import type { OpeningHours } from '@/types/availability';
 import type { VenueArea } from '@/types/areas';
-import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
-import { Pill } from '@/components/ui/dashboard/Pill';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { DashboardGridSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
 
@@ -39,6 +38,54 @@ function formatDateInput(d: Date): string {
 function timeToMinutes(t: string): number {
   const [h, m] = t.split(':').map(Number);
   return (h ?? 0) * 60 + (m ?? 0);
+}
+
+function minutesToTime(value: number): string {
+  const h = Math.floor(value / 60);
+  const m = value % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
+/** Matches `TimelineGrid` default slot column width at 100% scale. */
+const TIMELINE_SLOT_BASE_PX = 64;
+const TIMELINE_SCALE_PERCENT_MIN = 50;
+const TIMELINE_SCALE_PERCENT_MAX = 150;
+const TIMELINE_SCALE_STEP = 5;
+const TIMELINE_SCALE_STORAGE_KEY = 'reserve:table-grid:timeline-scale-pct';
+const LEGACY_SLOT_WIDTH_STORAGE_KEY = 'reserve:table-grid:slot-width';
+
+function timelinePercentToSlotWidthPx(percent: number): number {
+  const raw = Math.round(TIMELINE_SLOT_BASE_PX * (percent / 100));
+  return Math.max(28, Math.min(100, raw));
+}
+
+function endMinutesAfterStart(start: string, end: string | null | undefined, fallbackMinutes = 90): number {
+  const startMin = timeToMinutes(start.slice(0, 5));
+  if (!end) return startMin + fallbackMinutes;
+  let endMin = timeToMinutes(end.slice(0, 5));
+  if (endMin <= startMin) {
+    endMin += 24 * 60;
+  }
+  return endMin;
+}
+
+function effectiveBookingEndMinutes(
+  status: string,
+  start: string,
+  end: string | null | undefined,
+  isToday: boolean,
+): number {
+  const scheduledEnd = endMinutesAfterStart(start, end);
+  if (status === 'Seated' || status === 'Arrived') {
+    if (!isToday) return scheduledEnd;
+    const now = new Date();
+    const nowMinutes = now.getHours() * 60 + now.getMinutes();
+    const startMinutes = timeToMinutes(start.slice(0, 5));
+    if (nowMinutes > startMinutes) {
+      return Math.max(scheduledEnd, nowMinutes);
+    }
+  }
+  return scheduledEnd;
 }
 
 function withOptimisticBookingMove(
@@ -177,14 +224,18 @@ export function TableGridView({
   const [loading, setLoading] = useState(true);
   const [zoneFilter, setZoneFilter] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
-  const [showCancelled, setShowCancelled] = useState(false);
-  const [showNoShow, setShowNoShow] = useState(false);
   const [search, setSearch] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searchPopoverRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const filterPopoverRef = useRef<HTMLDivElement>(null);
   const [undoStack, setUndoStack] = useState<UndoAction[]>([]);
   const [showUndoToast, setShowUndoToast] = useState(false);
   const [validDropTargets, setValidDropTargets] = useState<Set<string> | null>(null);
   const [validDropCombos, setValidDropCombos] = useState<Map<string, string> | null>(null);
   const [selectedBookingId, setSelectedBookingId] = useState<string | null>(null);
+  const [selectedBookingAnchor, setSelectedBookingAnchor] = useState<{ x: number; y: number } | null>(null);
   /** Bumps every minute while viewing today so “covers in use” stays current. */
   const [coversClockTick, setCoversClockTick] = useState(0);
   const [newBookingCell, setNewBookingCell] = useState<{ tableId: string; time: string } | null>(null);
@@ -204,8 +255,7 @@ export function TableGridView({
   const [walkInCell, setWalkInCell] = useState<{ tableId: string; time: string } | null>(null);
   const [noShowGraceMinutes, setNoShowGraceMinutes] = useState(15);
   const [combinationThreshold, setCombinationThreshold] = useState(80);
-  const [showLegend, setShowLegend] = useState(false);
-  const [slotWidth, setSlotWidth] = useState<number>(64);
+  const [timelineScalePercent, setTimelineScalePercent] = useState(100);
   const [moveBookingId, setMoveBookingId] = useState<string | null>(null);
   const [rescheduleDialog, setRescheduleDialog] = useState<{ bookingId: string; time: string } | null>(null);
   const [assignAllUnassignedLoading, setAssignAllUnassignedLoading] = useState(false);
@@ -215,6 +265,7 @@ export function TableGridView({
   const pendingReconcileRef = useRef(false);
   const lastReconcileAtRef = useRef(0);
   const gridDataRef = useRef<TableGridData | null>(null);
+  const skipNextTimelineScalePersist = useRef(true);
   const { addToast } = useToast();
 
   const [openingHours, setOpeningHours] = useState<OpeningHours | null>(null);
@@ -222,6 +273,54 @@ export function TableGridView({
   const [startHourOverride, setStartHourOverride] = useState<number | null>(null);
   const [endHourOverride, setEndHourOverride] = useState<number | null>(null);
   const [timeRangeFilterActive, setTimeRangeFilterActive] = useState(false);
+
+  useEffect(() => {
+    if (!searchOpen) return;
+
+    const focusTimer = window.setTimeout(() => {
+      searchInputRef.current?.focus();
+    }, 0);
+
+    return () => window.clearTimeout(focusTimer);
+  }, [searchOpen]);
+
+  useEffect(() => {
+    if (!filterOpen) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (filterPopoverRef.current?.contains(event.target as Node)) return;
+      setFilterOpen(false);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setFilterOpen(false);
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [filterOpen]);
+
+  useEffect(() => {
+    if (!searchOpen) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (searchPopoverRef.current?.contains(event.target as Node)) return;
+      setSearchOpen(false);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setSearchOpen(false);
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [searchOpen]);
 
   const showDiningAreaChrome =
     bookingModel === 'table_reservation' && diningAreas.filter((a) => a.is_active).length > 1;
@@ -327,6 +426,16 @@ export function TableGridView({
     }
     return null;
   }, [selectedBookingId, gridData, date]);
+
+  const openBookingPopover = useCallback((bookingId: string, anchor: { x: number; y: number }) => {
+    setSelectedBookingId(bookingId);
+    setSelectedBookingAnchor(anchor);
+  }, []);
+
+  const openBookingDrawer = useCallback((bookingId: string) => {
+    setSelectedBookingId(bookingId);
+    setSelectedBookingAnchor(null);
+  }, []);
 
   useEffect(() => {
     gridDataRef.current = gridData;
@@ -514,24 +623,52 @@ export function TableGridView({
   }, [date, gridData?.cells.length]);
   useEffect(() => {
     try {
-      const saved = window.localStorage.getItem('reserve:table-grid:slot-width');
-      if (!saved) return;
-      const next = Number(saved);
-      if (Number.isFinite(next)) {
-        setSlotWidth(Math.max(30, Math.min(80, next)));
+      const savedPct = window.localStorage.getItem(TIMELINE_SCALE_STORAGE_KEY);
+      if (savedPct != null) {
+        const n = Number(savedPct);
+        if (Number.isFinite(n)) {
+          setTimelineScalePercent(
+            Math.max(TIMELINE_SCALE_PERCENT_MIN, Math.min(TIMELINE_SCALE_PERCENT_MAX, Math.round(n))),
+          );
+          return;
+        }
+      }
+      const legacyPx = window.localStorage.getItem(LEGACY_SLOT_WIDTH_STORAGE_KEY);
+      if (legacyPx != null) {
+        const px = Number(legacyPx);
+        if (Number.isFinite(px) && px > 0) {
+          const pct = Math.round((px / TIMELINE_SLOT_BASE_PX) * 100);
+          setTimelineScalePercent(Math.max(TIMELINE_SCALE_PERCENT_MIN, Math.min(TIMELINE_SCALE_PERCENT_MAX, pct)));
+        }
       }
     } catch {
-      // ignore storage errors
+      /* ignore storage errors */
     }
   }, []);
 
   useEffect(() => {
-    try {
-      window.localStorage.setItem('reserve:table-grid:slot-width', String(slotWidth));
-    } catch {
-      // ignore storage errors
+    if (skipNextTimelineScalePersist.current) {
+      skipNextTimelineScalePersist.current = false;
+      return;
     }
-  }, [slotWidth]);
+    try {
+      window.localStorage.setItem(TIMELINE_SCALE_STORAGE_KEY, String(timelineScalePercent));
+    } catch {
+      /* ignore storage errors */
+    }
+  }, [timelineScalePercent]);
+
+  const timelineSlotWidthPx = useMemo(
+    () => timelinePercentToSlotWidthPx(timelineScalePercent),
+    [timelineScalePercent],
+  );
+
+  const bumpTimelineScale = useCallback((deltaPercent: number) => {
+    setTimelineScalePercent((prev) => {
+      const stepped = Math.round((prev + deltaPercent) / TIMELINE_SCALE_STEP) * TIMELINE_SCALE_STEP;
+      return Math.max(TIMELINE_SCALE_PERCENT_MIN, Math.min(TIMELINE_SCALE_PERCENT_MAX, stepped));
+    });
+  }, []);
 
   const allCombinations = useMemo(() => {
     if (!gridData) return combinations;
@@ -861,7 +998,9 @@ export function TableGridView({
     }
     const clampedEnd = nextBoundary === null ? requestedEnd : Math.min(requestedEnd, nextBoundary);
     const clampedEndTime = `${Math.floor(clampedEnd / 60).toString().padStart(2, '0')}:${(clampedEnd % 60).toString().padStart(2, '0')}`;
-    setGridData((prev) => withOptimisticBookingMove(prev, bookingId, { endTime: clampedEndTime }));
+    flushSync(() => {
+      setGridData((prev) => withOptimisticBookingMove(prev, bookingId, { endTime: clampedEndTime }));
+    });
     try {
       const res = await fetch('/api/venue/tables/assignments', {
         method: 'POST',
@@ -1095,14 +1234,38 @@ export function TableGridView({
   }, [timeRangeFilterActive, pickerStartHour, serviceId, selectedService, derivedStartHour]);
 
   const timelineEndTime = useMemo(() => {
-    if (timeRangeFilterActive) {
-      return `${String(pickerEndHour).padStart(2, '0')}:00`;
-    }
-    if (serviceId && selectedService) {
-      return selectedService.end_time;
-    }
-    return `${String(derivedEndHour).padStart(2, '0')}:00`;
-  }, [timeRangeFilterActive, pickerEndHour, serviceId, selectedService, derivedEndHour]);
+    const today = formatDateInput(new Date());
+    const isToday = date === today;
+    const configuredEnd = (() => {
+      if (timeRangeFilterActive) {
+        return `${String(pickerEndHour).padStart(2, '0')}:00`;
+      }
+      if (serviceId && selectedService) {
+        return selectedService.end_time;
+      }
+      return `${String(derivedEndHour).padStart(2, '0')}:00`;
+    })();
+    const configuredEndMinutes = timeToMinutes(configuredEnd);
+    const latestBookingEndMinutes = Math.max(
+      configuredEndMinutes,
+      ...(gridData?.cells
+        .filter((cell) => cell.booking_id && cell.booking_details)
+        .map((cell) =>
+          effectiveBookingEndMinutes(
+            cell.booking_details!.status,
+            cell.booking_details!.start_time,
+            cell.booking_details!.end_time,
+            isToday,
+          )
+        ) ?? []),
+      ...(gridData?.unassigned_bookings
+        .map((booking) =>
+          effectiveBookingEndMinutes(booking.status, booking.start_time, booking.end_time, isToday)
+        ) ?? []),
+    );
+    const slotInterval = gridData?.slot_interval_minutes ?? 15;
+    return minutesToTime(Math.ceil(latestBookingEndMinutes / slotInterval) * slotInterval);
+  }, [timeRangeFilterActive, pickerEndHour, serviceId, selectedService, derivedEndHour, gridData, date, coversClockTick]);
 
   const timelineCells = useMemo(() => {
     if (!gridData?.cells) return [];
@@ -1125,164 +1288,12 @@ export function TableGridView({
     );
   }, [gridData, timeRangeFilterActive, pickerStartHour, pickerEndHour]);
 
-  const exportCsv = useCallback(async () => {
-    if (!gridData) return;
-    const listRes = await fetch(`/api/venue/bookings/list?date=${date}`);
-    const listPayload = listRes.ok ? await listRes.json() : { bookings: [] };
-    const bookingMeta = new Map<string, { phone: string; email: string; source: string; created: string }>(
-      (listPayload.bookings ?? []).map((booking: {
-        id: string;
-        guest_phone: string | null;
-        guest_email: string | null;
-        source: string | null;
-        created_at?: string | null;
-      }) => [booking.id, {
-        phone: booking.guest_phone ?? '',
-        email: booking.guest_email ?? '',
-        source: booking.source ?? '',
-        created: booking.created_at ?? '',
-      }]),
-    );
-    const tableNameById = new Map(gridData.tables.map((table) => [table.id, table.name]));
-    const byBooking = new Map<string, {
-      ref: string;
-      guest: string;
-      party: number;
-      start: string;
-      end: string;
-      duration: number;
-      status: string;
-      deposit: string;
-      special: string;
-      source: string;
-      created: string;
-      tables: Set<string>;
-    }>();
-    for (const cell of gridData.cells) {
-      if (!cell.booking_id || !cell.booking_details) continue;
-      const existing = byBooking.get(cell.booking_id) ?? {
-        ref: cell.booking_id,
-        guest: cell.booking_details.guest_name,
-        party: cell.booking_details.party_size,
-        start: cell.booking_details.start_time.slice(0, 5),
-        end: cell.booking_details.end_time.slice(0, 5),
-        duration: Math.max(15, timeToMinutes(cell.booking_details.end_time.slice(0, 5)) - timeToMinutes(cell.booking_details.start_time.slice(0, 5))),
-        status: cell.booking_details.status,
-        deposit: cell.booking_details.deposit_status ?? '',
-        special: cell.booking_details.dietary_notes ?? cell.booking_details.occasion ?? '',
-        source: bookingMeta.get(cell.booking_id)?.source ?? '',
-        created: bookingMeta.get(cell.booking_id)?.created ?? '',
-        tables: new Set<string>(),
-      };
-      existing.tables.add(tableNameById.get(cell.table_id) ?? cell.table_id);
-      byBooking.set(cell.booking_id, existing);
-    }
-    const header = [
-      'Booking Reference', 'Guest Name', 'Party Size', 'Table', 'Start Time', 'End Time', 'Duration',
-      'Status', 'Deposit Status', 'Special Requests', 'Phone', 'Email', 'Source', 'Created At',
-    ];
-    const rows = [header.join(',')];
-    for (const row of byBooking.values()) {
-      rows.push([
-        row.ref,
-        row.guest,
-        String(row.party),
-        Array.from(row.tables).join(' + '),
-        row.start,
-        row.end,
-        String(row.duration),
-        row.status,
-        row.deposit,
-        row.special,
-        bookingMeta.get(row.ref)?.phone ?? '',
-        bookingMeta.get(row.ref)?.email ?? '',
-        row.source,
-        row.created,
-      ].map((value) => `"${String(value).replace(/"/g, '""')}"`).join(','));
-    }
-    const blob = new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `table-grid-${date}.csv`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
-  }, [gridData, date]);
-
-  const printDaySheet = useCallback(async () => {
-    if (!gridData) return;
-    const listRes = await fetch(`/api/venue/bookings/list?date=${date}`);
-    const listPayload = listRes.ok ? await listRes.json() : { bookings: [] };
-    const rows = (listPayload.bookings ?? []) as Array<{
-      id: string;
-      booking_time: string;
-      guest_name: string;
-      party_size: number;
-      status: string;
-      dietary_notes?: string | null;
-      occasion?: string | null;
-    }>;
-    const tableNamesByBooking = new Map<string, string[]>();
-    for (const cell of gridData.cells) {
-      if (!cell.booking_id) continue;
-      const existing = tableNamesByBooking.get(cell.booking_id) ?? [];
-      const tableName = gridData.tables.find((table) => table.id === cell.table_id)?.name ?? cell.table_id;
-      if (!existing.includes(tableName)) existing.push(tableName);
-      tableNamesByBooking.set(cell.booking_id, existing);
-    }
-    const win = window.open('', '_blank', 'width=900,height=700');
-    if (!win) return;
-    const htmlRows = rows.map((booking) => `
-      <tr>
-        <td>${booking.booking_time?.slice(0, 5) ?? ''}</td>
-        <td>${booking.guest_name ?? ''}</td>
-        <td>${booking.party_size}</td>
-        <td>${(tableNamesByBooking.get(booking.id) ?? []).join(' + ')}</td>
-        <td>${booking.status}</td>
-        <td>${booking.dietary_notes ?? booking.occasion ?? ''}</td>
-      </tr>
-    `).join('');
-    win.document.write(`
-      <html>
-        <head>
-          <title>Table Grid Day Sheet ${date}</title>
-          <style>
-            body { font-family: Arial, sans-serif; padding: 16px; }
-            h1 { font-size: 18px; margin-bottom: 8px; }
-            table { width: 100%; border-collapse: collapse; font-size: 12px; }
-            th, td { border: 1px solid #ddd; padding: 6px; text-align: left; }
-            th { background: #f4f4f4; }
-          </style>
-        </head>
-        <body>
-          <h1>Day Sheet - ${date}</h1>
-          <table>
-            <thead><tr><th>Time</th><th>Guest</th><th>Party</th><th>Table</th><th>Status</th><th>Notes</th></tr></thead>
-            <tbody>${htmlRows}</tbody>
-          </table>
-        </body>
-      </html>
-    `);
-    win.document.close();
-    win.focus();
-    win.print();
-  }, [gridData, date]);
-
   return (
-    <div className="flex flex-col gap-2 md:gap-3 lg:gap-4">
-      {gridData ? (
-        <PageHeader
-          eyebrow="Operations"
+    <div className="flex min-h-[calc(100dvh-6rem)] flex-1 flex-col gap-1.5 sm:gap-2">
+      {gridData && viewToolbarSummary ? (
+        <OperationsWorkspaceToolbar
           title="Table grid"
-          subtitle="Assign bookings to tables, manage blocks, and follow live updates for the service."
-        />
-      ) : null}
-      {gridData && (
-        <ViewToolbar
-          title=""
-          summary={viewToolbarSummary ?? gridData.summary}
+          summary={viewToolbarSummary}
           date={date}
           onDateChange={setDate}
           liveState={liveState}
@@ -1291,73 +1302,170 @@ export function TableGridView({
           onWalkIn={() => {
             setWalkInCell({ tableId: '', time: '' });
           }}
-          datePicker={(
-            <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+          compact
+          showControlsButton={false}
+          timelineLabel={`${String(pickerStartHour).padStart(2, '0')}-${String(pickerEndHour).padStart(2, '0')}`}
+          timelinePanel={(
+            <div className="space-y-2">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Visible hours</p>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <label className="block min-w-0">
+                  <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-slate-500">From</span>
+                  <select
+                    value={pickerStartHour}
+                    onChange={(e) => {
+                      const start = Number(e.target.value);
+                      const end = Math.max(pickerEndHour, start + 1);
+                      setStartHourOverride(start);
+                      setEndHourOverride(end);
+                      setTimeRangeFilterActive(true);
+                    }}
+                    className="h-8 w-full rounded-lg border border-slate-200 bg-white px-2 py-0 pr-7 text-xs shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                  >
+                    {Array.from({ length: 24 }, (_, hour) => hour)
+                      .filter((hour) => hour < pickerEndHour)
+                      .map((hour) => (
+                        <option key={hour} value={hour}>
+                          {String(hour).padStart(2, '0')}:00
+                        </option>
+                      ))}
+                  </select>
+                </label>
+                <label className="block min-w-0">
+                  <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-slate-500">Until</span>
+                  <select
+                    value={pickerEndHour}
+                    onChange={(e) => {
+                      const end = Number(e.target.value);
+                      const start = Math.min(pickerStartHour, end - 1);
+                      setStartHourOverride(start);
+                      setEndHourOverride(end);
+                      setTimeRangeFilterActive(true);
+                    }}
+                    className="h-8 w-full rounded-lg border border-slate-200 bg-white px-2 py-0 pr-7 text-xs shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                  >
+                    {Array.from({ length: 24 }, (_, hour) => hour)
+                      .filter((hour) => hour > pickerStartHour)
+                      .map((hour) => (
+                        <option key={hour} value={hour}>
+                          {String(hour).padStart(2, '0')}:00
+                        </option>
+                      ))}
+                  </select>
+                </label>
+              </div>
+              {timeRangeFilterActive ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStartHourOverride(null);
+                    setEndHourOverride(null);
+                    setTimeRangeFilterActive(false);
+                  }}
+                  className="h-8 rounded-lg border border-slate-200 bg-white px-2.5 text-[11px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+                >
+                  Clear time filter
+                </button>
+              ) : null}
+            </div>
+          )}
+          datePickerPanel={(
+            <div className="rounded-xl border border-slate-200 bg-white p-2.5 shadow-sm sm:p-3">
               <CalendarDateTimePicker
                 date={date}
                 onDateChange={setDate}
                 startHour={pickerStartHour}
                 endHour={pickerEndHour}
-                onTimeRangeChange={(start, end) => {
-                  setStartHourOverride(start);
-                  setEndHourOverride(end);
-                  setTimeRangeFilterActive(true);
-                }}
+                onTimeRangeChange={() => undefined}
               />
-              {timeRangeFilterActive && (
-                <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2">
-                  <p className="text-xs text-slate-600">
-                    Showing bookings with start times from{' '}
-                    <span className="font-medium text-slate-800">
-                      {String(pickerStartHour).padStart(2, '0')}:00
-                    </span>{' '}
-                    up to{' '}
-                    <span className="font-medium text-slate-800">
-                      {String(pickerEndHour).padStart(2, '0')}:00
-                    </span>{' '}
-                    (not including the end hour).
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setStartHourOverride(null);
-                      setEndHourOverride(null);
-                      setTimeRangeFilterActive(false);
-                    }}
-                    className="shrink-0 text-xs font-medium text-brand-600 hover:text-brand-700 hover:underline"
-                  >
-                    Clear time filter
-                  </button>
-                </div>
-              )}
             </div>
           )}
-          secondaryActions={(
-            <>
-              <button
-                type="button"
-                onClick={() => { void printDaySheet(); }}
-                className="hidden rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-sm hover:bg-slate-50 sm:block"
-              >
-                Print
-              </button>
-              <button
-                type="button"
-                onClick={() => { void exportCsv(); }}
-                className="hidden rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-sm hover:bg-slate-50 sm:block"
-              >
-                Export CSV
-              </button>
-            </>
+          controlsPanel={(
+            <div />
           )}
-        >
-          <div className="flex w-full flex-col gap-2 lg:flex-row lg:items-center lg:justify-between lg:gap-3">
-            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5 sm:gap-2">
-              {showDiningAreaChrome && diningAreaId && (
+          summaryTools={(
+            <div className="flex h-7 shrink-0 items-stretch rounded-lg border border-slate-200 bg-white text-[11px] shadow-sm sm:h-8">
+                <button
+                  type="button"
+                  onClick={() => bumpTimelineScale(-TIMELINE_SCALE_STEP)}
+                  disabled={timelineScalePercent <= TIMELINE_SCALE_PERCENT_MIN}
+                  className="px-1.5 text-slate-500 hover:bg-slate-50 hover:text-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
+                  title="Narrower time columns"
+                  aria-label="Decrease timeline scale"
+                >
+                  −
+                </button>
+                <span className="flex min-w-[2.75rem] items-center justify-center border-x border-slate-200 px-1 font-medium tabular-nums text-slate-600 sm:min-w-[3.25rem]">
+                  {timelineScalePercent}%
+                </span>
+                <button
+                  type="button"
+                  onClick={() => bumpTimelineScale(TIMELINE_SCALE_STEP)}
+                  disabled={timelineScalePercent >= TIMELINE_SCALE_PERCENT_MAX}
+                  className="px-1.5 text-slate-500 hover:bg-slate-50 hover:text-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
+                  title="Wider time columns"
+                  aria-label="Increase timeline scale"
+                >
+                  +
+                </button>
+              </div>
+          )}
+          toolbarTools={(
+            <>
+              <div ref={searchPopoverRef} className="relative shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setSearchOpen((prev) => !prev)}
+                  className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border shadow-sm transition-colors ${
+                    search || searchOpen
+                      ? 'border-brand-200 bg-brand-50 text-brand-700'
+                      : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50 hover:text-slate-800'
+                  }`}
+                  aria-label="Search guest"
+                  aria-expanded={searchOpen}
+                >
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+                  </svg>
+                </button>
+                {searchOpen ? (
+                  <div className="animate-fade-in absolute left-0 top-[calc(100%+0.35rem)] z-40 w-[min(17rem,calc(100vw-2rem))] origin-top-left rounded-lg border border-slate-200 bg-white p-1 shadow-xl shadow-slate-900/10 ring-1 ring-slate-100">
+                    <div className="relative">
+                      <input
+                        ref={searchInputRef}
+                        type="text"
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                        placeholder="Search guest"
+                        className="h-8 w-full rounded-md border border-slate-200 bg-white py-0 pl-7 pr-7 text-xs shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                      />
+                      <svg className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+                      </svg>
+                      {search ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSearch('');
+                            searchInputRef.current?.focus();
+                          }}
+                          className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                          aria-label="Clear guest search"
+                        >
+                          <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+              {showDiningAreaChrome && diningAreaId ? (
                 <select
                   value={diningAreaId}
                   onChange={(e) => setDiningAreaFilter(e.target.value)}
-                  className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 sm:px-3 sm:py-2 sm:text-sm"
+                  className="h-8 w-[6.75rem] min-w-0 shrink-0 truncate rounded-lg border border-slate-200 bg-white px-1.5 py-0 pr-5 text-[11px] font-medium text-slate-700 shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 sm:w-[7.25rem] sm:pr-6"
                   aria-label="Dining area"
                 >
                   {diningAreas
@@ -1368,116 +1476,110 @@ export function TableGridView({
                       </option>
                     ))}
                 </select>
-              )}
-              <select
-                value={serviceId ?? ''}
-                onChange={(e) => setServiceId(e.target.value || null)}
-                className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 sm:px-3 sm:py-2 sm:text-sm"
-              >
-                <option value="">All services</option>
-                {services.map((s) => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
-                ))}
-              </select>
-              {serviceId ? (
-                <Pill variant="brand" size="sm">
-                  Filtered
-                </Pill>
               ) : null}
-              {zones.length > 0 && (
+              <div ref={filterPopoverRef} className="relative shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setFilterOpen((prev) => !prev)}
+                  className={`inline-flex h-8 items-center justify-center gap-1 rounded-lg border px-2 text-[11px] font-semibold shadow-sm transition-colors ${
+                    serviceId || statusFilter || filterOpen
+                      ? 'border-brand-200 bg-brand-50 text-brand-700'
+                      : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 hover:text-slate-900'
+                  }`}
+                  aria-label="Filter services and statuses"
+                  aria-expanded={filterOpen}
+                >
+                  <svg className="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 5.25h16.5M6.75 12h10.5M10 18.75h4" />
+                  </svg>
+                  <span>Filter</span>
+                  {serviceId || statusFilter ? (
+                    <span className="ml-0.5 rounded-full bg-brand-600 px-1.5 py-0.5 text-[9px] leading-none text-white">
+                      {[serviceId, statusFilter].filter(Boolean).length}
+                    </span>
+                  ) : null}
+                </button>
+                {filterOpen ? (
+                  <div className="animate-fade-in absolute left-0 top-[calc(100%+0.35rem)] z-40 w-[min(17rem,calc(100vw-2rem))] origin-top-left rounded-xl border border-slate-200 bg-white p-2 shadow-xl shadow-slate-900/10 ring-1 ring-slate-100">
+                    <div className="space-y-2">
+                      <label className="block">
+                        <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-slate-500">Service</span>
+                        <select
+                          value={serviceId ?? ''}
+                          onChange={(e) => setServiceId(e.target.value || null)}
+                          className="h-8 w-full rounded-lg border border-slate-200 bg-white px-2 py-0 pr-7 text-xs font-medium text-slate-700 shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                          aria-label="Service filter"
+                        >
+                          <option value="">All services</option>
+                          {services.map((s) => (
+                            <option key={s.id} value={s.id}>{s.name}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="block">
+                        <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-slate-500">Status</span>
+                        <select
+                          value={statusFilter ?? ''}
+                          onChange={(e) => setStatusFilter(e.target.value || null)}
+                          className="h-8 w-full rounded-lg border border-slate-200 bg-white px-2 py-0 pr-7 text-xs font-medium text-slate-700 shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                          aria-label="Status filter"
+                        >
+                          <option value="">All statuses</option>
+                          <option value="Booked">Booked</option>
+                          <option value="Confirmed">Confirmed</option>
+                          <option value="Pending">Pending</option>
+                          <option value="Seated">Seated</option>
+                          <option value="Arrived">Arrived</option>
+                        </select>
+                      </label>
+                      {(serviceId || statusFilter) ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setServiceId(null);
+                            setStatusFilter(null);
+                          }}
+                          className="h-8 rounded-lg px-2 text-[11px] font-semibold text-brand-700 hover:bg-brand-50"
+                        >
+                          Clear filters
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+              {zones.length > 0 ? (
                 <select
                   value={zoneFilter ?? ''}
                   onChange={(e) => setZoneFilter(e.target.value || null)}
-                  className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 sm:px-3 sm:py-2 sm:text-sm"
+                  className="h-8 w-[5.75rem] min-w-0 shrink-0 truncate rounded-lg border border-slate-200 bg-white px-1.5 py-0 pr-5 text-[11px] font-medium text-slate-700 shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 sm:w-[6.25rem] sm:pr-6"
+                  aria-label="Zone filter"
                 >
                   <option value="">All zones</option>
                   {zones.map((z) => (
                     <option key={z} value={z}>{z}</option>
                   ))}
                 </select>
-              )}
-              <select
-                value={statusFilter ?? ''}
-                onChange={(e) => setStatusFilter(e.target.value || null)}
-                className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 sm:px-3 sm:py-2 sm:text-sm"
-              >
-                <option value="">All statuses</option>
-                <option value="Booked">Booked</option>
-                <option value="Confirmed">Confirmed</option>
-                <option value="Pending">Pending</option>
-                <option value="Seated">Seated</option>
-                <option value="Arrived">Arrived</option>
-                <option value="No-Show">No-Show</option>
-                <option value="Cancelled">Cancelled</option>
-              </select>
-              <label className="hidden cursor-pointer items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 shadow-sm hover:bg-slate-50 sm:inline-flex">
-                <input type="checkbox" checked={showCancelled} onChange={(e) => setShowCancelled(e.target.checked)} className="rounded border-slate-300 text-brand-600 focus:ring-brand-500" />
-                Cancelled
-              </label>
-              <label className="hidden cursor-pointer items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 shadow-sm hover:bg-slate-50 sm:inline-flex">
-                <input type="checkbox" checked={showNoShow} onChange={(e) => setShowNoShow(e.target.checked)} className="rounded border-slate-300 text-brand-600 focus:ring-brand-500" />
-                No-Show
-              </label>
-            </div>
-            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-              <div className="relative min-w-0 flex-1 sm:min-w-[14rem]">
-                <input
-                  type="text"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search guest"
-                  className="w-full rounded-lg border border-slate-200 px-2 py-1.5 pl-8 text-xs focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 sm:px-3 sm:py-2 sm:pl-9 sm:text-sm"
-                />
-                <svg className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400 sm:left-3 sm:h-4 sm:w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
-                </svg>
-              </div>
-              <div className="flex items-center rounded-lg border border-slate-200 bg-white shadow-sm">
-                <button type="button" onClick={() => setSlotWidth((prev) => Math.max(30, prev - 5))} className="px-2 py-1.5 text-sm text-slate-500 hover:text-slate-700 sm:px-2.5 sm:py-2" title="Zoom out">−</button>
-                <span className="hidden border-x border-slate-200 px-2 py-1.5 text-xs font-medium tabular-nums text-slate-600 sm:block sm:py-2">{slotWidth}px</span>
-                <button type="button" onClick={() => setSlotWidth((prev) => Math.min(80, prev + 5))} className="px-2 py-1.5 text-sm text-slate-500 hover:text-slate-700 sm:px-2.5 sm:py-2" title="Zoom in">+</button>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowLegend((prev) => !prev)}
-                className={`rounded-lg border px-2 py-1.5 text-xs font-medium shadow-sm transition-colors sm:px-3 sm:py-2 sm:text-sm ${
-                  showLegend
-                    ? 'border-brand-200 bg-brand-50 text-brand-800'
-                    : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
-                }`}
-              >
-                Legend
-              </button>
-            </div>
-          </div>
-        </ViewToolbar>
-      )}
-      {showLegend && (
-        <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm shadow-slate-900/5">
-          {[
-            { label: 'Pending', className: 'border-[#BFDBFE] bg-[#EFF6FF] text-[#1E40AF]', dot: 'bg-[#3B82F6]' },
-            { label: 'Booked', className: 'border-[#BFDBFE] bg-[#EFF6FF] text-[#1E40AF]', dot: 'bg-[#3B82F6]' },
-            { label: 'Confirmed', className: 'border-[#99F6E4] bg-[#F0FDFA] text-[#134E4A]', dot: 'bg-[#0D9488]' },
-            { label: 'Arrived', className: 'border-[#FDE68A] bg-[#FFFBEB] text-[#92400E]', dot: 'bg-[#F59E0B]' },
-            { label: 'Seated', className: 'border-[#DDD6FE] bg-[#F5F3FF] text-[#5B21B6]', dot: 'bg-[#8B5CF6]' },
-            { label: 'Completed', className: 'border-[#FCA5A5] bg-[#FEE2E2] text-[#991B1B]', dot: 'bg-[#EF4444]' },
-            { label: 'No-Show', className: 'border-[#FECACA] bg-[#FEF2F2] text-[#991B1B]', dot: 'bg-[#EF4444]' },
-            { label: 'Cancelled', className: 'border-[#E5E7EB] bg-[#F3F4F6] text-[#6B7280]', dot: 'bg-[#6B7280]' },
-            { label: 'Blocked', className: 'border-slate-200 bg-slate-50 text-slate-700', dot: 'bg-slate-400' },
-          ].map((item) => (
-            <span
-              key={item.label}
-              className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-medium ${item.className}`}
-            >
-              <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${item.dot}`} />
-              {item.label}
-            </span>
-          ))}
-        </div>
-      )}
-
-      <SectionCard elevated className="relative w-full">
-        <SectionCard.Body className="p-0">
+              ) : null}
+              {(serviceId || statusFilter || zoneFilter) ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setServiceId(null);
+                    setStatusFilter(null);
+                    setZoneFilter(null);
+                  }}
+                  className="h-8 shrink-0 whitespace-nowrap rounded-lg px-2 text-[11px] font-semibold text-brand-700 hover:bg-brand-50"
+                >
+                  Clear
+                </button>
+              ) : null}
+            </>
+          )}
+        />
+      ) : null}
+      <SectionCard elevated className="relative flex min-h-[calc(100dvh-12rem)] w-full flex-1 flex-col sm:min-h-[calc(100dvh-10.5rem)] lg:min-h-[calc(100dvh-8.5rem)]">
+        <SectionCard.Body className="min-h-0 flex-1 p-0">
         {loading ? (
           <div className="min-h-[40vh] p-4 sm:p-5">
             <DashboardGridSkeleton />
@@ -1499,13 +1601,11 @@ export function TableGridView({
             serviceEndTime={timelineEndTime}
             slotIntervalMinutes={gridData.slot_interval_minutes}
             statusFilter={statusFilter}
-            showCancelled={showCancelled}
-            showNoShow={showNoShow}
             highlightedBookingIds={highlightedBookingIds}
             validDropTargets={validDropTargets}
             validDropCombos={validDropCombos}
             currentDate={date}
-            slotWidth={slotWidth}
+            slotWidth={timelineSlotWidthPx}
             onReassign={handleReassign}
             onTimeChange={handleTimeChange}
             onAssign={handleAssign}
@@ -1514,10 +1614,10 @@ export function TableGridView({
             onRefresh={fetchGrid}
             onDragValidation={handleDragValidation}
             onError={(msg) => addToast(msg, 'error')}
-            onBookingClick={setSelectedBookingId}
-            onEditBooking={setSelectedBookingId}
-            onSendMessage={setSelectedBookingId}
-            onCellClick={(tableId, time) => {
+            onBookingClick={openBookingPopover}
+            onEditBooking={openBookingDrawer}
+            onSendMessage={openBookingDrawer}
+            onCellClick={(tableId, time, anchor) => {
               if (moveBookingId) {
                 const currentAssignments = gridData.cells.filter((c) => c.booking_id === moveBookingId).map((c) => c.table_id);
                 const oldTableIds = Array.from(new Set(currentAssignments));
@@ -1533,7 +1633,7 @@ export function TableGridView({
                 setMoveBookingId(null);
                 return;
               }
-              setNewBookingCell({ tableId, time });
+              setCellContext({ tableId, time, x: anchor.x, y: anchor.y });
             }}
             onBlockClick={(blockId) => setActiveBlockId(blockId)}
             onCellContextMenu={(tableId, time, x, y) => setCellContext({ tableId, time, x, y })}
@@ -1580,10 +1680,15 @@ export function TableGridView({
           venueId={venueId}
           venueCurrency={currency}
           initialSnapshot={selectedBookingSnapshot}
-          onClose={() => setSelectedBookingId(null)}
+          onClose={() => {
+            setSelectedBookingId(null);
+            setSelectedBookingAnchor(null);
+          }}
           onUpdated={() => {
             fetchGrid({ silent: true });
           }}
+          presentation={selectedBookingAnchor ? 'popover' : 'drawer'}
+          anchor={selectedBookingAnchor}
         />
       )}
       {cellContext && (
@@ -1591,7 +1696,10 @@ export function TableGridView({
           <div className="fixed inset-0 z-40" onClick={() => setCellContext(null)} />
           <div
             className="fixed z-50 w-56 rounded-2xl border border-slate-200/80 bg-white p-2 shadow-xl shadow-slate-900/15 ring-1 ring-slate-100"
-            style={{ left: cellContext.x, top: cellContext.y }}
+            style={{
+              left: `min(max(0.5rem, ${cellContext.x}px), calc(100vw - 14.5rem))`,
+              top: `min(max(0.5rem, ${cellContext.y}px), calc(100dvh - 10rem))`,
+            }}
           >
             <p className="px-2 py-1 text-[11px] font-semibold text-slate-800">Slot actions</p>
             <p className="px-2 pb-1 text-[10px] text-slate-500">{cellContext.time}</p>

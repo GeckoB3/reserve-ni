@@ -39,6 +39,7 @@ export interface TableRenderData {
   height: number | null;
   rotation: number | null;
   polygon_points?: { x: number; y: number }[] | null;
+  is_temporary?: boolean;
 }
 
 export interface BookingInfo {
@@ -65,6 +66,10 @@ export interface TableShapeProps {
   showSeats?: boolean;
   /** Whole-table opacity (e.g. drag ghost on live floor). */
   groupOpacity?: number;
+  /** Live floor: keep the table name visible even when the primary label is the booking guest. */
+  showTableNameBadge?: boolean;
+  /** Live floor: keep table name as the primary in-table label; booking guest becomes secondary. */
+  alwaysShowTableName?: boolean;
   /**
    * Parent canvas zoom (0–1 = layout zoomed out). Used to scale up labels/seats
    * on screen when the layout is zoomed out so text stays readable, while the
@@ -231,6 +236,8 @@ export default function TableShape({
   compactLabels = false,
   showSeats = true,
   groupOpacity = 1,
+  showTableNameBadge = false,
+  alwaysShowTableName = false,
   layoutScale,
   overrideX,
   overrideY,
@@ -321,12 +328,15 @@ export default function TableShape({
     table.min_covers === table.max_covers
       ? `${table.max_covers}`
       : `${table.min_covers}-${table.max_covers}`;
-  const topLabel = isOccupied
-    ? booking!.guest_name.slice(0, 12)
-    : table.name;
-  const bottomLabel = isOccupied
-    ? `${booking!.party_size} pax`
-    : capacityText;
+  const topLabel = alwaysShowTableName || !isOccupied
+    ? table.name
+    : booking!.guest_name.slice(0, 12);
+  const bottomLabel = alwaysShowTableName
+    ? (isOccupied ? booking!.guest_name.slice(0, 12) : '')
+    : isOccupied
+      ? `${booking!.party_size} pax`
+      : capacityText;
+  const hasBottomLabel = bottomLabel.trim().length > 0;
 
   const HANDLE = 6;
   /** Screen-space targets: grow when zoomed out so corners stay easy to grab (desktop + touch). */
@@ -390,8 +400,8 @@ export default function TableShape({
 
     const measureBlock = (nameFs: number, capFs: number, g: number) => {
       const nh = nameFs + 1;
-      const ch = capFs + 1;
-      return { blockH: nh + g + ch, nameBox: nh, capBox: ch };
+      const ch = hasBottomLabel ? capFs + 1 : 0;
+      return { blockH: nh + (hasBottomLabel ? g + ch : 0), nameBox: nh, capBox: ch };
     };
 
     const { blockH, nameBox, capBox } = measureBlock(fn, fc, gap);
@@ -431,7 +441,7 @@ export default function TableShape({
     /* Keep polygon labels centered in the largest contiguous interior band. */
     const startY = polygonBand ? polygonBand.centerY - blockH / 2 : -blockH / 2;
     nameY = startY;
-    capY = nameY + nameLineH + gap;
+    capY = hasBottomLabel ? nameY + nameLineH + gap : nameY + nameLineH;
     labelBlockCenterY = nameY + blockH / 2;
 
     nameFill = '#000000';
@@ -464,8 +474,8 @@ export default function TableShape({
 
     const measureBlock = (nameFs: number, capFs: number, g: number) => {
       const nh = compactLineBox(nameFs, true);
-      const ch = compactLineBox(capFs, false);
-      return { blockH: nh + g + ch, nameBox: nh, capBox: ch };
+      const ch = hasBottomLabel ? compactLineBox(capFs, false) : 0;
+      return { blockH: nh + (hasBottomLabel ? g + ch : 0), nameBox: nh, capBox: ch };
     };
 
     const { blockH, nameBox, capBox } = measureBlock(fn, fc, gap);
@@ -515,7 +525,7 @@ export default function TableShape({
           return clamp(rawStart, innerTop, Math.max(innerTop, innerBottom - blockH));
         })();
     nameY = blockStart;
-    capY = blockStart + nameLineH + gap;
+    capY = hasBottomLabel ? blockStart + nameLineH + gap : blockStart + nameLineH;
     labelBlockCenterY = blockStart + blockH / 2;
 
     nameFill = isOccupied ? '#1e293b' : '#334155';
@@ -715,6 +725,41 @@ export default function TableShape({
       </Group>
       )}
 
+      {showTableNameBadge && (
+        <Group y={topEdge - 22} rotation={labelScreenRotationDeg}>
+          <Rect
+            x={-Math.max(w * 0.56, 58)}
+            y={0}
+            width={Math.max(w * 1.12, 116)}
+            height={18}
+            cornerRadius={9}
+            fill={table.is_temporary ? '#fff7ed' : '#ffffff'}
+            stroke={table.is_temporary ? '#fb923c' : '#cbd5e1'}
+            strokeWidth={1}
+            shadowColor="rgba(15,23,42,0.12)"
+            shadowBlur={3}
+            shadowOffsetY={1}
+            listening={false}
+          />
+          <Text
+            x={-Math.max(w * 0.56, 58) + 7}
+            y={2}
+            width={Math.max(w * 1.12, 116) - 14}
+            height={14}
+            text={table.is_temporary ? `Temporary: ${table.name}` : table.name}
+            fontSize={10}
+            fontFamily="Inter, system-ui, sans-serif"
+            fontStyle="bold"
+            fill={table.is_temporary ? '#9a3412' : '#334155'}
+            align="center"
+            verticalAlign="middle"
+            wrap="none"
+            ellipsis
+            listening={false}
+          />
+        </Group>
+      )}
+
       {/* ---- Labels: keep the whole two-line block upright without letting the lines drift independently ---- */}
       <Group
         {...(isCircular || isOval
@@ -770,24 +815,26 @@ export default function TableShape({
             y={nameY - labelBlockCenterY}
             listening={false}
           />
-          <Text
-            text={displayCap}
-            fontSize={fontCap}
-            fontFamily="Inter, system-ui, sans-serif"
-            fontStyle="normal"
-            fill={capFill}
-            stroke={compactTextStroke}
-            strokeWidth={compactTextStrokeW}
-            align="center"
-            verticalAlign="middle"
-            wrap="none"
-            ellipsis={true}
-            width={innerW}
-            height={capLineH}
-            x={textX}
-            y={capY - labelBlockCenterY}
-            listening={false}
-          />
+          {hasBottomLabel ? (
+            <Text
+              text={displayCap}
+              fontSize={fontCap}
+              fontFamily="Inter, system-ui, sans-serif"
+              fontStyle="normal"
+              fill={capFill}
+              stroke={compactTextStroke}
+              strokeWidth={compactTextStrokeW}
+              align="center"
+              verticalAlign="middle"
+              wrap="none"
+              ellipsis={true}
+              width={innerW}
+              height={capLineH}
+              x={textX}
+              y={capY - labelBlockCenterY}
+              listening={false}
+            />
+          ) : null}
         </Group>
       </Group>
 

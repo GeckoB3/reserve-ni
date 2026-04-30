@@ -135,7 +135,8 @@ export async function POST(request: NextRequest) {
       special_requests,
       require_deposit,
     } = parsed.data;
-    const staffWalkIn = parsed.data.source === 'walk-in';
+    const bookingSource = (parsed.data.source ?? 'phone') as 'phone' | 'walk-in';
+    const staffWalkIn = bookingSource === 'walk-in';
     const venueId = staff.venue_id;
     const admin = getSupabaseAdminClient();
 
@@ -250,10 +251,10 @@ export async function POST(request: NextRequest) {
 
       let depositAmountPence = 0;
       let requiresDeposit = false;
-      if (eventPayReq === 'full_payment' && ticketTotal > 0) {
+      if (!staffWalkIn && eventPayReq === 'full_payment' && ticketTotal > 0) {
         requiresDeposit = true;
         depositAmountPence = ticketTotal;
-      } else if (eventPayReq === 'deposit' && eventDepPerPerson > 0) {
+      } else if (!staffWalkIn && eventPayReq === 'deposit' && eventDepPerPerson > 0) {
         requiresDeposit = true;
         depositAmountPence = eventDepPerPerson * party_size;
       }
@@ -291,8 +292,6 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      const eventSource = parsed.data.source ?? 'phone';
-
       const eventInsert = {
         venue_id: venueId,
         guest_id: guest.id,
@@ -302,7 +301,7 @@ export async function POST(request: NextRequest) {
         /** Must be set explicitly — column defaults to `table_reservation`, which fails the area_required CHECK for non-table venues. */
         booking_model: 'event_ticket' as const,
         status: requiresDeposit ? ('Pending' as const) : ('Booked' as const),
-        source: eventSource,
+        source: bookingSource,
         created_by_staff_id: staff.id,
         guest_email: guest.email || null,
         deposit_amount_pence: requiresDeposit ? depositAmountPence : null,
@@ -419,10 +418,10 @@ export async function POST(request: NextRequest) {
       const classPayReq = cls.payment_requirement;
       const classPriceP = cls.price_pence ?? 0;
       const classDepPerPerson = cls.deposit_amount_pence ?? 0;
-      if (classPayReq === 'full_payment' && classPriceP > 0) {
+      if (!staffWalkIn && classPayReq === 'full_payment' && classPriceP > 0) {
         requiresDeposit = true;
         depositAmountPence = classPriceP * party_size;
-      } else if (classPayReq === 'deposit' && classDepPerPerson > 0) {
+      } else if (!staffWalkIn && classPayReq === 'deposit' && classDepPerPerson > 0) {
         requiresDeposit = true;
         depositAmountPence = classDepPerPerson * party_size;
       }
@@ -465,8 +464,6 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      const classSource = parsed.data.source ?? 'phone';
-
       const classInsert = {
         venue_id: venueId,
         guest_id: guest.id,
@@ -476,7 +473,7 @@ export async function POST(request: NextRequest) {
         /** Must be set explicitly — column defaults to `table_reservation`, which fails the area_required CHECK for non-table venues. */
         booking_model: 'class_session' as const,
         status: requiresDeposit ? ('Pending' as const) : ('Booked' as const),
-        source: classSource,
+        source: bookingSource,
         created_by_staff_id: staff.id,
         guest_email: guest.email || null,
         deposit_amount_pence: requiresDeposit ? depositAmountPence : null,
@@ -612,10 +609,10 @@ export async function POST(request: NextRequest) {
 
       let depositAmountPenceRes: number | null = null;
       let requiresDepositRes = false;
-      if (payReqRes === 'full_payment' && totalPricePenceRes > 0) {
+      if (!staffWalkIn && payReqRes === 'full_payment' && totalPricePenceRes > 0) {
         requiresDepositRes = true;
         depositAmountPenceRes = totalPricePenceRes;
-      } else if (payReqRes === 'deposit' && depConfiguredRes > 0) {
+      } else if (!staffWalkIn && payReqRes === 'deposit' && depConfiguredRes > 0) {
         requiresDepositRes = true;
         depositAmountPenceRes = depConfiguredRes;
       }
@@ -664,7 +661,6 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      const resourceSource = parsed.data.source ?? 'phone';
       const bookingEndForDb = booking_end_time.length === 5 ? booking_end_time + ':00' : booking_end_time;
 
       const resourceInsert = {
@@ -677,7 +673,7 @@ export async function POST(request: NextRequest) {
         /** Must be set explicitly — column defaults to `table_reservation`, which fails the area_required CHECK for non-table venues. */
         booking_model: 'resource_booking' as const,
         status: requiresDepositRes ? ('Pending' as const) : ('Booked' as const),
-        source: resourceSource,
+        source: bookingSource,
         created_by_staff_id: staff.id,
         guest_email: guest.email || null,
         deposit_amount_pence: requiresDepositRes ? depositAmountPenceRes : null,
@@ -874,8 +870,9 @@ export async function POST(request: NextRequest) {
       );
 
       const online = svc ? resolveAppointmentServiceOnlineCharge(svc) : null;
-      const staffWantsDeposit = require_deposit ?? false;
+      const staffWantsDeposit = !staffWalkIn && (require_deposit ?? false);
       const requiresDeposit =
+        !staffWalkIn &&
         online != null &&
         online.amountPence > 0 &&
         (online.chargeLabel === 'full_payment' || (online.chargeLabel === 'deposit' && staffWantsDeposit));
@@ -900,7 +897,7 @@ export async function POST(request: NextRequest) {
           ? 'unified_scheduling'
           : 'practitioner_appointment',
         status: requiresDeposit ? 'Pending' : 'Booked',
-        source: (parsed.data.source ?? 'phone') as 'phone' | 'walk-in',
+        source: bookingSource,
         created_by_staff_id: staff.id,
         guest_email: guest.email || null,
         deposit_amount_pence: depositAmountPence,
@@ -1115,7 +1112,7 @@ export async function POST(request: NextRequest) {
           ? legacyGbp
           : null;
 
-    const requiresDeposit = Boolean(require_deposit);
+    const requiresDeposit = !staffWalkIn && Boolean(require_deposit);
 
     if (requiresDeposit && (amountPerPersonGbp == null || amountPerPersonGbp <= 0)) {
       return NextResponse.json(
@@ -1146,7 +1143,7 @@ export async function POST(request: NextRequest) {
       booking_time: timeForDb,
       party_size,
       status: requiresDeposit ? 'Pending' : 'Booked',
-      source: 'phone',
+      source: bookingSource,
       created_by_staff_id: staff.id,
       guest_email: guest.email || null,
       deposit_amount_pence: depositAmountPence,

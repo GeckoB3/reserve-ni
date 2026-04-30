@@ -190,6 +190,7 @@ export function DashboardHomeClient({
   const hasCap = t.concurrent_cap != null;
   const cap = t.concurrent_cap;
   const forecastSpark = payload.forecast.map((f) => (isAppointment ? f.bookings : f.covers));
+  const hasServiceCapacityOutlook = payload.heatmap.some((h) => (h.by_service?.length ?? 0) > 0);
 
   return (
     <PageFrame>
@@ -390,7 +391,11 @@ export function DashboardHomeClient({
           {!isAppointment && (
             <div className="rounded-xl border border-slate-200 bg-white p-5">
               <h2 className="text-sm font-semibold text-slate-700">7-day capacity outlook</h2>
-              <p className="mb-4 mt-1 text-xs text-slate-400">How full each day gets at its busiest time.</p>
+              <p className="mb-4 mt-1 text-xs text-slate-400">
+                {hasServiceCapacityOutlook
+                  ? 'Peak load vs slot capacity for each dining service (busiest moment that day).'
+                  : 'How full each day gets at its busiest time.'}
+              </p>
               <HorizontalScrollHint />
               <div className="-mx-1 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch] sm:mx-0 sm:overflow-visible">
                 <div className="flex min-w-min gap-2 sm:min-w-0 sm:w-full">
@@ -400,33 +405,90 @@ export function DashboardHomeClient({
                     const hPct = n(h.fill_percent);
                     const isToday = idx === 0;
                     const hHasCap = h.concurrent_cap != null;
+                    const segments = h.by_service;
+                    const useServiceStack = Boolean(segments && segments.length > 0);
                     return (
                       <div
                         key={h.date}
-                        className="flex w-[4.5rem] shrink-0 flex-col items-center gap-1.5 sm:w-0 sm:min-w-0 sm:flex-1 sm:shrink"
+                        className={`flex shrink-0 flex-col items-center gap-1.5 sm:w-0 sm:min-w-0 sm:flex-1 sm:shrink ${
+                          useServiceStack ? 'w-[6rem] min-w-[5.25rem]' : 'w-[4.5rem]'
+                        }`}
                       >
                         <span className={`text-xs font-medium ${isToday ? 'text-brand-600' : 'text-slate-500'}`}>
                           {isToday ? 'Today' : h.day}
                         </span>
-                        <div
-                          className={`flex h-14 w-full items-center justify-center rounded-lg transition-colors ${getHeatColor(hPct)} ${isToday ? 'ring-2 ring-brand-300 ring-offset-1' : ''}`}
-                        >
-                          <span className={`text-xs font-bold ${hPct >= 40 ? 'text-white' : 'text-slate-600'}`}>
-                            {hHasCap ? `${hPct}%` : hTotal > 0 ? `${hTotal}` : '-'}
-                          </span>
-                        </div>
-                        <div className="text-center leading-tight">
-                          {hHasCap ? (
-                            <span className="block text-[10px] tabular-nums text-slate-500">
-                              {hPeak}/{h.concurrent_cap}
+                        {useServiceStack && segments ? (
+                          <div
+                            className={`flex w-full min-h-[5.75rem] flex-col gap-0.5 rounded-lg p-0.5 ${
+                              isToday ? 'ring-2 ring-brand-300 ring-offset-1' : ''
+                            }`}
+                          >
+                            {segments.map((s) => {
+                              const sPct = s.fill_percent;
+                              const heatInput = sPct != null ? sPct : s.daily_total_covers > 0 ? 22 : 0;
+                              const sPeak = n(s.peak_in_house_covers);
+                              const sTotal = n(s.daily_total_covers);
+                              const sHasCap = s.concurrent_cap != null;
+                              return (
+                                <div key={s.service_id} className="flex w-full flex-col gap-0.5">
+                                  <div
+                                    title={`${s.service_name}: ${sTotal} covers booked${
+                                      sHasCap ? ` · busiest moment ${sPeak}/${s.concurrent_cap}` : ''
+                                    }`}
+                                    className={`flex min-h-[1.85rem] flex-1 items-center justify-center rounded-md px-0.5 py-1 transition-colors ${getHeatColor(heatInput)}`}
+                                  >
+                                    <span className="truncate text-center text-[8px] font-semibold leading-tight text-slate-800 sm:text-[9px]">
+                                      {s.service_name}
+                                    </span>
+                                  </div>
+                                  <div className="text-center leading-tight">
+                                    {sHasCap && sPct != null ? (
+                                      <span className="block text-[10px] font-bold tabular-nums text-slate-700">
+                                        {sPct}%
+                                      </span>
+                                    ) : null}
+                                    {sHasCap ? (
+                                      <span className="block text-[10px] tabular-nums text-slate-500">
+                                        {sPeak}/{s.concurrent_cap}
+                                      </span>
+                                    ) : sTotal > 0 ? (
+                                      <span className="block text-[10px] tabular-nums text-slate-500">
+                                        {sPeak} at once
+                                      </span>
+                                    ) : (
+                                      <span className="block text-[10px] tabular-nums text-slate-400">—</span>
+                                    )}
+                                    <span className="block text-[10px] tabular-nums text-slate-400">
+                                      {sTotal} cover{sTotal !== 1 ? 's' : ''}
+                                    </span>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <div
+                            className={`flex h-14 w-full items-center justify-center rounded-lg transition-colors ${getHeatColor(hPct)} ${isToday ? 'ring-2 ring-brand-300 ring-offset-1' : ''}`}
+                          >
+                            <span className={`text-xs font-bold ${hPct >= 40 ? 'text-white' : 'text-slate-600'}`}>
+                              {hHasCap ? `${hPct}%` : hTotal > 0 ? `${hTotal}` : '-'}
                             </span>
-                          ) : hTotal > 0 ? (
-                            <span className="block text-[10px] tabular-nums text-slate-500">{hPeak} at once</span>
-                          ) : null}
-                          <span className="block text-[10px] tabular-nums text-slate-400">
-                            {hTotal} cover{hTotal !== 1 ? 's' : ''}
-                          </span>
-                        </div>
+                          </div>
+                        )}
+                        {!useServiceStack ? (
+                          <div className="text-center leading-tight">
+                            {hHasCap ? (
+                              <span className="block text-[10px] tabular-nums text-slate-500">
+                                {hPeak}/{h.concurrent_cap}
+                              </span>
+                            ) : hTotal > 0 ? (
+                              <span className="block text-[10px] tabular-nums text-slate-500">{hPeak} at once</span>
+                            ) : null}
+                            <span className="block text-[10px] tabular-nums text-slate-400">
+                              {hTotal} cover{hTotal !== 1 ? 's' : ''}
+                            </span>
+                          </div>
+                        ) : null}
                       </div>
                     );
                   })}

@@ -204,6 +204,18 @@ export async function clearTableStatusesForBooking(
     .eq('booking_id', bookingId);
 }
 
+export async function deleteTemporaryTablesForBooking(db: SupabaseClient, bookingId: string): Promise<void> {
+  const { error } = await db
+    .from('venue_tables')
+    .delete()
+    .eq('temporary_booking_id', bookingId)
+    .eq('is_temporary', true);
+
+  if (error) {
+    throw new Error(`Failed to delete temporary tables: ${error.message}`);
+  }
+}
+
 export function validateBookingStatusTransition(
   fromStatus: string,
   toStatus: BookingStatus,
@@ -302,6 +314,7 @@ export async function applyBookingLifecycleStatusEffects(
     await clearTableStatusesForBooking(db, bookingId, actorId);
     // Remove assignment rows so dashboards and exports do not show stale table links.
     await replaceBookingAssignments(db, bookingId, [], actorId);
+    await deleteTemporaryTablesForBooking(db, bookingId);
   } else if (nextStatus === 'Seated' || nextStatus === 'Booked' || nextStatus === 'Pending') {
     // Table assignment is locked at booking time, not at attendance time —
     // sync on Booked but skip on Booked → Confirmed (the table is already

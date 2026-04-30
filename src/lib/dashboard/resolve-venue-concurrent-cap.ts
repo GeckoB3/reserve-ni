@@ -9,14 +9,25 @@ import {
   getDayOfWeek,
   resolveServiceForDate,
 } from '@/lib/availability';
-export function resolveServiceEngineConcurrentCapFromInput(
+
+/** Per dining service max covers in one slot for a date (null cap = closed or unknown). */
+export interface PerServiceConcurrentSlotCap {
+  serviceId: string;
+  serviceName: string;
+  cap: number | null;
+}
+
+/**
+ * Max slot capacity per active service for the service engine (one row per service, sorted like computeAvailability).
+ */
+export function perServiceConcurrentSlotCaps(
   engineInput: EngineInput,
   venueId: string,
   dateStr: string,
-): number | null {
+): PerServiceConcurrentSlotCap[] {
   const serviceResults = computeAvailability(engineInput);
   const dayOfWeek = getDayOfWeek(dateStr);
-  const caps: number[] = [];
+  const out: PerServiceConcurrentSlotCap[] = [];
 
   for (const result of serviceResults) {
     const service = result.service;
@@ -27,7 +38,10 @@ export function resolveServiceEngineConcurrentCapFromInput(
       dateStr,
       dayOfWeek,
     );
-    if (!effectiveService) continue;
+    if (!effectiveService) {
+      out.push({ serviceId: service.id, serviceName: service.name, cap: null });
+      continue;
+    }
 
     const effectiveMax = computeEffectiveMinSlotCoverCap(
       engineInput,
@@ -40,9 +54,19 @@ export function resolveServiceEngineConcurrentCapFromInput(
     const defaultRule = rules.find((r) => r.day_of_week == null && !r.time_range_start);
     const rule = dayRule ?? defaultRule;
     const maxCovers = effectiveMax ?? rule?.max_covers_per_slot ?? null;
-    if (maxCovers != null) caps.push(maxCovers);
+    out.push({ serviceId: service.id, serviceName: service.name, cap: maxCovers });
   }
 
+  return out;
+}
+
+export function resolveServiceEngineConcurrentCapFromInput(
+  engineInput: EngineInput,
+  venueId: string,
+  dateStr: string,
+): number | null {
+  const rows = perServiceConcurrentSlotCaps(engineInput, venueId, dateStr);
+  const caps = rows.map((r) => r.cap).filter((c): c is number => c != null && c > 0);
   return caps.length > 0 ? Math.max(...caps) : null;
 }
 

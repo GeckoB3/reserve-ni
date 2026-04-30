@@ -1051,7 +1051,7 @@ export function AppointmentAvailabilitySettings({
             <div>
               {appointmentCalendars.length === 0 ? (
                 <div className="rounded-xl border border-slate-200 bg-white p-12 text-center">
-                  <p className="text-slate-500">Add team members first to configure their schedule.</p>
+                  <p className="text-slate-500">Add calendars first to set their schedule.</p>
                 </div>
               ) : (
                 <>

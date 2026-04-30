@@ -113,7 +113,7 @@ export function buildAppointmentsPlusCheckoutLineItems(mainQuantity: number): St
 }
 
 /**
- * Appointments Light Checkout: £6/mo + metered SMS at 8p.
+ * Appointments Light Checkout: £10/mo + metered SMS at 8p.
  * Quantity only applies to the main recurring price.
  */
 export function buildLightPlanCheckoutLineItems(mainQuantity: number): Stripe.Checkout.SessionCreateParams.LineItem[] {

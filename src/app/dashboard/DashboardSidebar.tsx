@@ -3,7 +3,6 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pill } from '@/components/ui/dashboard/Pill';
 import { createClient } from '@/lib/supabase/browser';
 
 import { mergeModelNavEntries } from '@/lib/booking/enabled-models';
@@ -14,7 +13,6 @@ import {
   shouldShowAppointmentAvailabilitySettings,
 } from '@/lib/booking/schedule-calendar-eligibility';
 import { isRestaurantTableProductTier } from '@/lib/tier-enforcement';
-import { planDisplayName } from '@/lib/pricing-constants';
 
 /**
  * Sidebar visibility matrix (maintainers: keep in sync with route guards and `lib/booking/schedule-calendar-eligibility.ts`).
@@ -180,47 +178,16 @@ export function DashboardSidebar({
     return () => window.removeEventListener('keydown', onKey);
   }, [mobileOpen]);
 
-  // Focus trap + initial focus on drawer open
   useEffect(() => {
     if (!mobileOpen) return;
-    const aside = asideRef.current;
-    if (!aside) return;
-    const nodes = aside.querySelectorAll<HTMLElement>(
-      'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])',
-    );
-    const list = [...nodes];
-    if (list.length === 0) return;
-    const first = list[0];
-    const last = list[list.length - 1];
-    const t = window.setTimeout(() => first.focus(), 0);
 
-    const onTab = (e: KeyboardEvent) => {
-      if (e.key !== 'Tab' || list.length === 0) return;
-      if (e.shiftKey) {
-        if (document.activeElement === first) {
-          e.preventDefault();
-          last.focus();
-        }
-      } else if (document.activeElement === last) {
-        e.preventDefault();
-        first.focus();
-      }
+    const onPointerDown = (event: PointerEvent) => {
+      if (asideRef.current?.contains(event.target as Node)) return;
+      setMobileOpen(false);
     };
-    aside.addEventListener('keydown', onTab);
-    return () => {
-      window.clearTimeout(t);
-      aside.removeEventListener('keydown', onTab);
-    };
-  }, [mobileOpen]);
 
-  // Lock body scroll behind the mobile drawer; `lg` hides the drawer so only applies on small viewports.
-  useEffect(() => {
-    if (!mobileOpen) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.body.style.overflow = prev;
-    };
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
   }, [mobileOpen]);
 
   /** Restaurant / Founding / legacy Business — matches table-management and SMS tier checks. */
@@ -345,7 +312,6 @@ export function DashboardSidebar({
     return pathname.startsWith(href);
   };
 
-  const tierLabel = planDisplayName(pricingTier);
   const venueInitial = (venueName ?? staffName ?? email).charAt(0).toUpperCase();
 
   return (
@@ -354,40 +320,30 @@ export function DashboardSidebar({
       <div
         className="fixed top-0 right-0 left-0 z-40 border-b border-slate-200/80 bg-white/95 pt-[env(safe-area-inset-top,0px)] backdrop-blur-md lg:hidden"
       >
-        <div className="flex h-14 items-center justify-between gap-3 px-3">
-          <div className="flex min-w-0 items-center gap-3">
+        <div className="flex h-14 items-center px-3">
+          <div className="flex min-w-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setMobileOpen(!mobileOpen)}
+              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100"
+              aria-label={mobileOpen ? 'Close navigation' : 'Open navigation'}
+              aria-expanded={mobileOpen}
+              aria-controls="dashboard-sidebar"
+            >
+              {mobileOpen ? <XIcon /> : <MenuIcon />}
+            </button>
             <img src="/Logo.png" alt="Reserve NI" className="h-7 w-auto shrink-0" />
             {venueName ? (
               <span
-                className="min-w-0 truncate text-sm font-semibold text-slate-800"
+                className="min-w-0 truncate pl-1 text-sm font-semibold text-slate-800"
                 title={venueName}
               >
                 {venueName}
               </span>
             ) : null}
           </div>
-          <button
-            type="button"
-            onClick={() => setMobileOpen(!mobileOpen)}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100"
-            aria-label={mobileOpen ? 'Close navigation' : 'Open navigation'}
-            aria-expanded={mobileOpen}
-            aria-controls="dashboard-sidebar"
-          >
-            {mobileOpen ? <XIcon /> : <MenuIcon />}
-          </button>
         </div>
       </div>
-
-      {/* Mobile overlay: button for a11y + keyboard */}
-      {mobileOpen ? (
-        <button
-          type="button"
-          className="fixed inset-0 z-30 bg-slate-900/30 backdrop-blur-[2px] lg:hidden"
-          aria-label="Close menu"
-          onClick={() => setMobileOpen(false)}
-        />
-      ) : null}
 
       {/* Sidebar */}
       <aside
@@ -395,27 +351,14 @@ export function DashboardSidebar({
         ref={asideRef}
         aria-label="Primary"
         className={`
-        fixed top-0 left-0 z-40 flex h-[100dvh] w-64 flex-col border-r border-slate-200/80 bg-slate-50/95 shadow-sm backdrop-blur-md
+        fixed left-2 top-[calc(4rem+env(safe-area-inset-top,0px))] z-40 flex h-[calc(100dvh-4.5rem-env(safe-area-inset-top,0px))] w-64 flex-col overflow-hidden rounded-2xl border border-slate-200/80 bg-slate-50/95 shadow-2xl shadow-slate-900/15 backdrop-blur-md
         transition-transform duration-200 ease-in-out
-        ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}
-        lg:h-full lg:min-h-0 lg:translate-x-0 lg:static lg:self-stretch lg:z-auto
+        ${mobileOpen ? 'translate-x-0' : '-translate-x-[calc(100%+1rem)]'}
+        lg:static lg:top-0 lg:h-full lg:min-h-0 lg:translate-x-0 lg:self-stretch lg:z-auto lg:rounded-none lg:border-y-0 lg:border-l-0 lg:shadow-sm
       `}
       >
-        {/* Brand */}
-        <div className="border-b border-slate-100/80 bg-white/80 px-5 py-4">
-          <img src="/Logo.png" alt="Reserve NI" className="h-8 w-auto" />
-        </div>
-
-        {/* Workspace label */}
-        <p
-          className="break-words px-4 pt-4 text-[10px] font-semibold uppercase tracking-widest text-slate-500"
-          title={venueName?.trim() || undefined}
-        >
-          {venueName?.trim() || 'Workspace'}
-        </p>
-
         {/* Nav links */}
-        <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-2 pb-4" aria-label="Dashboard">
+        <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-3 pb-4" aria-label="Dashboard">
           {navItems.map((item) => {
             if (item.href === '/dashboard/bookings' && !showTableManagementNav) {
               if (isRestaurantTablePrimary) {
@@ -530,24 +473,6 @@ export function DashboardSidebar({
           )}
         </nav>
 
-        {/* Help + Support */}
-        <div className="space-y-1 px-3 pb-1">
-          <NavLinkItem
-            href="/help"
-            label="Help"
-            icon={BookOpenIcon}
-            active={pathname.startsWith('/help')}
-            onNavigate={closeMobile}
-          />
-          <NavLinkItem
-            href="/dashboard/support"
-            label="Support"
-            icon={SupportIcon}
-            active={pathname.startsWith('/dashboard/support')}
-            onNavigate={closeMobile}
-          />
-        </div>
-
         {/* Footer */}
         <div className="space-y-3 border-t border-slate-100/80 bg-white/60 px-3 py-4 pb-[max(1rem,env(safe-area-inset-bottom,0px))]">
           <div className="rounded-xl border border-slate-100 bg-white p-3 shadow-sm">
@@ -570,12 +495,14 @@ export function DashboardSidebar({
                 </p>
               </div>
             </div>
-            <div className="mt-2 flex flex-wrap items-center gap-1.5">
-              <Pill variant="brand" size="sm">
-                {tierLabel}
-              </Pill>
-            </div>
           </div>
+          <NavLinkItem
+            href="/dashboard/support"
+            label="Support"
+            icon={SupportIcon}
+            active={pathname.startsWith('/dashboard/support')}
+            onNavigate={closeMobile}
+          />
           <button
             type="button"
             onClick={handleSignOut}
@@ -703,14 +630,3 @@ function SupportIcon({ className }: { className?: string }) {
   );
 }
 
-function BookOpenIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25"
-      />
-    </svg>
-  );
-}

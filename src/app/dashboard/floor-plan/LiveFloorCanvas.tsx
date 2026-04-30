@@ -1,7 +1,7 @@
 'use client';
 
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
-import { Stage, Layer, Line, Rect, Text, Circle } from 'react-konva';
+import { Stage, Layer, Line, Rect, Text, Circle, Group } from 'react-konva';
 import type { KonvaEventObject } from 'konva/lib/Node';
 import type Konva from 'konva';
 import {
@@ -56,6 +56,28 @@ function blockedToHiddenSet(blocked?: BlockedSides): Set<string> {
   return s.size > 0 ? s : EMPTY_HIDDEN_SET;
 }
 
+function clampScale(value: number): number {
+  return Math.max(0.3, Math.min(3, value));
+}
+
+function touchDistance(touches: TouchList): number {
+  if (touches.length < 2) return 0;
+  const a = touches[0]!;
+  const b = touches[1]!;
+  return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+}
+
+function touchCenter(touches: TouchList, container: HTMLDivElement): { x: number; y: number } | null {
+  if (touches.length < 2) return null;
+  const rect = container.getBoundingClientRect();
+  const a = touches[0]!;
+  const b = touches[1]!;
+  return {
+    x: (a.clientX + b.clientX) / 2 - rect.left,
+    y: (a.clientY + b.clientY) / 2 - rect.top,
+  };
+}
+
 interface TableWithState {
   id: string;
   name: string;
@@ -68,6 +90,7 @@ interface TableWithState {
   width: number | null;
   height: number | null;
   rotation: number | null;
+  is_temporary?: boolean;
   seat_angles?: (number | null)[] | null;
   polygon_points?: { x: number; y: number }[] | null;
   service_status: string;
@@ -133,23 +156,70 @@ export default function LiveFloorCanvas({
   const isDraggingRef = useRef(false);
   /** Tracks whether the Konva Stage is mid-pan (click vs. drag distinction for deselect). */
   const panningRef = useRef(false);
+  const [isCoarsePointer, setIsCoarsePointer] = useState(() =>
+    typeof window !== 'undefined' ? window.matchMedia('(pointer: coarse)').matches : false,
+  );
+  const [panMode, setPanMode] = useState(false);
+  const pinchGestureRef = useRef<{
+    distance: number;
+    center: { x: number; y: number };
+    scale: number;
+    stagePos: { x: number; y: number };
+  } | null>(null);
 
-  const handleStageClick = useCallback((e: KonvaEventObject<MouseEvent | TouchEvent>) => {
+  const positionedTables = useMemo(() => {
+    const temporaryTables = tables.filter((table) => table.is_temporary);
+    if (temporaryTables.length === 0) return tables;
+
+    const regularTables = tables.filter((table) => !table.is_temporary);
+    const tempRowY = layoutPixelH + Math.max(140, layoutPixelH * 0.08);
+    const gap = layoutPixelW / (temporaryTables.length + 1);
+
+    return [
+      ...regularTables,
+      ...temporaryTables.map((table, index) => ({
+        ...table,
+        position_x: ((gap * (index + 1)) / layoutPixelW) * 100,
+        position_y: (tempRowY / layoutPixelH) * 100,
+        rotation: 0,
+      })),
+    ];
+  }, [tables, layoutPixelW, layoutPixelH]);
+
+  const handleEmptyCanvasClick = useCallback(() => {
     if (isDraggingRef.current || panningRef.current) return;
-    if (e.target === e.target.getStage()) {
-      if (draggingBookingId) {
-        setDraggingBookingId(null);
-        setDragPointer(null);
-        isDraggingRef.current = false;
-        onDragCancel?.();
-      } else {
-        onSelect(null);
-      }
+    if (draggingBookingId) {
+      setDraggingBookingId(null);
+      setDragPointer(null);
+      isDraggingRef.current = false;
+      onDragCancel?.();
+    } else {
+      onSelect(null);
     }
   }, [onSelect, draggingBookingId, onDragCancel]);
 
+  const handleStageClick = useCallback((e: KonvaEventObject<MouseEvent | TouchEvent>) => {
+    if (e.target === e.target.getStage()) handleEmptyCanvasClick();
+  }, [handleEmptyCanvasClick]);
+
+  useEffect(() => {
+    const mq = window.matchMedia('(pointer: coarse)');
+    const onChange = () => {
+      setIsCoarsePointer(mq.matches);
+      if (!mq.matches) setPanMode(false);
+    };
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+
+  useEffect(() => {
+    if (!panMode) return;
+    const timeout = window.setTimeout(() => setPanMode(false), 15000);
+    return () => window.clearTimeout(timeout);
+  }, [panMode, stagePos, scale]);
+
   const adjacency = useMemo(() => {
-    const bounds = tables.map((t) => {
+    const bounds = positionedTables.map((t) => {
       const fallback = getTableDimensions(t.max_covers, t.shape);
       const { w, h } = tableDimensionsPercentToPixels(
         t.width ?? fallback.width,
@@ -167,7 +237,7 @@ export default function LiveFloorCanvas({
       };
     });
     return computeTableAdjacency(bounds);
-  }, [tables, layoutPixelW, layoutPixelH]);
+  }, [positionedTables, layoutPixelW, layoutPixelH]);
 
   const combinationLines = useCallback(() => {
     if (!combinedTableGroups) return [];
@@ -176,8 +246,8 @@ export default function LiveFloorCanvas({
     combinedTableGroups.forEach((tableIds, bookingId) => {
       if (tableIds.length < 2) return;
       for (let i = 0; i < tableIds.length - 1; i++) {
-        const t1 = tables.find((t) => t.id === tableIds[i]);
-        const t2 = tables.find((t) => t.id === tableIds[i + 1]);
+        const t1 = positionedTables.find((t) => t.id === tableIds[i]);
+        const t2 = positionedTables.find((t) => t.id === tableIds[i + 1]);
         if (!t1 || !t2) continue;
         const x1 = t1.position_x != null ? (t1.position_x / 100) * layoutPixelW : layoutPixelW / 2;
         const y1 = t1.position_y != null ? (t1.position_y / 100) * layoutPixelH : layoutPixelH / 2;
@@ -188,11 +258,11 @@ export default function LiveFloorCanvas({
     });
 
     return lines;
-  }, [combinedTableGroups, tables, layoutPixelW, layoutPixelH]);
+  }, [combinedTableGroups, positionedTables, layoutPixelW, layoutPixelH]);
 
   const layoutSignature = useMemo(
     () =>
-      tables
+      positionedTables
         .map((table) =>
           [
             table.id,
@@ -206,11 +276,11 @@ export default function LiveFloorCanvas({
         )
         .sort()
         .join('|'),
-    [tables],
+    [positionedTables],
   );
 
   const handleTableMouseDown = useCallback((tableId: string, _e: KonvaEventObject<MouseEvent | TouchEvent>) => {
-    const table = tables.find((t) => t.id === tableId);
+    const table = positionedTables.find((t) => t.id === tableId);
     if (!table?.booking) return;
 
     const stage = stageRef.current;
@@ -219,7 +289,7 @@ export default function LiveFloorCanvas({
     if (!pointer) return;
 
     dragStartPosRef.current = { x: pointer.x, y: pointer.y };
-  }, [tables]);
+  }, [positionedTables]);
 
   const handleTableMouseMove = useCallback((tableId: string) => {
     if (!dragStartPosRef.current) return;
@@ -234,7 +304,7 @@ export default function LiveFloorCanvas({
 
     if (dist > 8 && !isDraggingRef.current) {
       isDraggingRef.current = true;
-      const table = tables.find((t) => t.id === tableId);
+      const table = positionedTables.find((t) => t.id === tableId);
       if (table?.booking) {
         const bookingId = table.booking.id;
         const sourceTableIds = combinedTableGroups?.get(bookingId) ?? [tableId];
@@ -249,7 +319,7 @@ export default function LiveFloorCanvas({
         y: (pointer.y - stagePos.y) / scale,
       });
     }
-  }, [tables, combinedTableGroups, onDragStart, scale, stagePos]);
+  }, [positionedTables, combinedTableGroups, onDragStart, scale, stagePos]);
 
   const handleTableMouseUp = useCallback((tableId: string) => {
     if (isDraggingRef.current && draggingBookingId) {
@@ -305,10 +375,10 @@ export default function LiveFloorCanvas({
   const fitViewToStage = useCallback(() => {
     const vw = viewport.w;
     const vh = viewport.h;
-    if (vw < 1 || vh < 1 || tables.length === 0) return;
+    if (vw < 1 || vh < 1 || positionedTables.length === 0) return;
 
     const fit = computeStageFitToView(
-      tables,
+      positionedTables,
       layoutPixelW,
       layoutPixelH,
       vw,
@@ -322,7 +392,7 @@ export default function LiveFloorCanvas({
     baseScaleRef.current = nextScale;
     setScale(nextScale);
     setStagePos({ x: fit.x, y: fit.y });
-  }, [tables, layoutPixelW, layoutPixelH, viewport.w, viewport.h]);
+  }, [positionedTables, layoutPixelW, layoutPixelH, viewport.w, viewport.h]);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -346,16 +416,16 @@ export default function LiveFloorCanvas({
     initialFitDone.current = false;
   }, [layoutWidth, layoutHeight, layoutSignature]);
   useEffect(() => {
-    if (tables.length === 0 || !hasMeasuredViewport) return;
+    if (positionedTables.length === 0 || !hasMeasuredViewport) return;
     if (!initialFitDone.current) {
       fitViewToStage();
       initialFitDone.current = true;
     }
-  }, [tables.length, hasMeasuredViewport, fitViewToStage]);
+  }, [positionedTables.length, hasMeasuredViewport, fitViewToStage]);
 
   const zoomBy = useCallback(
     (delta: number) => {
-      const newScale = Math.max(0.3, Math.min(3, scale + delta));
+      const newScale = clampScale(scale + delta);
       const cx = stageWidth / 2;
       const cy = stageHeight / 2;
       const pointTo = {
@@ -371,11 +441,63 @@ export default function LiveFloorCanvas({
     [scale, stagePos, stageWidth, stageHeight],
   );
 
+  const handleStageTouchStart = useCallback((e: KonvaEventObject<TouchEvent>) => {
+    const native = e.evt;
+    if (native.touches.length < 2) return;
+    const container = containerRef.current;
+    if (!container) return;
+    const center = touchCenter(native.touches, container);
+    const distance = touchDistance(native.touches);
+    if (!center || distance <= 0) return;
+    if (native.cancelable) native.preventDefault();
+    pinchGestureRef.current = {
+      distance,
+      center,
+      scale,
+      stagePos,
+    };
+    panningRef.current = true;
+    isDraggingRef.current = false;
+    dragStartPosRef.current = null;
+  }, [scale, stagePos]);
+
+  const handleStageTouchMove = useCallback((e: KonvaEventObject<TouchEvent>) => {
+    const native = e.evt;
+    if (native.touches.length < 2 || !pinchGestureRef.current) return;
+    const container = containerRef.current;
+    if (!container) return;
+    const center = touchCenter(native.touches, container);
+    const distance = touchDistance(native.touches);
+    if (!center || distance <= 0) return;
+    if (native.cancelable) native.preventDefault();
+
+    const gesture = pinchGestureRef.current;
+    const nextScale = clampScale(gesture.scale * (distance / gesture.distance));
+    const pointTo = {
+      x: (gesture.center.x - gesture.stagePos.x) / gesture.scale,
+      y: (gesture.center.y - gesture.stagePos.y) / gesture.scale,
+    };
+    setScale(nextScale);
+    setStagePos({
+      x: center.x - pointTo.x * nextScale,
+      y: center.y - pointTo.y * nextScale,
+    });
+  }, []);
+
+  const handleStageTouchEnd = useCallback((e: KonvaEventObject<TouchEvent>) => {
+    if (e.evt.touches.length >= 2) return;
+    pinchGestureRef.current = null;
+    setTimeout(() => {
+      panningRef.current = false;
+    }, 0);
+  }, []);
+
   const isDragging = draggingBookingId != null || reassignMode != null;
   const activeBookingId = draggingBookingId ?? reassignMode?.bookingId ?? null;
+  const canvasPanEnabled = !isDragging && (!isCoarsePointer || panMode);
 
   const unifiedLabelFonts = useMemo(() => {
-    const inputs = tables.map((table) => {
+    const inputs = positionedTables.map((table) => {
       const fb = getTableDimensions(table.max_covers, table.shape);
       const { w: tw, h: th } = tableDimensionsPercentToPixels(
         table.width ?? fb.width,
@@ -384,10 +506,6 @@ export default function LiveFloorCanvas({
         layoutPixelH,
         table.shape,
       );
-      const capacityText =
-        table.min_covers === table.max_covers
-          ? `${table.max_covers}`
-          : `${table.min_covers}-${table.max_covers}`;
       const dragOrReassign = draggingBookingId != null || reassignMode != null;
       const isSource = activeBookingId
         ? (combinedTableGroups?.get(activeBookingId)?.includes(table.id) ??
@@ -395,8 +513,8 @@ export default function LiveFloorCanvas({
         : false;
       const booking = dragOrReassign && isSource ? null : table.booking;
       const isOccupied = booking != null;
-      const topLabel = isOccupied ? booking!.guest_name.slice(0, 12) : table.name;
-      const bottomLabel = isOccupied ? `${booking!.party_size} pax` : capacityText;
+      const topLabel = table.name;
+      const bottomLabel = isOccupied ? booking!.guest_name.slice(0, 12) : '';
       return {
         w: tw,
         h: th,
@@ -410,7 +528,7 @@ export default function LiveFloorCanvas({
     });
     return computeGlobalUnifiedLabelFonts(inputs);
   }, [
-    tables,
+    positionedTables,
     layoutPixelW,
     layoutPixelH,
     scale,
@@ -424,9 +542,26 @@ export default function LiveFloorCanvas({
     <div
       ref={containerRef}
       className="relative h-full w-full overflow-hidden bg-slate-50"
-      style={{ touchAction: 'none' }}
+      style={{ touchAction: isCoarsePointer && !panMode ? 'pan-y' : 'none' }}
     >
       <div className="absolute right-2 top-2 z-10 flex gap-1 rounded-2xl border border-slate-200 bg-white p-0.5 shadow-sm shadow-slate-900/5">
+        {isCoarsePointer ? (
+          <button
+            type="button"
+            onClick={() => setPanMode((value) => !value)}
+            className={`flex h-10 min-w-[3rem] items-center justify-center rounded-xl px-2 text-xs font-semibold sm:h-9 sm:min-w-[2.75rem] ${
+              panMode ? 'bg-brand-600 text-white hover:bg-brand-700' : 'text-slate-600 hover:bg-slate-50'
+            }`}
+            aria-pressed={panMode}
+            aria-label={panMode ? 'Turn off move mode' : 'Move floor plan'}
+            title={panMode ? 'Move mode on' : 'Move floor plan'}
+          >
+            <svg className="h-4 w-4 sm:mr-1" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M7 11.5V14a5 5 0 0 0 10 0v-3.5M7 11.5V9a1.5 1.5 0 0 1 3 0v2.5m-3 0a1.5 1.5 0 0 0-3 0V14a8 8 0 0 0 16 0v-2.5a1.5 1.5 0 0 0-3 0m-7 0V7a1.5 1.5 0 0 1 3 0v4.5m-3 0h3m0 0V8.5a1.5 1.5 0 0 1 3 0v3" />
+            </svg>
+            <span className="hidden sm:inline">{panMode ? 'Done' : 'Move'}</span>
+          </button>
+        ) : null}
         <button
           type="button"
           onClick={() => zoomBy(0.2)}
@@ -455,241 +590,299 @@ export default function LiveFloorCanvas({
         </div>
       )}
 
+      {isCoarsePointer && panMode && !isDragging ? (
+        <div className="absolute left-2 top-14 z-10 flex max-w-[calc(100%-1rem)] items-center gap-2 rounded-lg border border-brand-200 bg-brand-50 px-2 py-1 text-[11px] font-medium text-brand-900 shadow-sm">
+          <span>Move mode on. Drag to pan, pinch to zoom.</span>
+          <button
+            type="button"
+            onClick={() => setPanMode(false)}
+            className="shrink-0 rounded-md px-1.5 py-0.5 font-semibold text-brand-700 hover:bg-brand-100"
+          >
+            Done
+          </button>
+        </div>
+      ) : null}
+
       <Stage
         ref={(node) => { stageRef.current = node; }}
         width={stageWidth}
         height={stageHeight}
-        scaleX={scale}
-        scaleY={scale}
-        x={stagePos.x}
-        y={stagePos.y}
         onClick={handleStageClick}
         onTap={handleStageClick}
         onMouseUp={handleStageMouseUp}
         onMouseMove={handleStageMouseMove}
-        draggable={!isDragging}
-        onDragStart={(e) => {
-          if (e.target === e.target.getStage()) panningRef.current = true;
-        }}
-        onDragMove={(e) => {
-          if (e.target === e.target.getStage()) {
-            setStagePos({ x: e.target.x(), y: e.target.y() });
-          }
-        }}
-        onDragEnd={(e) => {
-          if (e.target === e.target.getStage()) {
-            setStagePos({ x: e.target.x(), y: e.target.y() });
-            setTimeout(() => {
-              panningRef.current = false;
-            }, 0);
-          }
-        }}
-        style={{ background: '#f8fafc', cursor: isDragging ? 'grabbing' : 'grab' }}
+        onTouchStart={handleStageTouchStart}
+        onTouchMove={handleStageTouchMove}
+        onTouchEnd={handleStageTouchEnd}
+        onTouchCancel={handleStageTouchEnd}
+        style={{ background: '#f8fafc', cursor: isDragging || canvasPanEnabled ? 'grab' : 'default' }}
       >
         <Layer>
-          {/* Combination lines only when a booking spans multiple tables (see combinationLines) */}
-          {combinationLines().map((line) => (
-            <Line
-              key={line.key}
-              points={line.points}
-              stroke="#8b5cf6"
-              strokeWidth={3}
-              dash={[8, 4]}
-              opacity={0.7}
+          <Group
+            x={stagePos.x}
+            y={stagePos.y}
+            scaleX={scale}
+            scaleY={scale}
+            draggable={canvasPanEnabled}
+            onDragStart={() => {
+              panningRef.current = true;
+            }}
+            onDragMove={(e) => {
+              setStagePos({ x: e.target.x(), y: e.target.y() });
+            }}
+            onDragEnd={(e) => {
+              setStagePos({ x: e.target.x(), y: e.target.y() });
+              setTimeout(() => {
+                panningRef.current = false;
+              }, 0);
+            }}
+          >
+            <Rect
+              x={0}
+              y={0}
+              width={layoutPixelW}
+              height={layoutPixelH}
+              fill="rgba(248,250,252,0.01)"
+              onClick={handleEmptyCanvasClick}
+              onTap={handleEmptyCanvasClick}
             />
-          ))}
 
-          {/* Tables */}
-          {tables.map((table) => {
-            const isSelected = table.id === selectedId;
-            const isSource = activeBookingId ? (combinedTableGroups?.get(activeBookingId)?.includes(table.id) ?? (table.booking?.id === activeBookingId)) : false;
-            const isValidTarget = isDragging && validDropTargets?.has(table.id) && !isSource;
-            const isInvalid = isDragging && !isSource && !validDropTargets?.has(table.id);
-            const comboLabel = validDropComboLabels?.get(table.id);
+            {/* Combination lines only when a booking spans multiple tables (see combinationLines) */}
+            {positionedTables.some((table) => table.is_temporary) ? (
+              <>
+                <Line
+                  points={[0, layoutPixelH + 48, layoutPixelW, layoutPixelH + 48]}
+                  stroke="#cbd5e1"
+                  strokeWidth={2}
+                  dash={[10, 8]}
+                  listening={false}
+                />
+                <Text
+                  x={0}
+                  y={layoutPixelH + 62}
+                  width={layoutPixelW}
+                  text="Temporary tables"
+                  align="center"
+                  fontSize={16}
+                  fontStyle="bold"
+                  fill="#9a3412"
+                  listening={false}
+                />
+              </>
+            ) : null}
 
-            let statusColor = STATUS_COLORS[table.service_status] ?? STAT_TILE_TEXT_EMERALD_700;
-            let opacity = 1;
+            {combinationLines().map((line) => (
+              <Line
+                key={line.key}
+                points={line.points}
+                stroke="#8b5cf6"
+                strokeWidth={3}
+                dash={[8, 4]}
+                opacity={0.7}
+              />
+            ))}
 
-            if (isDragging) {
-              if (isValidTarget) {
-                statusColor = VALID_TARGET_COLOR;
-              } else if (isSource) {
-                opacity = DRAG_GHOST_OPACITY;
-              } else if (isInvalid) {
-                opacity = 0.2;
+            {/* Tables */}
+            {positionedTables.map((table) => {
+              const isSelected = table.id === selectedId;
+              const isSource = activeBookingId ? (combinedTableGroups?.get(activeBookingId)?.includes(table.id) ?? (table.booking?.id === activeBookingId)) : false;
+              const isValidTarget = isDragging && validDropTargets?.has(table.id) && !isSource;
+              const isInvalid = isDragging && !isSource && !validDropTargets?.has(table.id);
+              const comboLabel = validDropComboLabels?.get(table.id);
+
+              let statusColor = STATUS_COLORS[table.service_status] ?? STAT_TILE_TEXT_EMERALD_700;
+              let opacity = 1;
+
+              if (isDragging) {
+                if (isValidTarget) {
+                  statusColor = VALID_TARGET_COLOR;
+                } else if (isSource) {
+                  opacity = DRAG_GHOST_OPACITY;
+                } else if (isInvalid) {
+                  opacity = 0.2;
+                }
               }
-            }
 
-            const blocked = adjacency.get(table.id);
-            const hidden = blockedToHiddenSet(blocked);
+              const blocked = adjacency.get(table.id);
+              const hidden = blockedToHiddenSet(blocked);
 
-            const fb = getTableDimensions(table.max_covers, table.shape);
-            const { w, h } = tableDimensionsPercentToPixels(
-              table.width ?? fb.width,
-              table.height ?? fb.height,
-              layoutPixelW,
-              layoutPixelH,
-              table.shape,
-            );
+              const fb = getTableDimensions(table.max_covers, table.shape);
+              const { w, h } = tableDimensionsPercentToPixels(
+                table.width ?? fb.width,
+                table.height ?? fb.height,
+                layoutPixelW,
+                layoutPixelH,
+                table.shape,
+              );
 
-            return (
-              <TableShape
-                key={table.id}
-                table={table}
-                hiddenSides={hidden}
-                isSelected={isSelected || (isValidTarget ?? false)}
-                isEditorMode={false}
-                statusColour={statusColor}
-                groupOpacity={opacity}
-                booking={isDragging && isSource ? null : table.booking}
-                canvasWidth={layoutPixelW}
-                canvasHeight={layoutPixelH}
-                layoutScale={scale}
-                unifiedLabelFonts={unifiedLabelFonts}
-                seatAngles={table.seat_angles}
-                onClick={() => {
-                  if (isDragging && isValidTarget) {
-                    if (draggingBookingId) {
-                      const sourceTableIds = combinedTableGroups?.get(draggingBookingId) ?? [];
-                      onDragEnd?.({
-                        bookingId: draggingBookingId,
-                        sourceTableIds,
-                        targetTableId: table.id,
-                      });
-                      setDraggingBookingId(null);
-                      setDragPointer(null);
-                      isDraggingRef.current = false;
-                      dragStartPosRef.current = null;
+              return (
+                <TableShape
+                  key={table.id}
+                  table={table}
+                  hiddenSides={hidden}
+                  isSelected={isSelected || (isValidTarget ?? false)}
+                  isEditorMode={false}
+                  statusColour={statusColor}
+                  groupOpacity={opacity}
+                  booking={isDragging && isSource ? null : table.booking}
+                  canvasWidth={layoutPixelW}
+                  canvasHeight={layoutPixelH}
+                  layoutScale={scale}
+                  unifiedLabelFonts={unifiedLabelFonts}
+                  seatAngles={table.seat_angles}
+                  alwaysShowTableName
+                  onClick={() => {
+                    if (isDragging && isValidTarget) {
+                      if (draggingBookingId) {
+                        const sourceTableIds = combinedTableGroups?.get(draggingBookingId) ?? [];
+                        onDragEnd?.({
+                          bookingId: draggingBookingId,
+                          sourceTableIds,
+                          targetTableId: table.id,
+                        });
+                        setDraggingBookingId(null);
+                        setDragPointer(null);
+                        isDraggingRef.current = false;
+                        dragStartPosRef.current = null;
+                      }
+                      return;
                     }
-                    return;
-                  }
-                  if (!isDraggingRef.current) onSelect(table.id);
-                }}
-                onTap={() => {
-                  if (isDragging && isValidTarget) {
-                    if (draggingBookingId) {
-                      const sourceTableIds = combinedTableGroups?.get(draggingBookingId) ?? [];
-                      onDragEnd?.({
-                        bookingId: draggingBookingId,
-                        sourceTableIds,
-                        targetTableId: table.id,
-                      });
-                      setDraggingBookingId(null);
-                      setDragPointer(null);
-                      isDraggingRef.current = false;
-                      dragStartPosRef.current = null;
+                    if (!isDraggingRef.current) onSelect(table.id);
+                  }}
+                  onTap={() => {
+                    if (isDragging && isValidTarget) {
+                      if (draggingBookingId) {
+                        const sourceTableIds = combinedTableGroups?.get(draggingBookingId) ?? [];
+                        onDragEnd?.({
+                          bookingId: draggingBookingId,
+                          sourceTableIds,
+                          targetTableId: table.id,
+                        });
+                        setDraggingBookingId(null);
+                        setDragPointer(null);
+                        isDraggingRef.current = false;
+                        dragStartPosRef.current = null;
+                      }
+                      return;
                     }
-                    return;
-                  }
-                  onSelect(table.id);
-                }}
-              >
-                {/* Valid target ring */}
-                {isValidTarget && (
-                  <>
-                    {table.shape === 'circle' ? (
-                      <Circle
-                        x={0}
-                        y={0}
-                        radius={Math.max(w, h) / 2 + 6}
-                        stroke={VALID_TARGET_COLOR}
-                        strokeWidth={3}
-                        dash={[6, 3]}
-                        opacity={0.8}
-                        listening={false}
-                      />
-                    ) : (
-                      <Rect
-                        x={-w / 2 - 6}
-                        y={-h / 2 - 6}
-                        width={w + 12}
-                        height={h + 12}
-                        cornerRadius={6}
-                        stroke={VALID_TARGET_COLOR}
-                        strokeWidth={3}
-                        dash={[6, 3]}
-                        opacity={0.8}
-                        listening={false}
-                      />
-                    )}
-                    {comboLabel && (
-                      <Text
-                        x={-72}
-                        y={h / 2 + 10}
-                        width={144}
-                        align="center"
-                        verticalAlign="middle"
-                        text={comboLabel}
-                        fontSize={12}
-                        fill="#16a34a"
-                        fontStyle="bold"
-                        listening={false}
-                      />
-                    )}
-                  </>
-                )}
+                    onSelect(table.id);
+                  }}
+                >
+                  {/* Valid target ring */}
+                  {isValidTarget && (
+                    <>
+                      {table.shape === 'circle' ? (
+                        <Circle
+                          x={0}
+                          y={0}
+                          radius={Math.max(w, h) / 2 + 6}
+                          stroke={VALID_TARGET_COLOR}
+                          strokeWidth={3}
+                          dash={[6, 3]}
+                          opacity={0.8}
+                          listening={false}
+                        />
+                      ) : (
+                        <Rect
+                          x={-w / 2 - 6}
+                          y={-h / 2 - 6}
+                          width={w + 12}
+                          height={h + 12}
+                          cornerRadius={6}
+                          stroke={VALID_TARGET_COLOR}
+                          strokeWidth={3}
+                          dash={[6, 3]}
+                          opacity={0.8}
+                          listening={false}
+                        />
+                      )}
+                      {comboLabel && (
+                        <Text
+                          x={-72}
+                          y={h / 2 + 10}
+                          width={144}
+                          align="center"
+                          verticalAlign="middle"
+                          text={comboLabel}
+                          fontSize={12}
+                          fill="#16a34a"
+                          fontStyle="bold"
+                          listening={false}
+                        />
+                      )}
+                    </>
+                  )}
 
-                {/* Drag initiation overlay (only on occupied tables, hidden during drag) */}
-                {table.booking && !isDragging && (
-                  <Rect
-                    x={-w / 2}
-                    y={-h / 2}
-                    width={w}
-                    height={h}
-                    opacity={0}
-                    onMouseDown={(e) => { e.cancelBubble = true; handleTableMouseDown(table.id, e); }}
-                    onMouseMove={() => handleTableMouseMove(table.id)}
-                    onMouseUp={() => handleTableMouseUp(table.id)}
-                    onTouchStart={(e) => { e.cancelBubble = true; handleTableMouseDown(table.id, e); }}
-                    onTouchMove={() => handleTableMouseMove(table.id)}
-                    onTouchEnd={() => handleTableMouseUp(table.id)}
-                  />
-                )}
+                  {/* Drag initiation overlay (only on occupied tables, hidden during drag) */}
+                  {table.booking && !isDragging && (
+                    <Rect
+                      x={-w / 2}
+                      y={-h / 2}
+                      width={w}
+                      height={h}
+                      opacity={0}
+                      onMouseDown={(e) => { e.cancelBubble = true; handleTableMouseDown(table.id, e); }}
+                      onMouseMove={() => handleTableMouseMove(table.id)}
+                      onMouseUp={() => handleTableMouseUp(table.id)}
+                      onTouchStart={(e) => {
+                        if (isCoarsePointer) return;
+                        e.cancelBubble = true;
+                        handleTableMouseDown(table.id, e);
+                      }}
+                      onTouchMove={() => {
+                        if (!isCoarsePointer) handleTableMouseMove(table.id);
+                      }}
+                      onTouchEnd={() => {
+                        if (!isCoarsePointer) handleTableMouseUp(table.id);
+                      }}
+                    />
+                  )}
 
-                {/* Drop-capture overlay (all tables during drag, catches mouseUp on target) */}
-                {isDragging && !isSource && (
-                  <Rect
-                    x={-w / 2}
-                    y={-h / 2}
-                    width={w}
-                    height={h}
-                    opacity={0}
-                    onMouseUp={() => handleTableMouseUp(table.id)}
-                    onTouchEnd={() => handleTableMouseUp(table.id)}
-                  />
-                )}
-              </TableShape>
-            );
-          })}
+                  {/* Drop-capture overlay (all tables during drag, catches mouseUp on target) */}
+                  {isDragging && !isSource && (
+                    <Rect
+                      x={-w / 2}
+                      y={-h / 2}
+                      width={w}
+                      height={h}
+                      opacity={0}
+                      onMouseUp={() => handleTableMouseUp(table.id)}
+                      onTouchEnd={() => handleTableMouseUp(table.id)}
+                    />
+                  )}
+                </TableShape>
+              );
+            })}
 
-          {/* Drag cursor indicator */}
-          {dragPointer && draggingBookingId && (
-            <>
-              <Circle
-                x={dragPointer.x}
-                y={dragPointer.y}
-                radius={16}
-                fill="#3b82f6"
-                opacity={0.6}
-                listening={false}
-              />
-              <Text
-                x={dragPointer.x - 48}
-                y={dragPointer.y + 18}
-                width={96}
-                align="center"
-                verticalAlign="middle"
-                text={(() => {
-                  const b = tables.find((t) => t.booking?.id === draggingBookingId);
-                  return b?.booking?.guest_name ?? '';
-                })()}
-                fontSize={12}
-                fill="#1e40af"
-                fontStyle="bold"
-                listening={false}
-              />
-            </>
-          )}
+            {/* Drag cursor indicator */}
+            {dragPointer && draggingBookingId && (
+              <>
+                <Circle
+                  x={dragPointer.x}
+                  y={dragPointer.y}
+                  radius={16}
+                  fill="#3b82f6"
+                  opacity={0.6}
+                  listening={false}
+                />
+                <Text
+                  x={dragPointer.x - 48}
+                  y={dragPointer.y + 18}
+                  width={96}
+                  align="center"
+                  verticalAlign="middle"
+                  text={(() => {
+                    const b = positionedTables.find((t) => t.booking?.id === draggingBookingId);
+                    return b?.booking?.guest_name ?? '';
+                  })()}
+                  fontSize={12}
+                  fill="#1e40af"
+                  fontStyle="bold"
+                  listening={false}
+                />
+              </>
+            )}
+          </Group>
         </Layer>
       </Stage>
     </div>

@@ -69,6 +69,33 @@ function minutesToTime(m: number): string {
   return `${h.toString().padStart(2, '0')}:${min.toString().padStart(2, '0')}`;
 }
 
+function endMinutesAfterStart(start: string, end: string | null | undefined, fallbackMinutes = 90): number {
+  const startMin = timeToMinutes(start);
+  if (!end) return startMin + fallbackMinutes;
+  let endMin = timeToMinutes(end);
+  if (endMin <= startMin) {
+    endMin += 24 * 60;
+  }
+  return endMin;
+}
+
+function effectiveBookingEndMinutes(
+  status: string,
+  start: string,
+  end: string | null | undefined,
+  isToday: boolean,
+  nowMinutes: number,
+): number {
+  const scheduledEnd = endMinutesAfterStart(start, end);
+  if ((status === 'Seated' || status === 'Arrived') && isToday) {
+    const startMin = timeToMinutes(start);
+    if (nowMinutes > startMin) {
+      return Math.max(scheduledEnd, nowMinutes);
+    }
+  }
+  return scheduledEnd;
+}
+
 function formatLocalDateInput(d: Date): string {
   const year = d.getFullYear();
   const month = `${d.getMonth() + 1}`.padStart(2, '0');
@@ -129,8 +156,6 @@ interface Props {
   serviceEndTime?: string;
   slotIntervalMinutes?: number;
   statusFilter: string | null;
-  showCancelled: boolean;
-  showNoShow: boolean;
   highlightedBookingIds: Set<string>;
   validDropTargets: Set<string> | null;
   validDropCombos: Map<string, string> | null;
@@ -142,10 +167,10 @@ interface Props {
   onRefresh: () => void;
   onDragValidation: (block: BookingBlock | null) => void;
   onError: (message: string) => void;
-  onBookingClick: (bookingId: string) => void;
+  onBookingClick: (bookingId: string, anchor: { x: number; y: number }) => void;
   onEditBooking: (bookingId: string) => void;
   onSendMessage: (bookingId: string) => void;
-  onCellClick: (tableId: string, time: string) => void;
+  onCellClick: (tableId: string, time: string, anchor: { x: number; y: number }) => void;
   onBlockClick: (blockId: string) => void;
   onCellContextMenu: (tableId: string, time: string, x: number, y: number) => void;
   onBlockAfterBooking: (tableId: string, endTime: string) => void;
@@ -197,8 +222,6 @@ export function TimelineGrid({
   serviceEndTime,
   slotIntervalMinutes,
   statusFilter,
-  showCancelled,
-  showNoShow,
   highlightedBookingIds,
   validDropTargets,
   validDropCombos,
@@ -234,7 +257,7 @@ export function TimelineGrid({
   const bookingPointerDownRef = useRef<{ bookingId: string; x: number; y: number } | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; booking: BookingBlock } | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<{ message: string; resolve: (value: boolean) => void } | null>(null);
-  const [resizeVisual, setResizeVisual] = useState<{ bookingId: string; deltaSlots: number } | null>(null);
+  const [resizeVisual, setResizeVisual] = useState<{ bookingId: string; deltaPx: number } | null>(null);
   /** Hovered drop target while dragging - time (same table) or table/combination name (table move). */
   const [dragDropPreview, setDragDropPreview] = useState<DragDropPreview | null>(null);
   const [scrollTop, setScrollTop] = useState(0);
@@ -244,6 +267,11 @@ export function TimelineGrid({
   const endMin = useMemo(() => serviceEndTime ? timeToMinutes(serviceEndTime) : 23 * 60, [serviceEndTime]);
   const slotInterval = slotIntervalMinutes ?? 15;
   const isToday = useMemo(() => currentDate === formatLocalDateInput(new Date()), [currentDate]);
+
+  const [nowMinutes, setNowMinutes] = useState(() => {
+    const now = new Date();
+    return now.getHours() * 60 + now.getMinutes();
+  });
 
   const timeSlots = useMemo(() => {
     const slots: string[] = [];
@@ -271,9 +299,13 @@ export function TimelineGrid({
       seenBookings.add(cell.booking_id);
 
       const bStart = timeToMinutes(cell.booking_details.start_time);
-      const bEnd = cell.booking_details.end_time
-        ? timeToMinutes(cell.booking_details.end_time)
-        : bStart + 90;
+      const bEnd = effectiveBookingEndMinutes(
+        cell.booking_details.status,
+        cell.booking_details.start_time,
+        cell.booking_details.end_time,
+        isToday,
+        nowMinutes,
+      );
 
       const startCol = Math.max(0, Math.floor((bStart - startMin) / slotInterval));
       const endCol = Math.ceil((bEnd - startMin) / slotInterval);
@@ -295,7 +327,7 @@ export function TimelineGrid({
           guest_attendance_confirmed_at: cell.booking_details.guest_attendance_confirmed_at ?? null,
           staff_attendance_confirmed_at: cell.booking_details.staff_attendance_confirmed_at ?? null,
           start_time: cell.booking_details.start_time,
-          end_time: cell.booking_details.end_time ?? '',
+          end_time: minutesToTime(bEnd),
           table_id: tableId,
           table_ids: allTableIds,
           table_names: tableNames,
@@ -319,7 +351,7 @@ export function TimelineGrid({
       seenBookings.add(b.id);
 
       const bStart = timeToMinutes(b.start_time);
-      const bEnd = b.end_time ? timeToMinutes(b.end_time) : bStart + 90;
+      const bEnd = effectiveBookingEndMinutes(b.status, b.start_time, b.end_time, isToday, nowMinutes);
       const startCol = Math.max(0, Math.floor((bStart - startMin) / slotInterval));
       const endCol = Math.ceil((bEnd - startMin) / slotInterval);
 
@@ -336,7 +368,7 @@ export function TimelineGrid({
         guest_attendance_confirmed_at: b.guest_attendance_confirmed_at ?? null,
         staff_attendance_confirmed_at: b.staff_attendance_confirmed_at ?? null,
         start_time: b.start_time,
-        end_time: b.end_time,
+        end_time: minutesToTime(bEnd),
         table_id: null,
         table_ids: [],
         table_names: [],
@@ -385,15 +417,13 @@ export function TimelineGrid({
     }
 
     return blocks;
-  }, [cells, unassignedBookings, startMin, slotInterval, tables, SLOT_WIDTH]);
+  }, [cells, unassignedBookings, startMin, slotInterval, tables, SLOT_WIDTH, isToday, nowMinutes]);
 
   const filteredBlocks = useMemo(() => {
-    let blocks = bookingBlocks;
-    if (!showCancelled) blocks = blocks.filter((b) => b.status !== 'Cancelled');
-    if (!showNoShow) blocks = blocks.filter((b) => b.status !== 'No-Show');
+    let blocks = bookingBlocks.filter((b) => b.status !== 'Cancelled' && b.status !== 'No-Show');
     if (statusFilter) blocks = blocks.filter((b) => b.status === statusFilter);
     return blocks;
-  }, [bookingBlocks, statusFilter, showCancelled, showNoShow]);
+  }, [bookingBlocks, statusFilter]);
 
   const unassignedBlocks = useMemo(() => {
     const list = filteredBlocks.filter((b) => !b.table_id);
@@ -484,11 +514,6 @@ export function TimelineGrid({
     return () => root.removeEventListener('wheel', onWheel);
   }, []);
 
-  const [nowMinutes, setNowMinutes] = useState(() => {
-    const now = new Date();
-    return now.getHours() * 60 + now.getMinutes();
-  });
-
   useEffect(() => {
     if (!isToday) return;
     const interval = window.setInterval(() => {
@@ -502,17 +527,28 @@ export function TimelineGrid({
     return ((nowMinutes - startMin) / slotInterval) * SLOT_WIDTH;
   }, [nowMinutes, startMin, slotInterval, SLOT_WIDTH]);
 
+  /** Stricter touch activation reduces accidental moves while panning the timeline on phones/tablets. */
   const sensors = useSensors(
     useSensor(PointerSensor, {
-      activationConstraint: { distance: 8 },
+      activationConstraint: { distance: 12 },
     }),
     useSensor(TouchSensor, {
       activationConstraint: {
-        delay: 200,
-        tolerance: 8,
+        delay: 450,
+        tolerance: 4,
       },
     }),
   );
+
+  const [coarsePointer, setCoarsePointer] = useState(false);
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return;
+    const mq = window.matchMedia('(pointer: coarse)');
+    const sync = () => setCoarsePointer(mq.matches);
+    sync();
+    mq.addEventListener('change', sync);
+    return () => mq.removeEventListener('change', sync);
+  }, []);
 
   const handleDragStart = useCallback((event: DragStartEvent) => {
     setContextMenu(null);
@@ -937,7 +973,10 @@ export function TimelineGrid({
           </div>
         </div>
 
-        <div ref={scrollRef} className="min-w-0 flex-1 touch-manipulation overflow-x-auto">
+        <div
+          ref={scrollRef}
+          className="min-w-0 flex-1 touch-pan-x touch-manipulation overflow-x-auto overscroll-x-contain"
+        >
           <div style={{ width: gridWidth, position: 'relative' }}>
             <div className="sticky top-0 z-10 flex border-b border-slate-200 bg-white" style={{ height: HEADER_HEIGHT }}>
               {timeSlots.map((time, i) => (
@@ -985,13 +1024,13 @@ export function TimelineGrid({
                         <DroppableCell
                           key={time}
                           droppableId={`cell_${table.id}_${time}`}
-                          onClick={() => {
+                          onClick={(e) => {
                             if (cell?.block_id) {
                               onBlockClick(cell.block_id);
                               return;
                             }
                             if (!cell?.booking_id) {
-                              onCellClick(table.id, time);
+                              onCellClick(table.id, time, { x: e.clientX, y: e.clientY });
                             }
                           }}
                           onContextMenu={(e) => {
@@ -1023,9 +1062,11 @@ export function TimelineGrid({
                       block={block}
                       dragId={`${block.id}__${block.table_id}`}
                       slotWidth={SLOT_WIDTH}
+                      slotMinutes={slotInterval}
                       rowHeight={ROW_HEIGHT}
                       highlighted={highlightedBookingIds.has(block.id)}
                       isMultiTable={block.table_ids.length > 1}
+                      useDragHandle={coarsePointer}
                       onContextMenu={handleContextMenu}
                       onBookingPointerDown={handleBookingPointerDown}
                       onClick={onBookingClick}
@@ -1067,9 +1108,11 @@ export function TimelineGrid({
                       block={{ ...block, laneIndex: 0, laneCount: 1, rowSpan: 1 }}
                       dragId={`${block.id}__unassigned`}
                       slotWidth={SLOT_WIDTH}
+                      slotMinutes={slotInterval}
                       rowHeight={ROW_HEIGHT}
                       highlighted={highlightedBookingIds.has(block.id)}
                       isMultiTable={false}
+                      useDragHandle={coarsePointer}
                       onContextMenu={handleContextMenu}
                       onBookingPointerDown={handleBookingPointerDown}
                       onClick={onBookingClick}
@@ -1374,7 +1417,7 @@ function DroppableCell({
   className: string;
   style: React.CSSProperties;
   title?: string;
-  onClick?: () => void;
+  onClick?: (e: React.MouseEvent) => void;
   onContextMenu?: (e: React.MouseEvent) => void;
 }) {
   const { setNodeRef } = useDroppable({ id: droppableId });
@@ -1390,32 +1433,55 @@ function DroppableCell({
   );
 }
 
-function DraggableBlock({ block, dragId, slotWidth, rowHeight, highlighted, isMultiTable, onContextMenu, onBookingPointerDown, onClick, onQuickStatusChange, resizeVisual, onResizeVisual, activeDragBookingId }: {
+function DraggableBlock({
+  block,
+  dragId,
+  slotWidth,
+  slotMinutes,
+  rowHeight,
+  highlighted,
+  isMultiTable,
+  useDragHandle,
+  onContextMenu,
+  onBookingPointerDown,
+  onClick,
+  onQuickStatusChange,
+  resizeVisual,
+  onResizeVisual,
+  activeDragBookingId,
+}: {
   block: BookingBlock;
   dragId: string;
   slotWidth: number;
+  /** Grid slot length in minutes; used for resize snapping and minimum duration. */
+  slotMinutes: number;
   rowHeight: number;
   highlighted: boolean;
   isMultiTable: boolean;
+  /** When true (coarse pointers), only the grip activates drag so timeline scroll does not move bookings. */
+  useDragHandle: boolean;
   onContextMenu: (e: React.MouseEvent, block: BookingBlock) => void;
   onBookingPointerDown: (block: BookingBlock, clientX: number, clientY: number) => void;
-  onClick: (bookingId: string) => void;
+  onClick: (bookingId: string, anchor: { x: number; y: number }) => void;
   onQuickStatusChange: (nextStatus: BookingStatus) => void;
-  resizeVisual: { bookingId: string; deltaSlots: number } | null;
-  onResizeVisual: (state: { bookingId: string; deltaSlots: number } | null) => void;
+  resizeVisual: { bookingId: string; deltaPx: number } | null;
+  onResizeVisual: (state: { bookingId: string; deltaPx: number } | null) => void;
   activeDragBookingId: string | null;
 }) {
-  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: dragId });
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, isDragging } = useDraggable({ id: dragId });
   const resizingRef = useRef(false);
   const justResizedRef = useRef(false);
   const resizeStartXRef = useRef(0);
   const resizeStartEndRef = useRef(0);
+  const resizeFrameRef = useRef<number | null>(null);
+  const resizePendingVisualRef = useRef<{ bookingId: string; deltaPx: number } | null>(null);
+  const resizePreviewEndRef = useRef<string | null>(null);
   const [resizePreviewEnd, setResizePreviewEnd] = useState<string | null>(null);
 
   const isConfirmed = isAttendanceConfirmed(block);
   const colorClass = STATUS_COLORS[statusColorKeyForBooking(block)] ?? 'bg-slate-100 border-slate-300 text-slate-800';
   const left = block.leftPx + 2;
-  const resizeDelta = resizeVisual?.bookingId === block.id ? resizeVisual.deltaSlots * slotWidth : 0;
+  const resizeDelta = resizeVisual?.bookingId === block.id ? resizeVisual.deltaPx : 0;
   const width = Math.max(16, block.widthPx - 4 + resizeDelta);
   const isSiblingDragging = activeDragBookingId === block.id && !isDragging;
   const rowHeightForLane = Math.max(18, (rowHeight * Math.max(1, block.rowSpan) - 8) / Math.max(1, block.laneCount));
@@ -1436,47 +1502,103 @@ function DraggableBlock({ block, dragId, slotWidth, rowHeight, highlighted, isMu
     Boolean(primaryAction) &&
     width >= (canConfirmBooking && block.status === 'Booked' ? 184 : 132);
 
-  const startResize = (e: React.MouseEvent) => {
+  const startResize = (e: React.PointerEvent<HTMLSpanElement>) => {
     e.stopPropagation();
     e.preventDefault();
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    if (resizingRef.current) return;
+
+    const pointerId = e.pointerId;
     const start = timeToMinutes(block.start_time.slice(0, 5));
     const currentEnd = block.end_time ? timeToMinutes(block.end_time.slice(0, 5)) : start + 90;
+    const minEnd = start + slotMinutes;
+
     resizingRef.current = true;
     resizeStartXRef.current = e.clientX;
     resizeStartEndRef.current = currentEnd;
-    onResizeVisual({ bookingId: block.id, deltaSlots: 0 });
+    resizePreviewEndRef.current = null;
+    onResizeVisual({ bookingId: block.id, deltaPx: 0 });
+
+    const target = e.currentTarget;
+    try {
+      target.setPointerCapture(pointerId);
+    } catch {
+      /* ignore if capture unsupported */
+    }
     document.body.style.cursor = 'ew-resize';
-    const onMove = (ev: MouseEvent) => {
-      if (!resizingRef.current) return;
-      const deltaX = ev.clientX - resizeStartXRef.current;
-      const deltaSlots = Math.round(deltaX / slotWidth);
-      const nextEnd = Math.max(start + 15, resizeStartEndRef.current + deltaSlots * 15);
-      const clampedDelta = Math.round((nextEnd - resizeStartEndRef.current) / 15);
-      const endStr = minutesToTime(nextEnd);
-      setResizePreviewEnd(endStr);
-      onResizeVisual({ bookingId: block.id, deltaSlots: clampedDelta });
+
+    const flushResizeVisual = () => {
+      resizeFrameRef.current = null;
+      if (resizePendingVisualRef.current) {
+        onResizeVisual(resizePendingVisualRef.current);
+      }
     };
-    const onUp = (ev: MouseEvent) => {
-      if (!resizingRef.current) return;
-      const deltaX = ev.clientX - resizeStartXRef.current;
-      const deltaSlots = Math.round(deltaX / slotWidth);
-      const nextEnd = Math.max(start + 15, resizeStartEndRef.current + deltaSlots * 15);
+
+    const applyDeltaX = (clientX: number) => {
+      const deltaX = clientX - resizeStartXRef.current;
+      const minutesPerPixel = slotMinutes / slotWidth;
+      const nextEnd = Math.max(minEnd, Math.round(resizeStartEndRef.current + deltaX * minutesPerPixel));
+      const minDeltaPx = ((minEnd - resizeStartEndRef.current) / slotMinutes) * slotWidth;
+      const clampedDeltaPx = Math.max(minDeltaPx, deltaX);
       const endStr = minutesToTime(nextEnd);
+      if (resizePreviewEndRef.current !== endStr) {
+        resizePreviewEndRef.current = endStr;
+        setResizePreviewEnd(endStr);
+      }
+      resizePendingVisualRef.current = { bookingId: block.id, deltaPx: clampedDeltaPx };
+      if (resizeFrameRef.current === null) {
+        resizeFrameRef.current = window.requestAnimationFrame(flushResizeVisual);
+      }
+      return endStr;
+    };
+
+    const onMove = (ev: PointerEvent) => {
+      if (!resizingRef.current || ev.pointerId !== pointerId) return;
+      ev.preventDefault();
+      applyDeltaX(ev.clientX);
+    };
+
+    const onUp = (ev: PointerEvent) => {
+      if (ev.pointerId !== pointerId) return;
+      if (!resizingRef.current) return;
+
+      const endStr = applyDeltaX(ev.clientX);
       document.body.style.cursor = '';
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
+      try {
+        target.releasePointerCapture(pointerId);
+      } catch {
+        /* ignore */
+      }
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+      if (resizeFrameRef.current !== null) {
+        window.cancelAnimationFrame(resizeFrameRef.current);
+        resizeFrameRef.current = null;
+      }
       resizingRef.current = false;
       justResizedRef.current = true;
-      setTimeout(() => { justResizedRef.current = false; }, 200);
-      setResizePreviewEnd(null);
-      onResizeVisual(null);
-      const customEvent = new CustomEvent('timeline-resize-booking', {
-        detail: { bookingId: block.id, endTime: endStr },
+      setTimeout(() => {
+        justResizedRef.current = false;
+      }, 200);
+
+      window.dispatchEvent(
+        new CustomEvent('timeline-resize-booking', {
+          detail: { bookingId: block.id, endTime: endStr },
+        }),
+      );
+
+      window.requestAnimationFrame(() => {
+        resizePendingVisualRef.current = null;
+        resizePreviewEndRef.current = null;
+        setResizePreviewEnd(null);
+        onResizeVisual(null);
       });
-      window.dispatchEvent(customEvent);
     };
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
+
+    window.addEventListener('pointermove', onMove, { passive: false });
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
   };
 
   if (isSiblingDragging) {
@@ -1490,25 +1612,51 @@ function DraggableBlock({ block, dragId, slotWidth, rowHeight, highlighted, isMu
     );
   }
 
+  const dragRootAttrs = useDragHandle ? {} : { ...attributes };
+  const dragListeners = useDragHandle ? {} : { ...listeners };
+
   return (
     <div
       ref={setNodeRef}
-      {...attributes}
+      {...dragRootAttrs}
       onPointerDownCapture={(e) => {
-        if (e.button !== 0) return;
+        if (e.pointerType === 'mouse' && e.button !== 0) return;
         onBookingPointerDown(block, e.clientX, e.clientY);
       }}
       onContextMenu={(e) => onContextMenu(e, block)}
-      onClick={() => { if (!justResizedRef.current) onClick(block.id); }}
-      className={`absolute flex cursor-grab touch-none select-none items-center gap-1 overflow-hidden rounded-md border border-l-[3px] px-2 text-xs font-medium transition-shadow active:cursor-grabbing ${colorClass} ${
-        isDragging ? 'z-30 opacity-50' : ''
-      } ${highlighted ? 'ring-2 ring-amber-400 ring-offset-1' : ''} ${
+      onClick={(e) => {
+        if (!justResizedRef.current) {
+          onClick(block.id, { x: e.clientX, y: e.clientY });
+        }
+      }}
+      className={`absolute flex select-none items-center gap-0 overflow-hidden rounded-md border border-l-[3px] text-xs font-medium transition-shadow ${colorClass} ${
+        useDragHandle ? 'touch-manipulation' : 'touch-none cursor-grab active:cursor-grabbing'
+      } ${isDragging ? 'z-30 opacity-50' : ''} ${highlighted ? 'ring-2 ring-amber-400 ring-offset-1' : ''} ${
         isMultiTable ? 'border-l-[3px] border-l-purple-500' : ''
       }`}
       style={{ left, top, width, height, WebkitTapHighlightColor: 'transparent' }}
       title={`${block.guest_name} · Party of ${block.party_size} · ${block.start_time.slice(0, 5)}–${block.end_time.slice(0, 5)}${isMultiTable ? ' · Table combination' : ''}`}
     >
-      <div {...listeners} className="flex min-h-0 flex-1 items-center gap-1 pr-1 touch-none">
+      {useDragHandle && (
+        <button
+          type="button"
+          ref={setActivatorNodeRef}
+          {...listeners}
+          {...attributes}
+          className="flex h-full w-9 shrink-0 touch-none cursor-grab items-center justify-center border-r border-black/10 bg-black/[0.06] active:cursor-grabbing sm:w-7"
+          aria-label={`Move booking: ${block.guest_name}`}
+        >
+          <span className="flex flex-col gap-0.5 text-slate-500" aria-hidden>
+            <span className="block h-0.5 w-3 rounded-full bg-current sm:w-2.5" />
+            <span className="block h-0.5 w-3 rounded-full bg-current sm:w-2.5" />
+            <span className="block h-0.5 w-3 rounded-full bg-current sm:w-2.5" />
+          </span>
+        </button>
+      )}
+      <div
+        {...dragListeners}
+        className={`flex min-h-0 flex-1 items-center gap-1 overflow-hidden px-2 py-0.5 pr-1 ${useDragHandle ? 'touch-manipulation' : 'touch-none'}`}
+      >
         {isCondensed ? (
           <>
             <span className="text-[10px] font-semibold">{block.party_size}</span>
@@ -1599,9 +1747,13 @@ function DraggableBlock({ block, dragId, slotWidth, rowHeight, highlighted, isMu
         </div>
       )}
       <span
-        onMouseDown={startResize}
-        className="absolute right-0 top-0 h-full w-2 cursor-ew-resize bg-black/20 opacity-60 transition-opacity hover:opacity-100"
-        title="Drag to resize"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label={`Resize end time for ${block.guest_name}`}
+        onPointerDown={startResize}
+        className="absolute right-0 top-0 z-[1] flex h-full min-h-[44px] min-w-[44px] max-w-[44px] cursor-ew-resize touch-none items-stretch justify-end bg-gradient-to-l from-black/25 to-transparent opacity-70 transition-opacity hover:opacity-100 sm:min-h-0 sm:min-w-0 sm:max-w-none sm:w-2 sm:bg-black/20"
+        style={{ touchAction: 'none' }}
+        title="Drag to resize end"
       />
       {resizePreviewEnd && (
         <span className="absolute -top-5 right-0 rounded bg-slate-900 px-1.5 py-0.5 text-[10px] text-white">

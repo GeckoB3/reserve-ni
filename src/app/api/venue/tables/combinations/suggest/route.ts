@@ -13,11 +13,51 @@ import {
   type CombinationTable,
   type ManualCombination,
 } from '@/lib/table-management/combination-engine';
+import { fetchEngineInput } from '@/lib/availability';
+import { getDayOfWeek, resolveDuration, selectServiceForWalkInTime } from '@/lib/availability/engine';
 
 function parsePositiveInt(value: string | null, fallback: number): number {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
   return Math.round(parsed);
+}
+
+async function resolveSuggestedDurationMinutes({
+  supabase,
+  venueId,
+  date,
+  time,
+  partySize,
+  areaId,
+  explicitDuration,
+}: {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  venueId: string;
+  date: string;
+  time: string;
+  partySize: number;
+  areaId?: string;
+  explicitDuration: number;
+}): Promise<number> {
+  if (explicitDuration > 0) return explicitDuration;
+
+  try {
+    const engineInput = await fetchEngineInput({
+      supabase,
+      venueId,
+      date,
+      partySize,
+      areaId,
+    });
+    const dayOfWeek = getDayOfWeek(date);
+    const service = selectServiceForWalkInTime(engineInput, venueId, date, time);
+
+    if (!service) return 90;
+    return resolveDuration(engineInput.durations, service.id, partySize, dayOfWeek);
+  } catch (error) {
+    console.error('Combination suggestion duration resolution failed:', error);
+    return 90;
+  }
 }
 
 export async function GET(request: NextRequest) {
@@ -29,7 +69,7 @@ export async function GET(request: NextRequest) {
   const date = searchParams.get('date');
   const time = searchParams.get('time');
   const partySize = parsePositiveInt(searchParams.get('party_size'), 0);
-  const durationMinutes = parsePositiveInt(searchParams.get('duration_minutes'), 90);
+  const explicitDurationMinutes = parsePositiveInt(searchParams.get('duration_minutes'), 0);
   const excludeBookingId = searchParams.get('booking_id') ?? undefined;
   const areaIdParam = searchParams.get('area_id');
   const areaIdUuid =
@@ -40,6 +80,16 @@ export async function GET(request: NextRequest) {
   if (!date || !time || partySize < 1) {
     return NextResponse.json({ error: 'date, time and party_size are required' }, { status: 400 });
   }
+
+  const durationMinutes = await resolveSuggestedDurationMinutes({
+    supabase,
+    venueId: staff.venue_id,
+    date,
+    time,
+    partySize,
+    areaId: areaIdUuid,
+    explicitDuration: explicitDurationMinutes,
+  });
 
   if (areaIdUuid) {
     const { data: areaRow, error: areaErr } = await staff.db
@@ -243,5 +293,7 @@ export async function GET(request: NextRequest) {
     suggestions,
     best: suggestions[0] ?? null,
     occupied_table_ids,
+    /** Minutes used for this request (from `duration_minutes` query or venue defaults). */
+    resolved_duration_minutes: durationMinutes,
   });
 }

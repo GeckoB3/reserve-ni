@@ -202,6 +202,7 @@ function compactLineBox(fs: number, bold: boolean): number {
  */
 export function computeFittedTableLabelFonts(input: TableLabelFitInput): TableLabelFitResult {
   const { w, h, shape, topLabel, bottomLabel, compactLabels, layoutScale, polygon_points } = input;
+  const hasBottomLabel = bottomLabel.trim().length > 0;
   const isCircular = shape === 'circle';
   const isOval = shape === 'oval';
   const isPolygon = shape === 'polygon';
@@ -234,8 +235,8 @@ export function computeFittedTableLabelFonts(input: TableLabelFitInput): TableLa
 
     const measureBlock = (nameFs: number, capFs: number, g: number) => {
       const nh = nameFs + 1;
-      const ch = capFs + 1;
-      return { blockH: nh + g + ch, nameBox: nh, capBox: ch };
+      const ch = hasBottomLabel ? capFs + 1 : 0;
+      return { blockH: nh + (hasBottomLabel ? g + ch : 0), nameBox: nh, capBox: ch };
     };
 
     let { blockH } = measureBlock(fn, fc, gap);
@@ -294,10 +295,10 @@ export function computeFittedTableLabelFonts(input: TableLabelFitInput): TableLa
   fc = Math.min(fc, 36);
   let gap = 2;
 
-  const measureBlock = (nameFs: number, capFs: number, g: number) => {
+    const measureBlock = (nameFs: number, capFs: number, g: number) => {
     const nh = compactLineBox(nameFs, true);
-    const ch = compactLineBox(capFs, false);
-    return { blockH: nh + g + ch, nameBox: nh, capBox: ch };
+      const ch = hasBottomLabel ? compactLineBox(capFs, false) : 0;
+      return { blockH: nh + (hasBottomLabel ? g + ch : 0), nameBox: nh, capBox: ch };
   };
 
   let { blockH } = measureBlock(fn, fc, gap);

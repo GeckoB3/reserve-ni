@@ -9,7 +9,8 @@ import { DashboardStaffBookingModal } from '@/components/booking/DashboardStaffB
 import type { BookingModel } from '@/types/booking-models';
 import { UndoToast } from '@/app/dashboard/table-grid/UndoToast';
 import { BookingDetailPanel, type BookingDetailPanelSnapshot } from '@/app/dashboard/bookings/BookingDetailPanel';
-import { ViewToolbar } from '@/components/dashboard/ViewToolbar';
+import { OperationsWorkspaceToolbar } from '@/components/dashboard/OperationsWorkspaceToolbar';
+import { TabBar } from '@/components/ui/dashboard/TabBar';
 import { useToast } from '@/components/ui/Toast';
 import { detectAdjacentTables, type CombinationTable } from '@/lib/table-management/combination-engine';
 import { BOOKING_REVERT_ACTIONS, canMarkNoShowForSlot, canTransitionBookingStatus, isDestructiveBookingStatus, isRevertTransition, type BookingStatus } from '@/lib/table-management/booking-status';
@@ -25,7 +26,6 @@ import {
   FLOOR_PLAN_DEFAULT_LAYOUT_HEIGHT,
   FLOOR_PLAN_DEFAULT_LAYOUT_WIDTH,
 } from '@/lib/floor-plan/fit-view';
-import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { DashboardGridSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
@@ -66,8 +66,37 @@ function formatIsoTimeUk(iso: string): string {
   }
 }
 
+function minutesFromTime(value: string): number {
+  const [h, m] = value.slice(0, 5).split(':').map(Number);
+  return (h ?? 0) * 60 + (m ?? 0);
+}
+
+function bookingEndMinutes(booking: BookingOnTable, selectedDate: string, nowMinutes: number): number {
+  const startMin = minutesFromTime(booking.start_time);
+  let endMin = booking.estimated_end_time
+    ? minutesFromTime(new Date(booking.estimated_end_time).toISOString().slice(11, 16))
+    : startMin + 90;
+  if (endMin <= startMin) {
+    endMin += 24 * 60;
+  }
+  if (
+    (booking.status === 'Seated' || booking.status === 'Arrived') &&
+    selectedDate === formatDateInput(new Date()) &&
+    nowMinutes > startMin
+  ) {
+    endMin = Math.max(endMin, nowMinutes);
+  }
+  return endMin;
+}
+
 const BLOCK_DURATION_PRESETS = [30, 45, 60, 90, 120, 180] as const;
 
+export interface FloorPlanAreaNavConfig {
+  showTabs: true;
+  tabs: readonly { id: string; label: string }[];
+  value: string;
+  onChange: (id: string) => void;
+}
 
 export function FloorPlanLiveView({
   isAdmin = false,
@@ -76,6 +105,7 @@ export function FloorPlanLiveView({
   bookingModel = 'table_reservation',
   enabledModels = [],
   diningAreaId = null,
+  areaNav = null,
 }: {
   isAdmin?: boolean;
   venueId: string;
@@ -84,6 +114,10 @@ export function FloorPlanLiveView({
   enabledModels?: BookingModel[];
   /** Scope tables, grid, and combinations to this dining area (multi-area venues). */
   diningAreaId?: string | null;
+  /** Multi-area dining: tabs + change handler (rendered in compact toolbar). */
+  areaNav?: FloorPlanAreaNavConfig | null;
+  /** Admin link to layout editor in Dining Availability. */
+  editLayoutHref?: string;
 }) {
   const venueBootstrap = useDashboardVenueBootstrap();
   const { addToast } = useToast();
@@ -94,6 +128,8 @@ export function FloorPlanLiveView({
   const [loading, setLoading] = useState(true);
   const [viewportRefreshing, setViewportRefreshing] = useState(false);
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
+  /** Mobile/tablet: expand table detail sheet for full actions. */
+  const [tableDetailSheetExpanded, setTableDetailSheetExpanded] = useState(false);
   const [combinedTableGroups, setCombinedTableGroups] = useState<Map<string, string[]>>(new Map());
   const [manualCombinations, setManualCombinations] = useState<CombinationInfo[]>([]);
   const [selectedDate, setSelectedDate] = useState(() => formatDateInput(new Date()));
@@ -102,6 +138,7 @@ export function FloorPlanLiveView({
     return `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
   });
   const [debouncedTime, setDebouncedTime] = useState(selectedTime);
+  const [clockTick, setClockTick] = useState(0);
   const [noShowGraceMinutes, setNoShowGraceMinutes] = useState(15);
   const [combinationThreshold, setCombinationThreshold] = useState(80);
   const [undoAction, setUndoAction] = useState<UndoAction | null>(null);
@@ -141,6 +178,12 @@ export function FloorPlanLiveView({
     const timeout = setTimeout(() => setDebouncedTime(selectedTime), 300);
     return () => clearTimeout(timeout);
   }, [selectedTime]);
+
+  useEffect(() => {
+    if (selectedDate !== formatDateInput(new Date())) return;
+    const interval = window.setInterval(() => setClockTick((n) => n + 1), 60_000);
+    return () => window.clearInterval(interval);
+  }, [selectedDate]);
 
   useEffect(() => {
     if (venueBootstrap) {
@@ -325,25 +368,32 @@ export function FloorPlanLiveView({
       seenAssignment.add(key);
       assignmentPairs.push({ booking_id: cell.booking_id, table_id: cell.table_id });
     }
+    const currentMin = minutesFromTime(debouncedTime);
     return tables.map((t) => {
-      const tableStatus = getTableStatus(t.id, dateTime, bookingsForStatus, assignmentPairs, blocks);
-      const activeCell = (gridData?.cells ?? []).find((cell) => {
-        if (cell.table_id !== t.id || !cell.booking_id || !cell.booking_details) return false;
-        const currentMin = Number(debouncedTime.slice(0, 2)) * 60 + Number(debouncedTime.slice(3, 5));
-        const startMin = Number(cell.booking_details.start_time.slice(0, 2)) * 60 + Number(cell.booking_details.start_time.slice(3, 5));
-        const endMin = cell.booking_details.end_time
-          ? Number(cell.booking_details.end_time.slice(0, 2)) * 60 + Number(cell.booking_details.end_time.slice(3, 5))
-          : startMin + 90;
-        return currentMin >= startMin && currentMin < endMin;
-      });
-      const booking = activeCell?.booking_id ? bookingMap.get(activeCell.booking_id) ?? null : null;
+      let tableStatus = getTableStatus(t.id, dateTime, bookingsForStatus, assignmentPairs, blocks);
+      const assignedBookingIds = assignmentPairs
+        .filter((assignment) => assignment.table_id === t.id)
+        .map((assignment) => assignment.booking_id);
+      const booking =
+        assignedBookingIds
+          .map((bookingId) => bookingMap.get(bookingId) ?? null)
+          .find((candidate): candidate is BookingOnTable => {
+            if (!candidate) return false;
+            const startMin = minutesFromTime(candidate.start_time);
+            const endMin = bookingEndMinutes(candidate, selectedDate, currentMin);
+            return currentMin >= startMin && currentMin < endMin;
+          }) ?? null;
+      if (booking?.status === 'Seated' || booking?.status === 'Arrived') {
+        tableStatus = 'seated';
+      }
 
       let elapsedPct = 0;
       if (booking?.start_time && booking?.estimated_end_time) {
         const [y, mo, d] = selectedDate.split('-').map(Number);
         const [h, m] = booking.start_time.split(':').map(Number);
         const startMs = new Date(y!, mo! - 1, d!, h!, m!).getTime();
-        const endMs = new Date(booking.estimated_end_time).getTime();
+        const effectiveEndMin = bookingEndMinutes(booking, selectedDate, currentMin);
+        const endMs = new Date(y!, mo! - 1, d!, Math.floor(effectiveEndMin / 60), effectiveEndMin % 60).getTime();
         const totalMs = endMs - startMs;
         if (totalMs > 0) {
           elapsedPct = Math.min(100, Math.max(0, ((now - startMs) / totalMs) * 100));
@@ -352,7 +402,7 @@ export function FloorPlanLiveView({
 
       return { ...t, service_status: tableStatus, booking, elapsed_pct: elapsedPct };
     });
-  }, [tables, bookingMap, selectedDate, debouncedTime, gridData, blocks]);
+  }, [tables, bookingMap, selectedDate, debouncedTime, gridData, blocks, clockTick]);
 
   // Build all combinations (manual + auto-detected) -- same as table grid
   const allCombinations = useMemo((): CombinationInfo[] => {
@@ -677,6 +727,10 @@ export function FloorPlanLiveView({
     );
   }, [blocks, selectedTableId, selectedDate, debouncedTime]);
 
+  useEffect(() => {
+    setTableDetailSheetExpanded(false);
+  }, [selectedTableId]);
+
   const removeTableBlock = useCallback(
     async (blockId: string) => {
       try {
@@ -790,14 +844,9 @@ export function FloorPlanLiveView({
   }
 
   return (
-    <div className="flex flex-col space-y-2 md:space-y-3">
-      <PageHeader
-        eyebrow="Operations"
+    <div className="flex min-h-0 flex-1 flex-col gap-1.5 sm:gap-2">
+      <OperationsWorkspaceToolbar
         title="Live floor"
-        subtitle="Tap tables to see status, drag to reassign when available, and scrub the timeline to preview the room."
-      />
-      <ViewToolbar
-        title=""
         summary={summaryData}
         date={selectedDate}
         onDateChange={setSelectedDate}
@@ -805,7 +854,48 @@ export function FloorPlanLiveView({
         onRefresh={fetchData}
         onNewBooking={() => setShowNewBookingForm(true)}
         onWalkIn={() => setShowWalkInModal(true)}
-        datePicker={(
+        compact
+        showControlsButton={false}
+        timelineLabel={selectedTime}
+        timelinePanel={(
+          <div className="space-y-3">
+            <div>
+              <label htmlFor="floor-timeline-time" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Timeline time
+              </label>
+              <input
+                id="floor-timeline-time"
+                type="time"
+                value={selectedTime}
+                onChange={(e) => setSelectedTime(e.target.value)}
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+              />
+              <p className="mt-1.5 text-xs text-slate-500">
+                Table status, drag targets, and live covers use this service clock.
+              </p>
+            </div>
+            {timeRangeFilterActive ? (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                Showing bookings from{' '}
+                <span className="font-semibold">{String(pickerStartHour).padStart(2, '0')}:00</span>
+                {' '}to{' '}
+                <span className="font-semibold">{String(pickerEndHour).padStart(2, '0')}:00</span>.
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStartHourOverride(null);
+                    setEndHourOverride(null);
+                    setTimeRangeFilterActive(false);
+                  }}
+                  className="mt-2 block font-semibold text-amber-800 underline"
+                >
+                  Clear time filter
+                </button>
+              </div>
+            ) : null}
+          </div>
+        )}
+        datePickerPanel={(
           <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
             <CalendarDateTimePicker
               date={selectedDate}
@@ -847,21 +937,22 @@ export function FloorPlanLiveView({
             )}
           </div>
         )}
-      >
-        <div className="flex flex-wrap items-center gap-2">
-          <label className="text-xs font-medium text-slate-600 sm:text-sm">Timeline</label>
-          <input
-            type="time"
-            value={selectedTime}
-            onChange={(e) => setSelectedTime(e.target.value)}
-            className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 sm:px-3 sm:py-2"
+        controlsPanel={(
+          <div />
+        )}
+        pinnedRow={areaNav?.showTabs ? (
+          <TabBar
+            tabs={areaNav.tabs}
+            value={areaNav.value}
+            onChange={areaNav.onChange}
+            mobileNote="Swipe dining areas"
+            density="compact"
           />
-          <span className="hidden text-xs text-slate-500 sm:inline">Drag and status use this clock position.</span>
-        </div>
-      </ViewToolbar>
+        ) : undefined}
+      />
 
-      {/* Canvas area */}
-      <div className="relative h-[680px] min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 shadow-sm shadow-slate-900/5 sm:h-[760px] lg:h-[840px]">
+      {/* Canvas area — fill remaining viewport under dashboard chrome */}
+      <div className="relative min-h-[calc(100dvh-9.5rem)] w-full min-w-0 flex-1 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 shadow-sm shadow-slate-900/5 sm:min-h-[calc(100dvh-8.5rem)] lg:min-h-[calc(100dvh-7rem)]">
         {viewportRefreshing && (
           <div className="absolute inset-0 z-20 flex items-center justify-center bg-slate-50/70 backdrop-blur-[1px]">
             <div className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 shadow-sm">
@@ -875,34 +966,52 @@ export function FloorPlanLiveView({
             <button type="button" onClick={() => { setReassignMode(null); clearDragValidation(); }} className="shrink-0 font-semibold text-amber-700 underline">Cancel</button>
           </div>
         )}
-        <LiveFloorCanvas
-          tables={tablesWithState}
-          layoutWidth={floorPlanLayout.width}
-          layoutHeight={floorPlanLayout.height}
-          selectedId={selectedTableId}
-          combinedTableGroups={combinedTableGroups}
-          validDropTargets={validDropTargets}
-          validDropComboLabels={validDropComboLabels}
-          reassignMode={reassignMode ? { bookingId: reassignMode.bookingId, guestName: reassignMode.guestName } : null}
-          onSelect={handleTableSelect}
-          onDragStart={startDragValidation}
-          onDragEnd={handleFloorDragEnd}
-          onDragCancel={clearDragValidation}
-        />
+        <div className="absolute inset-0">
+          <LiveFloorCanvas
+            tables={tablesWithState}
+            layoutWidth={floorPlanLayout.width}
+            layoutHeight={floorPlanLayout.height}
+            selectedId={selectedTableId}
+            combinedTableGroups={combinedTableGroups}
+            validDropTargets={validDropTargets}
+            validDropComboLabels={validDropComboLabels}
+            reassignMode={reassignMode ? { bookingId: reassignMode.bookingId, guestName: reassignMode.guestName } : null}
+            onSelect={handleTableSelect}
+            onDragStart={startDragValidation}
+            onDragEnd={handleFloorDragEnd}
+            onDragCancel={clearDragValidation}
+          />
+        </div>
       </div>
 
       {/* Table detail bottom sheet */}
       {selectedTable && !detailBookingId && (
-        <div className="fixed bottom-0 left-0 right-0 z-40 mx-auto max-h-[60vh] max-w-lg overflow-y-auto rounded-t-2xl border-t border-slate-200 bg-white p-3 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-2xl shadow-slate-900/15 sm:p-4 lg:bottom-6 lg:left-auto lg:right-6 lg:max-h-[calc(100vh-12rem)] lg:max-w-sm lg:rounded-2xl lg:border lg:p-5">
-          <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-slate-300 lg:hidden" />
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="text-base font-semibold text-slate-900">{selectedTable.name}</h3>
-              <p className="text-xs text-slate-500">{selectedTable.max_covers} covers · {selectedTable.zone ?? 'No zone'}</p>
+        <div
+          className={`fixed bottom-0 left-0 right-0 z-40 mx-auto max-w-lg overflow-y-auto rounded-t-2xl border-t border-slate-200 bg-white p-2.5 pb-[calc(0.75rem+env(safe-area-inset-bottom))] shadow-2xl shadow-slate-900/15 sm:p-3 lg:bottom-6 lg:left-auto lg:right-6 lg:max-h-[calc(100dvh-10rem)] lg:max-w-sm lg:rounded-2xl lg:border lg:p-4 ${
+            tableDetailSheetExpanded
+              ? 'max-h-[min(88dvh,900px)] lg:max-h-[calc(100dvh-10rem)]'
+              : 'max-h-[min(46dvh,420px)] lg:max-h-[calc(100dvh-10rem)]'
+          }`}
+        >
+          <div className="mx-auto mb-1.5 h-1 w-10 rounded-full bg-slate-300 lg:hidden" />
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <h3 className="text-sm font-semibold text-slate-900 sm:text-base">{selectedTable.name}</h3>
+              <p className="text-[11px] text-slate-500 sm:text-xs">{selectedTable.max_covers} covers · {selectedTable.zone ?? 'No zone'}</p>
             </div>
-            <button aria-label="Close" onClick={() => setSelectedTableId(null)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600">
-              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" /></svg>
-            </button>
+            <div className="flex shrink-0 items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setTableDetailSheetExpanded((v) => !v)}
+                className="rounded-lg px-2 py-1.5 text-xs font-semibold text-brand-700 hover:bg-brand-50 lg:hidden"
+                aria-expanded={tableDetailSheetExpanded}
+              >
+                {tableDetailSheetExpanded ? 'Less' : 'More'}
+              </button>
+              <button aria-label="Close" onClick={() => setSelectedTableId(null)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600">
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
           </div>
 
           {selectedTable.service_status === 'held' && (

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { BOOKING_STATUS_TRANSITIONS, BOOKING_REVERT_ACTIONS, canMarkNoShowForSlot, isDestructiveBookingStatus, isRevertTransition, type BookingStatus } from '@/lib/table-management/booking-status';
 import { NumericInput } from '@/components/ui/NumericInput';
 import { PhoneWithCountryField } from '@/components/phone/PhoneWithCountryField';
@@ -217,6 +217,8 @@ export function BookingDetailPanel({
   venueCurrency,
   initialSnapshot,
   isAppointment = false,
+  presentation = 'drawer',
+  anchor,
 }: {
   bookingId: string;
   onClose: () => void;
@@ -226,7 +228,10 @@ export function BookingDetailPanel({
   venueCurrency?: string;
   initialSnapshot?: BookingDetailPanelSnapshot | null;
   isAppointment?: boolean;
+  presentation?: 'drawer' | 'popover';
+  anchor?: { x: number; y: number } | null;
 }) {
+  const panelRef = useRef<HTMLDivElement>(null);
   const guestPhoneDefaultCountry: CountryCode = useMemo(
     () => defaultPhoneCountryForVenueCurrency(venueCurrency),
     [venueCurrency],
@@ -263,6 +268,39 @@ export function BookingDetailPanel({
 
   const displayDetail = detail ?? optimisticDetail;
   const isHydrated = detail !== null;
+  const isPopover = presentation === 'popover';
+  const popoverStyle = useMemo((): CSSProperties | undefined => {
+    if (!isPopover) return undefined;
+
+    const viewportWidth = typeof window === 'undefined' ? 1024 : window.innerWidth;
+    const viewportHeight = typeof window === 'undefined' ? 768 : window.innerHeight;
+    const panelWidth = Math.min(640, viewportWidth - 24);
+    const anchorX = anchor?.x ?? viewportWidth / 2;
+    const anchorY = anchor?.y ?? 120;
+    const canOpenRight = anchorX + panelWidth + 22 <= viewportWidth;
+    const leftCandidate = canOpenRight ? anchorX + 10 : anchorX - panelWidth - 10;
+    const left = Math.min(Math.max(12, leftCandidate), Math.max(12, viewportWidth - panelWidth - 12));
+    const spaceAbove = anchorY - 18;
+    const top = Math.max(12, anchorY + 10);
+    const spaceBelow = viewportHeight - top - 12;
+    const openAbove = spaceBelow < 520 && spaceAbove > spaceBelow;
+
+    if (openAbove) {
+      return {
+        left,
+        bottom: Math.max(12, viewportHeight - anchorY + 10),
+        width: panelWidth,
+        maxHeight: Math.max(220, spaceAbove),
+      };
+    }
+
+    return {
+      left,
+      top,
+      width: panelWidth,
+      maxHeight: Math.max(220, spaceBelow),
+    };
+  }, [anchor?.x, anchor?.y, isPopover]);
 
   const notesVariant: BookingNotesVariant = useMemo(() => {
     const m = displayDetail?.inferred_booking_model;
@@ -382,6 +420,18 @@ export function BookingDetailPanel({
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [onClose]);
+
+  useEffect(() => {
+    if (!isPopover) return;
+
+    const onPointerDown = (event: PointerEvent) => {
+      if (panelRef.current?.contains(event.target as Node)) return;
+      onClose();
+    };
+
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
+  }, [isPopover, onClose]);
 
   const executeStatusChange = useCallback(async (newStatus: string) => {
     if (!detail) return;
@@ -591,14 +641,20 @@ export function BookingDetailPanel({
   if (!displayDetail) {
     return (
       <div
-        className="fixed inset-0 z-50 flex justify-end bg-slate-900/25 backdrop-blur-[2px]"
-        onClick={onClose}
+        className={isPopover ? 'fixed z-50' : 'fixed inset-0 z-50 flex justify-end bg-slate-900/25 backdrop-blur-[2px]'}
+        style={popoverStyle}
+        onClick={isPopover ? undefined : onClose}
       >
         <div
+          ref={panelRef}
           role="dialog"
-          aria-modal="true"
+          aria-modal={!isPopover}
           aria-label="Booking detail panel"
-          className="flex w-full max-w-sm flex-col border-l border-slate-200/80 bg-white shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100 lg:rounded-l-2xl"
+          className={
+            isPopover
+              ? 'flex max-h-[inherit] w-full flex-col overflow-y-auto rounded-2xl border border-slate-200/80 bg-white shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100'
+              : 'flex w-full max-w-sm flex-col border-l border-slate-200/80 bg-white shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100 lg:rounded-l-2xl'
+          }
           onClick={(e) => e.stopPropagation()}
         >
           <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
@@ -667,25 +723,33 @@ export function BookingDetailPanel({
     optimisticTableLabel ??
     (assignedTables.length > 0 ? assignedTables.map((table) => table.name).join(' + ') : null);
   const hasAssignedTable = Boolean(tableLine);
+  const panelBodySpacing = isPopover ? 'space-y-1.5 p-2' : 'space-y-3 p-4';
+  const sectionPadding = isPopover ? 'p-2' : 'p-3.5';
 
   return (
     <div
-      className="fixed inset-0 z-50 flex justify-end bg-slate-900/25 backdrop-blur-[2px]"
-      onClick={onClose}
+      className={isPopover ? 'fixed z-50' : 'fixed inset-0 z-50 flex justify-end bg-slate-900/25 backdrop-blur-[2px]'}
+      style={popoverStyle}
+      onClick={isPopover ? undefined : onClose}
     >
       <div
+        ref={panelRef}
         role="dialog"
-        aria-modal="true"
+        aria-modal={!isPopover}
         aria-label="Booking detail panel"
-        className="w-full max-w-md overflow-y-auto border-l border-slate-200/80 bg-white shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100 lg:rounded-l-2xl"
+        className={
+          isPopover
+            ? 'max-h-[inherit] w-full overflow-y-auto rounded-2xl border border-slate-200/80 bg-white shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100'
+            : 'w-full max-w-md overflow-y-auto border-l border-slate-200/80 bg-white shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100 lg:rounded-l-2xl'
+        }
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header - compact */}
-        <div className="sticky top-0 z-10 border-b border-slate-100 bg-gradient-to-br from-white via-white to-brand-50/70 px-4 py-3 backdrop-blur">
+        <div className={`sticky top-0 z-10 border-b border-slate-100 bg-gradient-to-br from-white via-white to-brand-50/70 backdrop-blur ${isPopover ? 'px-2.5 py-1.5' : 'px-4 py-3'}`}>
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
-                <h2 className="truncate text-base font-semibold text-slate-900">{d.guest?.name ?? 'Booking'}</h2>
+                <h2 className={`truncate font-semibold text-slate-900 ${isPopover ? 'text-[13px]' : 'text-base'}`}>{d.guest?.name ?? 'Booking'}</h2>
                 <Pill variant={detailStatusPillVariant(d.status)} size="sm" dot className="shrink-0">
                   {bookingStatusDisplayLabel(d.status, bookingStyleIsTable)}
                 </Pill>
@@ -696,14 +760,14 @@ export function BookingDetailPanel({
                   </span>
                 )}
               </div>
-              <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] font-medium text-slate-600">
+              <p className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] font-medium text-slate-600">
                 <span>{formatDateNice(d.booking_date)}</span>
                 <span className="text-slate-300">·</span>
                 <span className="tabular-nums">{startTime} - {endTime}</span>
                 <span className="text-slate-300">·</span>
                 <span>{d.party_size} cover{d.party_size === 1 ? '' : 's'}</span>
               </p>
-              <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-500">
+              <p className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-slate-500">
                 <span className="font-mono">#{d.id.slice(0, 8)}</span>
                 <button
                   type="button"
@@ -722,31 +786,31 @@ export function BookingDetailPanel({
           </div>
         </div>
 
-        <div className="space-y-3 p-4">
+        <div className={panelBodySpacing}>
           {error && (
             <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{error}</div>
           )}
 
           <SectionCard className="border-brand-200 bg-gradient-to-br from-brand-50 via-white to-white">
-            <SectionCard.Body className="p-3.5">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <SectionCard.Body className={sectionPadding}>
+              <div className={isPopover ? 'grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center' : 'flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between'}>
                 <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-widest text-brand-600">Booking slot</p>
-                  <p className="mt-1 text-2xl font-bold tracking-tight text-slate-950 tabular-nums">{startTime} - {endTime}</p>
-                  <p className="mt-1 text-xs text-slate-600">
+                  <p className="text-[9px] font-semibold uppercase tracking-widest text-brand-600">Booking slot</p>
+                  <p className={`font-bold tracking-tight text-slate-950 tabular-nums ${isPopover ? 'text-lg leading-tight' : 'mt-0.5 text-2xl'}`}>{startTime} - {endTime}</p>
+                  <p className="text-[11px] text-slate-600">
                     {durationMinutes} min · {d.party_size} cover{d.party_size === 1 ? '' : 's'}
                   </p>
                 </div>
-                <div className="grid grid-cols-2 gap-2 sm:min-w-40">
-                  <div className={`rounded-xl border px-3 py-2 ${hasAssignedTable ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'}`}>
-                    <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">Table</p>
-                    <p className={`mt-0.5 truncate text-sm font-bold ${hasAssignedTable ? 'text-emerald-900' : 'text-amber-800'}`}>
+                <div className={isPopover ? 'grid grid-cols-2 gap-1.5 sm:min-w-44' : 'grid grid-cols-2 gap-2 sm:min-w-40'}>
+                  <div className={`rounded-lg border px-2 py-1.5 ${hasAssignedTable ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'}`}>
+                    <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Table</p>
+                    <p className={`truncate text-xs font-bold ${hasAssignedTable ? 'text-emerald-900' : 'text-amber-800'}`}>
                       {tableLine ?? 'Unassigned'}
                     </p>
                   </div>
-                  <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
-                    <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">Deposit</p>
-                    <p className={`mt-0.5 truncate text-sm font-bold ${
+                  <div className="rounded-lg border border-slate-200 bg-white px-2 py-1.5">
+                    <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Deposit</p>
+                    <p className={`truncate text-xs font-bold ${
                       d.deposit_status === 'Paid'
                         ? 'text-emerald-700'
                         : d.deposit_status === 'Pending'
@@ -766,18 +830,42 @@ export function BookingDetailPanel({
           </SectionCard>
 
           {canChangeStatus && (
-            <SectionCard>
-              <SectionCard.Body className="p-3.5">
-                <div className="flex items-center justify-between gap-2">
-                  <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Next action</p>
-                    <p className="mt-0.5 text-xs text-slate-500">Update this booking without leaving the grid.</p>
+            isPopover ? (
+              <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-slate-200/80 bg-white px-2 py-1.5 shadow-sm">
+                <span className="mr-1 text-[9px] font-semibold uppercase tracking-widest text-slate-400">Actions</span>
+                {forwardStatuses.map((status) => (
+                  <ActionButton
+                    key={status}
+                    onClick={() => updateStatus(status)}
+                    disabled={actionLoading || !isHydrated}
+                    variant={status === 'Cancelled' ? 'outline-danger' : status === 'No-Show' ? 'danger' : 'primary'}
+                  >
+                    {forwardLabel(status)}
+                  </ActionButton>
+                ))}
+                {statusRevertAction && (
+                  <ActionButton
+                    onClick={() => updateStatus(statusRevertAction.target)}
+                    disabled={actionLoading || !isHydrated}
+                    variant="secondary"
+                  >
+                    {revertLabel}
+                  </ActionButton>
+                )}
+              </div>
+            ) : (
+              <SectionCard>
+                <SectionCard.Body className={sectionPadding}>
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Next action</p>
+                      <p className="mt-0.5 text-xs text-slate-500">Update this booking without leaving the grid.</p>
+                    </div>
+                    <Pill variant={detailStatusPillVariant(d.status)} size="sm" dot>
+                      {bookingStatusDisplayLabel(d.status, bookingStyleIsTable)}
+                    </Pill>
                   </div>
-                  <Pill variant={detailStatusPillVariant(d.status)} size="sm" dot>
-                    {bookingStatusDisplayLabel(d.status, bookingStyleIsTable)}
-                  </Pill>
-                </div>
-                <div className="mt-3 flex flex-wrap gap-1.5">
+                  <div className="mt-2 flex flex-wrap gap-1.5">
                   {forwardStatuses.map((status) => (
                     <ActionButton
                       key={status}
@@ -797,17 +885,18 @@ export function BookingDetailPanel({
                       {revertLabel}
                     </ActionButton>
                   )}
-                </div>
-              </SectionCard.Body>
-            </SectionCard>
+                  </div>
+                </SectionCard.Body>
+              </SectionCard>
+            )
           )}
 
           {/* Guest + summary row */}
-          <div className="grid gap-2.5">
+          <div className={isPopover ? 'grid gap-1.5 md:grid-cols-2' : 'grid gap-2.5'}>
             <SectionCard>
-              <SectionCard.Body className="p-3.5">
-                <div className="flex items-start gap-3">
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-sm font-bold text-brand-700 ring-1 ring-brand-100">
+              <SectionCard.Body className={sectionPadding}>
+                <div className={isPopover ? 'flex items-start gap-2' : 'flex items-start gap-3'}>
+                  <div className={`${isPopover ? 'h-8 w-8 rounded-lg text-xs' : 'h-10 w-10 rounded-xl text-sm'} flex shrink-0 items-center justify-center bg-brand-50 font-bold text-brand-700 ring-1 ring-brand-100`}>
                     {(d.guest?.name ?? '?').charAt(0).toUpperCase()}
                   </div>
                   <div className="min-w-0 flex-1">
@@ -817,23 +906,23 @@ export function BookingDetailPanel({
                     </p>
                   </div>
                 </div>
-                <div className="mt-3 space-y-1.5 border-t border-slate-100 pt-3">
+                <div className={`${isPopover ? 'mt-1.5 space-y-0.5 border-t border-slate-100 pt-1.5' : 'mt-3 space-y-1.5 border-t border-slate-100 pt-3'}`}>
                   {d.guest?.email ? (
                     <a href={`mailto:${d.guest.email}`} className="flex items-center gap-2 text-xs text-slate-600 transition-colors hover:text-brand-600">
                       <svg className="h-3.5 w-3.5 shrink-0 text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 0 1-2.25 2.25h-15a2.25 2.25 0 0 1-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25m19.5 0v.243a2.25 2.25 0 0 1-1.07 1.916l-7.5 4.615a2.25 2.25 0 0 1-2.36 0L3.32 8.91a2.25 2.25 0 0 1-1.07-1.916V6.75" /></svg>
                       <span className="truncate">{d.guest.email}</span>
                     </a>
-                  ) : (
+                  ) : !isPopover ? (
                     <p className="text-xs italic text-slate-400">No email on file</p>
-                  )}
+                  ) : null}
                   {d.guest?.phone ? (
                     <a href={`tel:${d.guest.phone}`} className="flex items-center gap-2 text-xs text-slate-600 transition-colors hover:text-brand-600">
                       <svg className="h-3.5 w-3.5 shrink-0 text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 0 0 2.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 0 1-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 0 0-1.091-.852H4.5A2.25 2.25 0 0 0 2.25 4.5v2.25Z" /></svg>
                       {d.guest.phone}
                     </a>
-                  ) : (
+                  ) : !isPopover ? (
                     <p className="text-xs italic text-slate-400">No phone on file</p>
-                  )}
+                  ) : null}
                   {d.guest?.id ? (
                     <div className="pt-1">
                       <GuestTagEditor
@@ -855,7 +944,7 @@ export function BookingDetailPanel({
                       />
                     </div>
                   ) : null}
-                  {d.guest?.id ? (
+                  {d.guest?.id && (!isPopover || d.guest.customer_profile_notes) ? (
                     <CustomerProfileNotesCard
                       embedded
                       guestId={d.guest.id}
@@ -874,13 +963,14 @@ export function BookingDetailPanel({
             </SectionCard>
 
             <SectionCard>
-              <SectionCard.Body className="p-3.5">
-                <div className="grid grid-cols-2 gap-x-3 gap-y-2.5">
-                  <CompactInfo label="Date" value={formatDateNice(d.booking_date)} />
-                  <CompactInfo label="Time" value={`${startTime} – ${endTime}`} />
-                  {d.area_name ? <CompactInfo label="Area" value={d.area_name} /> : null}
-                  <CompactInfo label="Covers" value={String(d.party_size)} />
+              <SectionCard.Body className={sectionPadding}>
+                <div className={`grid grid-cols-2 gap-x-3 ${isPopover ? 'gap-y-1' : 'gap-y-2.5'}`}>
+                  <CompactInfo dense={isPopover} label="Date" value={formatDateNice(d.booking_date)} />
+                  <CompactInfo dense={isPopover} label="Time" value={`${startTime} – ${endTime}`} />
+                  {d.area_name ? <CompactInfo dense={isPopover} label="Area" value={d.area_name} /> : null}
+                  <CompactInfo dense={isPopover} label="Covers" value={String(d.party_size)} />
                   <CompactInfo
+                    dense={isPopover}
                     label="Deposit"
                     value={
                       depositPaid && depositAmountStr
@@ -897,10 +987,10 @@ export function BookingDetailPanel({
                           : 'text-slate-600'
                     }
                   />
-                  <CompactInfo label="Duration" value={`${durationMinutes} min`} />
-                  <CompactInfo label="Source" value={d.source} />
+                  <CompactInfo dense={isPopover} label="Duration" value={`${durationMinutes} min`} />
+                  <CompactInfo dense={isPopover} label="Source" value={d.source} />
                 </div>
-                {isHydrated && (
+                {isHydrated && !isPopover && (
                   <div className="mt-2.5 border-t border-slate-100 pt-2.5">
                     <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Created</p>
                     <p className="mt-0.5 text-[11px] text-slate-500">
@@ -913,7 +1003,7 @@ export function BookingDetailPanel({
             </SectionCard>
           </div>
 
-          {confirmationSentAt && (
+          {confirmationSentAt && !isPopover && (
             <p className="text-[11px] text-slate-500">Confirmation sent {new Date(confirmationSentAt).toLocaleString()}</p>
           )}
           <button
@@ -934,13 +1024,13 @@ export function BookingDetailPanel({
                 setActionLoading(false);
               }
             }}
-            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            className={`w-full rounded-lg border border-slate-200 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 ${isPopover ? 'px-2.5 py-1.5' : 'px-3 py-2'}`}
           >
             Resend confirmation
           </button>
 
           <SectionCard>
-            <SectionCard.Body className="p-3.5">
+            <SectionCard.Body className={sectionPadding}>
               <div className="flex items-center justify-between gap-2">
                 <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Deposit</p>
                 {d.deposit_status === 'Paid' && (
@@ -953,7 +1043,7 @@ export function BookingDetailPanel({
                   <Pill variant="warning" size="sm" dot>Pending</Pill>
                 )}
               </div>
-              <div className="mt-2.5 flex flex-wrap gap-1.5">
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
                 {d.deposit_status !== 'Paid' && d.deposit_status !== 'Refunded' && (
                   <>
                     <button
@@ -1004,7 +1094,7 @@ export function BookingDetailPanel({
             const hasTable = Boolean(tableLine);
             return (
               <SectionCard className={!hasTable ? 'border-amber-200 bg-amber-50/40' : ''}>
-                <SectionCard.Body className="p-3.5">
+                <SectionCard.Body className={sectionPadding}>
                   <div className="flex items-center justify-between gap-2">
                     <div className="min-w-0">
                       <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Table</p>
@@ -1022,7 +1112,7 @@ export function BookingDetailPanel({
                     </button>
                   </div>
                   {isHydrated && detail?.combination_staff_notes ? (
-                    <p className="mt-2.5 border-t border-slate-100 pt-2.5 text-xs leading-snug text-slate-600">
+                    <p className={isPopover ? 'mt-2 border-t border-slate-100 pt-2 text-xs leading-snug text-slate-600' : 'mt-2.5 border-t border-slate-100 pt-2.5 text-xs leading-snug text-slate-600'}>
                       <span className="font-medium text-slate-700">Combination note: </span>
                       {detail.combination_staff_notes}
                     </p>
@@ -1033,7 +1123,7 @@ export function BookingDetailPanel({
           })()}
 
           {showAssignModal && (
-            <div className="rounded-xl border border-brand-200 bg-brand-50/30 p-4">
+            <div className={`rounded-xl border border-brand-200 bg-brand-50/30 ${isPopover ? 'p-3' : 'p-4'}`}>
               <p className="mb-2 text-sm font-medium text-slate-900">Table Assignment</p>
               {suggestionsLoading ? (
                 <p className="mb-3 text-xs text-slate-500">Finding best table options...</p>
@@ -1165,7 +1255,7 @@ export function BookingDetailPanel({
 
           {d.status === 'Cancelled' && (
             <SectionCard className="border-red-100 bg-red-50/20">
-              <SectionCard.Body className="p-3.5">
+              <SectionCard.Body className={sectionPadding}>
                 <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-widest text-red-600/80">Remove from diary</p>
                 <p className="mb-3 text-xs text-slate-600">
                   Permanently delete this cancelled booking and its communications log. This cannot be undone.
@@ -1199,7 +1289,7 @@ export function BookingDetailPanel({
               Modify booking
             </button>
           ) : (
-            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-4">
+            <div className={`rounded-xl border border-slate-200 bg-slate-50 ${isPopover ? 'space-y-3 p-3' : 'space-y-4 p-4'}`}>
               {/* Date / Time / Party Size - availability-aware */}
               <div className="rounded-xl border border-slate-200 bg-white p-3.5">
                 <p className="mb-2.5 text-xs font-semibold text-slate-700">Date / Time / Party Size</p>
@@ -1216,7 +1306,7 @@ export function BookingDetailPanel({
               </div>
 
               {/* Guest details, duration, table assignment */}
-              <div className="space-y-3">
+              <div className={isPopover ? 'space-y-2.5' : 'space-y-3'}>
                 <p className="text-xs font-semibold text-slate-700">Guest &amp; Booking Details</p>
                 <div>
                   <label className="mb-1 block text-xs font-medium text-slate-500">Guest Name</label>
@@ -1301,14 +1391,15 @@ export function BookingDetailPanel({
             </div>
           )}
 
+          <div className={isPopover ? 'grid gap-1.5 md:grid-cols-2' : 'grid gap-3'}>
           {/* Timeline */}
           <SectionCard>
-            <SectionCard.Body className="p-3.5">
-              <p className="mb-2.5 text-[10px] font-semibold uppercase tracking-widest text-slate-400">Timeline</p>
+            <SectionCard.Body className={sectionPadding}>
+              <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-widest text-slate-400">Timeline</p>
               {d.events.length === 0 ? (
                 <p className="text-xs text-slate-400">{isHydrated ? 'No events yet.' : '…'}</p>
               ) : (
-                <div className="max-h-36 space-y-2 overflow-y-auto pr-1">
+                <div className={`${isPopover ? 'max-h-28 space-y-1.5' : 'max-h-36 space-y-2'} overflow-y-auto pr-1`}>
                   {d.events.map((ev) => (
                     <div key={ev.id} className="flex items-start gap-2 text-xs">
                       <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-slate-100">
@@ -1329,10 +1420,10 @@ export function BookingDetailPanel({
 
           {/* Communications */}
           <SectionCard>
-            <SectionCard.Body className="p-3.5">
-              <p className="mb-2.5 text-[10px] font-semibold uppercase tracking-widest text-slate-400">Communications</p>
+            <SectionCard.Body className={sectionPadding}>
+              <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-widest text-slate-400">Communications</p>
               {d.communications && d.communications.length > 0 && (
-                <div className="mb-3 max-h-32 space-y-1.5 overflow-y-auto pr-1">
+                <div className={`${isPopover ? 'mb-2 max-h-24' : 'mb-3 max-h-32'} space-y-1.5 overflow-y-auto pr-1`}>
                   {d.communications.map((c) => (
                     <div key={c.id} className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
                       <Pill variant={c.channel === 'email' ? 'brand' : 'success'} size="sm">{c.channel}</Pill>
@@ -1347,8 +1438,8 @@ export function BookingDetailPanel({
                   ))}
                 </div>
               )}
-              <div className="rounded-xl border border-slate-100 bg-slate-50/80 p-3">
-                <div className="mb-2 flex flex-wrap items-center gap-2">
+              <div className={`rounded-xl border border-slate-100 bg-slate-50/80 ${isPopover ? 'p-2' : 'p-3'}`}>
+                <div className="mb-1.5 flex flex-wrap items-center gap-2">
                   <span className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">Send message via</span>
                   <GuestMessageChannelSelect
                     value={guestMessageChannel}
@@ -1359,8 +1450,8 @@ export function BookingDetailPanel({
                 <textarea
                   value={customMessage}
                   onChange={(e) => setCustomMessage(e.target.value)}
-                  rows={2}
-                  className="w-full rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs placeholder:text-slate-400 focus:border-brand-300 focus:outline-none focus:ring-1 focus:ring-brand-200"
+                  rows={isPopover ? 1 : 2}
+                  className={`w-full rounded-lg border border-slate-200 bg-white px-2.5 text-xs placeholder:text-slate-400 focus:border-brand-300 focus:outline-none focus:ring-1 focus:ring-brand-200 ${isPopover ? 'py-1.5' : 'py-2'}`}
                   placeholder="SMS / email to guest…"
                 />
                 <button
@@ -1398,13 +1489,14 @@ export function BookingDetailPanel({
                       setActionLoading(false);
                     }
                   }}
-                  className="mt-2 rounded-lg bg-slate-800 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-slate-900 disabled:opacity-50"
+                  className="mt-1.5 rounded-lg bg-slate-800 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-slate-900 disabled:opacity-50"
                 >
                   Send
                 </button>
               </div>
             </SectionCard.Body>
           </SectionCard>
+          </div>
         </div>
       </div>
       {confirmDialog && (
@@ -1439,15 +1531,17 @@ function CompactInfo({
   label,
   value,
   valueClass,
+  dense = false,
 }: {
   label: string;
   value: ReactNode;
   valueClass?: string;
+  dense?: boolean;
 }) {
   return (
     <div className="min-w-0">
-      <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">{label}</p>
-      <p className={['mt-0.5 truncate text-sm font-medium text-slate-800', valueClass].filter(Boolean).join(' ')}>{value}</p>
+      <p className={`${dense ? 'text-[9px]' : 'text-[10px]'} font-semibold uppercase tracking-wider text-slate-400`}>{label}</p>
+      <p className={[dense ? 'truncate text-xs font-medium text-slate-800' : 'mt-0.5 truncate text-sm font-medium text-slate-800', valueClass].filter(Boolean).join(' ')}>{value}</p>
     </div>
   );
 }

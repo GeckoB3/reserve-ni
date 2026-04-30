@@ -881,6 +881,7 @@ export function AppointmentBookingFlow({
             ? onlineChargeFromCatalogOffer(selectedServiceForPractitioner)
             : null;
           const require_deposit =
+            !isStaffWalkInAppointment &&
             online != null &&
             online.amountPence > 0 &&
             (online.chargeLabel === 'full_payment' || (online.chargeLabel === 'deposit' && staffRequireDeposit));
@@ -964,6 +965,7 @@ export function AppointmentBookingFlow({
       isStaff,
       staffRequireDeposit,
       staffBookingSource,
+      isStaffWalkInAppointment,
       selectedServiceForPractitioner,
       onBookingCreated,
     ],
@@ -1651,7 +1653,9 @@ export function AppointmentBookingFlow({
               }}
               variant="appointment"
               appointmentDepositPence={
-                multiServiceSegments && multiServiceSegments.length > 1
+                isStaffWalkInAppointment
+                  ? null
+                  : multiServiceSegments && multiServiceSegments.length > 1
                   ? multiServiceSegments.reduce((sum, s) => sum + (s.depositPence ?? 0), 0)
                   : selectedServiceForPractitioner
                     ? onlineChargeFromCatalogOffer(selectedServiceForPractitioner)?.amountPence ?? 0

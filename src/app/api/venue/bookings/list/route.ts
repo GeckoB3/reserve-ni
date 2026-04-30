@@ -9,6 +9,7 @@ import { isTableReservationBooking } from '@/lib/booking/infer-booking-row-model
  * or  /api/venue/bookings/list?from=YYYY-MM-DD&to=YYYY-MM-DD&status=...
  * Optional: guest=<uuid> filters to that guest_id (with date/from-to or ids).
  * Optional: service=<uuid> filters table reservations by venue_services.id.
+ * Optional: calendar=<uuid> filters schedule bookings by calendar/practitioner/resource id.
  * Optional: attendance_confirmed=1 — bookings where the guest confirmed via reminder link (guest_attendance_confirmed_at)
  *   or staff pressed Confirm Booking (staff_attendance_confirmed_at). When set, `status` is ignored.
  * Returns bookings for the authenticated venue, with guest name.
@@ -44,6 +45,7 @@ export async function GET(request: NextRequest) {
     const guestIdParam = request.nextUrl.searchParams.get('guest');
     const areaIdParam = request.nextUrl.searchParams.get('area');
     const serviceIdParam = request.nextUrl.searchParams.get('service');
+    const calendarIdParam = request.nextUrl.searchParams.get('calendar');
     const isoRe = /^\d{4}-\d{2}-\d{2}$/;
     const guestUuidRe =
       /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -73,6 +75,12 @@ export async function GET(request: NextRequest) {
 
     if (serviceIdParam && guestUuidRe.test(serviceIdParam)) {
       query = query.eq('service_id', serviceIdParam);
+    }
+
+    if (calendarIdParam && guestUuidRe.test(calendarIdParam)) {
+      query = query.or(
+        `calendar_id.eq.${calendarIdParam},practitioner_id.eq.${calendarIdParam},resource_id.eq.${calendarIdParam}`,
+      );
     }
 
     if (groupBookingId) {

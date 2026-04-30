@@ -6,6 +6,9 @@ import { replaceBookingAssignments, syncTableStatusesForBooking } from '@/lib/ta
 import { resolvePartySizeBoundsForVenueServices } from '@/lib/booking/party-size-bounds';
 import { resolveVenueMode } from '@/lib/venue-mode';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
+import { getDefaultAreaIdForVenue } from '@/lib/areas/resolve-default-area';
+import { fetchEngineInput } from '@/lib/availability';
+import { getDayOfWeek, resolveDuration, selectServiceForWalkInTime, timeToMinutes } from '@/lib/availability/engine';
 import { z } from 'zod';
 import { normalizeToE164 } from '@/lib/phone/e164';
 
@@ -17,12 +20,22 @@ const walkInSchema = z.object({
   occasion: z.string().max(200).optional(),
   table_id: z.string().uuid().optional(),
   table_ids: z.array(z.string().uuid()).optional(),
+  temporary_table_name: z.string().trim().min(1).max(50).optional(),
   booking_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   booking_time: z.string().regex(/^([01]?[0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$/).optional(),
   practitioner_id: z.string().uuid().optional(),
   appointment_service_id: z.string().uuid().optional(),
   email: z.union([z.literal(''), z.string().email()]).optional(),
+  /** Override venue-derived cover time for table walk-ins (minutes at the table). */
+  duration_minutes: z.number().int().min(15).max(300).optional(),
 });
+
+function isUuid(value: string | null): value is string {
+  return Boolean(
+    value &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value),
+  );
+}
 
 function venueLocalDateTime(timezone: string): { date: string; hours: number; minutes: number } {
   const now = new Date();
@@ -44,11 +57,6 @@ function venueLocalDateTime(timezone: string): { date: string; hours: number; mi
   };
 }
 
-function timeToMinutes(time: string): number {
-  const [hours, minutes] = time.slice(0, 5).split(':').map(Number);
-  return (hours ?? 0) * 60 + (minutes ?? 0);
-}
-
 function extractTime(value: string): string {
   if (value.includes('T')) {
     return (value.split('T')[1] ?? '').slice(0, 5);
@@ -63,6 +71,176 @@ function addMinutesToBookingEnd(startHhMmSs: string, addMins: number): string {
   const hh = Math.floor(total / 60) % 24;
   const mm = total % 60;
   return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:00`;
+}
+
+function estimatedEndIsoFromDuration(bookingDate: string, startHhMmSs: string, durationMinutes: number): string | null {
+  const [year, month, day] = bookingDate.split('-').map(Number);
+  const [hour, minute] = startHhMmSs.slice(0, 5).split(':').map(Number);
+  if (!year || !month || !day || hour == null || minute == null) return null;
+  const startUtc = Date.UTC(year, month - 1, day, hour, minute, 0, 0);
+  const endDate = new Date(startUtc + durationMinutes * 60 * 1000);
+  return Number.isNaN(endDate.getTime()) ? null : endDate.toISOString();
+}
+
+export async function GET(request: NextRequest) {
+  try {
+    const supabase = await createClient();
+    const staff = await getVenueStaff(supabase);
+    if (!staff) {
+      return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
+    }
+
+    const { searchParams } = new URL(request.url);
+    const bookingDate = searchParams.get('date');
+    const bookingTime = searchParams.get('time');
+    const partySizeRaw = Number(searchParams.get('party_size'));
+    const areaId = searchParams.get('area_id');
+
+    if (!bookingDate || !/^\d{4}-\d{2}-\d{2}$/.test(bookingDate) || !bookingTime) {
+      return NextResponse.json({ error: 'date and time are required' }, { status: 400 });
+    }
+    if (!Number.isInteger(partySizeRaw) || partySizeRaw < 1 || partySizeRaw > 50) {
+      return NextResponse.json({ error: 'party_size must be between 1 and 50' }, { status: 400 });
+    }
+    if (areaId != null && areaId !== '' && !isUuid(areaId)) {
+      return NextResponse.json({ error: 'Invalid area_id' }, { status: 400 });
+    }
+
+    const admin = getSupabaseAdminClient();
+    const resolvedAreaId = areaId && isUuid(areaId) ? areaId : await getDefaultAreaIdForVenue(admin, staff.venue_id);
+    if (!resolvedAreaId) {
+      return NextResponse.json({ error: 'Availability setup is required before creating walk-ins' }, { status: 503 });
+    }
+
+    const time = bookingTime.length === 5 ? `${bookingTime}:00` : bookingTime;
+    const service = await inferTableWalkInService(
+      admin,
+      staff.venue_id,
+      resolvedAreaId,
+      bookingDate,
+      time,
+      partySizeRaw,
+    );
+
+    return NextResponse.json({
+      service_id: service.serviceId,
+      duration_minutes: service.durationMinutes,
+      estimated_end_time: service.estimatedEndTime,
+    });
+  } catch (err) {
+    console.error('GET /api/venue/bookings/walk-in failed:', err);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}
+
+async function createTemporaryWalkInTable({
+  admin,
+  venueId,
+  areaId,
+  bookingId,
+  name,
+  partySize,
+}: {
+  admin: ReturnType<typeof getSupabaseAdminClient>;
+  venueId: string;
+  areaId: string;
+  bookingId: string;
+  name: string;
+  partySize: number;
+}): Promise<string> {
+  const { data: latestTable } = await admin
+    .from('venue_tables')
+    .select('sort_order')
+    .eq('venue_id', venueId)
+    .order('sort_order', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const nextSortOrder = Number(latestTable?.sort_order ?? 0) + 1;
+  const { data, error } = await admin
+    .from('venue_tables')
+    .insert({
+      venue_id: venueId,
+      area_id: areaId,
+      name,
+      min_covers: 1,
+      max_covers: Math.max(1, partySize),
+      shape: 'rectangle',
+      table_type: 'Regular',
+      sort_order: nextSortOrder,
+      server_section: 'Temporary',
+      is_active: true,
+      is_temporary: true,
+      temporary_booking_id: bookingId,
+    })
+    .select('id')
+    .single();
+
+  if (error || !data?.id) {
+    if (error?.code === '23505') {
+      throw new Error('A table with this name already exists. Use a unique temporary table name.');
+    }
+    throw new Error(error?.message ?? 'Failed to create temporary table');
+  }
+
+  return data.id as string;
+}
+
+async function inferTableWalkInAreaId(
+  admin: ReturnType<typeof getSupabaseAdminClient>,
+  venueId: string,
+  tableIds: string[],
+): Promise<string | null> {
+  if (tableIds.length > 0) {
+    const { data: tableRows, error } = await admin
+      .from('venue_tables')
+      .select('area_id')
+      .eq('venue_id', venueId)
+      .in('id', tableIds)
+      .limit(1);
+    if (error) {
+      console.error('Walk-in table area lookup failed:', error);
+    }
+    const areaId = (tableRows?.[0] as { area_id?: string | null } | undefined)?.area_id;
+    if (areaId) return areaId;
+  }
+
+  return getDefaultAreaIdForVenue(admin, venueId);
+}
+
+async function inferTableWalkInService(
+  admin: ReturnType<typeof getSupabaseAdminClient>,
+  venueId: string,
+  areaId: string,
+  bookingDate: string,
+  bookingTime: string,
+  partySize: number,
+): Promise<{ serviceId: string | null; estimatedEndTime: string | null; durationMinutes: number }> {
+  try {
+    const engineInput = await fetchEngineInput({
+      supabase: admin,
+      venueId,
+      date: bookingDate,
+      partySize,
+      areaId,
+    });
+    const dayOfWeek = getDayOfWeek(bookingDate);
+    const service = selectServiceForWalkInTime(engineInput, venueId, bookingDate, bookingTime);
+
+    if (!service) {
+      return { serviceId: null, estimatedEndTime: null, durationMinutes: 90 };
+    }
+
+    const durationMinutes = resolveDuration(engineInput.durations, service.id, partySize, dayOfWeek);
+    return {
+      serviceId: service.id,
+      estimatedEndTime: estimatedEndIsoFromDuration(bookingDate, bookingTime, durationMinutes),
+      durationMinutes,
+    };
+  } catch (error) {
+    console.error('Walk-in table service inference failed:', error);
+    return { serviceId: null, estimatedEndTime: null, durationMinutes: 90 };
+  }
 }
 
 /**
@@ -96,6 +274,7 @@ export async function POST(request: NextRequest) {
       occasion,
       table_id,
       table_ids: rawTableIds,
+      temporary_table_name: temporaryTableName,
       booking_date,
       booking_time,
     } = parsed.data;
@@ -162,10 +341,7 @@ export async function POST(request: NextRequest) {
       // Walk-ins use the venue-local moment of confirmation, not the public availability grid.
       const bookingEndTime = addMinutesToBookingEnd(walkInTime, durationMins);
       const emailNorm = rawEmail?.trim() ? rawEmail.trim().toLowerCase() : null;
-      const estimatedEndIso = (() => {
-        const d = new Date(`${today}T${bookingEndTime.slice(0, 5)}:00`);
-        return Number.isNaN(d.getTime()) ? null : d.toISOString();
-      })();
+      const estimatedEndIso = estimatedEndIsoFromDuration(today, walkInTime, durationMins);
 
       const { data: apptGuest, error: apptGuestErr } = await admin
         .from('guests')
@@ -240,31 +416,55 @@ export async function POST(request: NextRequest) {
     const exactTime = `${String(localNow.hours).padStart(2, '0')}:${String(localNow.minutes).padStart(2, '0')}:00`;
     const bookingTime = booking_time ? (booking_time.length === 5 ? `${booking_time}:00` : booking_time) : exactTime;
 
-    const resolvedTableIds = rawTableIds ?? (table_id ? [table_id] : []);
+    const requestedTemporaryTableName = temporaryTableName?.trim();
+    if (requestedTemporaryTableName && (rawTableIds?.length || table_id)) {
+      return NextResponse.json({ error: 'Choose either existing tables or a temporary table, not both' }, { status: 400 });
+    }
 
-    if (table_id && !coversOnly) {
-      const { data: tableCheck } = await admin
+    const resolvedTableIds = rawTableIds ?? (table_id ? [table_id] : []);
+    const areaId = await inferTableWalkInAreaId(admin, staff.venue_id, resolvedTableIds);
+    if (!areaId) {
+      return NextResponse.json({ error: 'Availability setup is required before creating walk-ins' }, { status: 503 });
+    }
+    const tableWalkInService = await inferTableWalkInService(
+      admin,
+      staff.venue_id,
+      areaId,
+      today,
+      bookingTime,
+      party_size,
+    );
+    const walkInDurationMinutes =
+      parsed.data.duration_minutes ?? tableWalkInService.durationMinutes;
+    const walkInEstimatedEndIso = estimatedEndIsoFromDuration(
+      today,
+      bookingTime,
+      walkInDurationMinutes,
+    );
+
+    if (resolvedTableIds.length > 0 && !coversOnly) {
+      const { data: tableChecks } = await admin
         .from('venue_tables')
         .select('id, max_covers')
-        .eq('id', table_id)
         .eq('venue_id', staff.venue_id)
-        .single();
+        .in('id', resolvedTableIds);
 
-      if (!tableCheck) {
+      if (!tableChecks || tableChecks.length !== resolvedTableIds.length) {
         return NextResponse.json({ error: 'Table not found or does not belong to this venue' }, { status: 400 });
       }
 
-      if (party_size > tableCheck.max_covers) {
-        return NextResponse.json({ error: `Party of ${party_size} exceeds table capacity (max ${tableCheck.max_covers})` }, { status: 400 });
+      const combinedCapacity = tableChecks.reduce((total, table) => total + (table.max_covers ?? 0), 0);
+      if (party_size > combinedCapacity) {
+        return NextResponse.json({ error: `Party of ${party_size} exceeds selected table capacity (max ${combinedCapacity})` }, { status: 400 });
       }
 
       const bookingStartMinutes = timeToMinutes(bookingTime);
-      const bookingEndMinutes = bookingStartMinutes + 90;
+      const bookingEndMinutes = bookingStartMinutes + walkInDurationMinutes;
 
       const { data: existingAssignments } = await admin
         .from('booking_table_assignments')
         .select('booking_id, bookings!inner(booking_date, booking_time, estimated_end_time, status)')
-        .eq('table_id', table_id)
+        .in('table_id', resolvedTableIds)
         .eq('bookings.booking_date', today);
       const hasBookingConflict = (existingAssignments ?? []).some((assignment: {
         bookings:
@@ -286,9 +486,12 @@ export async function POST(request: NextRequest) {
         if (!details || !details.booking_time || !details.status) return false;
         if (!['Pending', 'Booked', 'Confirmed', 'Seated'].includes(details.status)) return false;
         const existingStart = timeToMinutes(extractTime(details.booking_time));
-        const existingEnd = details.estimated_end_time
+        let existingEnd = details.estimated_end_time
           ? timeToMinutes(extractTime(details.estimated_end_time))
           : existingStart + 90;
+        if (existingEnd <= existingStart) {
+          existingEnd += 24 * 60;
+        }
         return bookingStartMinutes < existingEnd && bookingEndMinutes > existingStart;
       });
       if (hasBookingConflict) {
@@ -300,12 +503,15 @@ export async function POST(request: NextRequest) {
       const { data: existingBlocks } = await admin
         .from('table_blocks')
         .select('start_at, end_at')
-        .eq('table_id', table_id)
+        .in('table_id', resolvedTableIds)
         .lt('start_at', dayEnd)
         .gt('end_at', dayStart);
       const hasBlockConflict = (existingBlocks ?? []).some((block: { start_at: string; end_at: string }) => {
         const existingStart = timeToMinutes(new Date(block.start_at).toISOString().slice(11, 16));
-        const existingEnd = timeToMinutes(new Date(block.end_at).toISOString().slice(11, 16));
+        let existingEnd = timeToMinutes(new Date(block.end_at).toISOString().slice(11, 16));
+        if (existingEnd <= existingStart) {
+          existingEnd += 24 * 60;
+        }
         return bookingStartMinutes < existingEnd && bookingEndMinutes > existingStart;
       });
       if (hasBlockConflict) {
@@ -338,9 +544,14 @@ export async function POST(request: NextRequest) {
         booking_date: today,
         booking_time: bookingTime,
         party_size,
+        booking_model: 'table_reservation',
         status: 'Seated',
         source: 'walk-in',
+        area_id: areaId,
+        service_id: tableWalkInService.serviceId,
+        estimated_end_time: walkInEstimatedEndIso,
         deposit_status: 'Not Required',
+        deposit_amount_pence: null,
         dietary_notes: dietary_notes?.trim() || null,
         occasion: occasion?.trim() || null,
         staff_attendance_confirmed_at: staffAttendanceAt,
@@ -353,9 +564,32 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to create booking' }, { status: 500 });
     }
 
-    if (resolvedTableIds.length > 0) {
-      await replaceBookingAssignments(admin, booking.id, resolvedTableIds, staff.id);
-      await syncTableStatusesForBooking(admin, booking.id, resolvedTableIds, 'Seated', staff.id);
+    let assignedTableIds = resolvedTableIds;
+    if (requestedTemporaryTableName && !coversOnly) {
+      try {
+        const temporaryTableId = await createTemporaryWalkInTable({
+          admin,
+          venueId: staff.venue_id,
+          areaId,
+          bookingId: booking.id,
+          name: requestedTemporaryTableName,
+          partySize: party_size,
+        });
+        assignedTableIds = [temporaryTableId];
+      } catch (error) {
+        console.error('Temporary walk-in table creation failed:', error);
+        await admin.from('bookings').delete().eq('id', booking.id).eq('venue_id', staff.venue_id);
+        await admin.from('guests').delete().eq('id', guest.id).eq('venue_id', staff.venue_id);
+        return NextResponse.json(
+          { error: error instanceof Error ? error.message : 'Failed to create temporary table' },
+          { status: 500 },
+        );
+      }
+    }
+
+    if (assignedTableIds.length > 0) {
+      await replaceBookingAssignments(admin, booking.id, assignedTableIds, staff.id);
+      await syncTableStatusesForBooking(admin, booking.id, assignedTableIds, 'Seated', staff.id);
     }
 
     return NextResponse.json(booking, { status: 201 });

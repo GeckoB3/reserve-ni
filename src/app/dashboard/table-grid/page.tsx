@@ -33,8 +33,8 @@ export default async function TableGridPage() {
   return (
     <ToastProvider>
       <PageFrame
-        maxWidthClass="max-w-[1600px]"
-        className="px-2 py-4 pb-28 sm:px-4 sm:py-5 sm:pb-5 lg:px-6 lg:pb-8"
+        maxWidthClass="max-w-none"
+        className="flex min-h-full flex-col px-1.5 py-2 pb-28 sm:px-2.5 sm:py-3 sm:pb-4 lg:px-3 lg:py-3 lg:pb-5"
       >
         <TableGridView
           venueId={staff.venue_id}

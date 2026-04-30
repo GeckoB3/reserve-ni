@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { nowInVenueTz } from '@/lib/day-sheet';
-import { getDayOfWeek, fetchEngineInput } from '@/lib/availability';
+import { getDayOfWeek, fetchEngineInput, resolveServiceForDate, timeToMinutes } from '@/lib/availability';
 import {
   peakOverlappingCovers,
   resolveOpeningWindowMinutes,
@@ -11,8 +11,10 @@ import {
 } from '@/lib/dashboard/load-metrics';
 import {
   resolveServiceEngineConcurrentCapFromInput,
+  perServiceConcurrentSlotCaps,
   defaultDurationForDashboardDay,
 } from '@/lib/dashboard/resolve-venue-concurrent-cap';
+import { getDefaultAreaIdForVenue } from '@/lib/areas/resolve-default-area';
 import { resolveVenueMode } from '@/lib/venue-mode';
 import { computeGuestBookingReady } from '@/lib/setup-guest-booking-ready';
 import type { AvailabilityConfig, EngineInput, OpeningHours } from '@/types/availability';
@@ -104,6 +106,15 @@ export interface DashboardHomePayload {
     peak_in_house_covers: number;
     concurrent_cap: number | null;
     fill_percent: number | null;
+    /** Restaurant + service engine: one segment per dining service for that day. */
+    by_service?: Array<{
+      service_id: string;
+      service_name: string;
+      daily_total_covers: number;
+      peak_in_house_covers: number;
+      concurrent_cap: number | null;
+      fill_percent: number | null;
+    }>;
   }>;
   alerts: Array<{ type: string; message: string }>;
   recent_bookings: Array<{
@@ -163,6 +174,13 @@ export async function buildDashboardHomePayload(
     engineInputsByDate = new Map(dateStrs.map((d, i) => [d, inputs[i]!]));
   }
 
+  const defaultAreaId =
+    engine === 'service' ? await getDefaultAreaIdForVenue(admin, staff.venue_id) : null;
+  const useServiceAreaScope =
+    engine === 'service' &&
+    venueMode.bookingModel === 'table_reservation' &&
+    Boolean(defaultAreaId);
+
   const bookingListCols =
     'id, booking_time, party_size, status, deposit_amount_pence, guest_id, estimated_end_time, deposit_status, experience_event_id, class_instance_id, resource_id, event_session_id, calendar_id, service_item_id, practitioner_id, appointment_service_id';
 
@@ -176,7 +194,7 @@ export async function buildDashboardHomePayload(
     admin
       .from('bookings')
       .select(
-        `id, booking_date, booking_time, party_size, status, deposit_amount_pence, guest_id, estimated_end_time, deposit_status, experience_event_id, class_instance_id, resource_id, event_session_id, calendar_id, service_item_id, practitioner_id, appointment_service_id`,
+        `id, booking_date, booking_time, party_size, status, deposit_amount_pence, guest_id, estimated_end_time, deposit_status, experience_event_id, class_instance_id, resource_id, event_session_id, calendar_id, service_item_id, practitioner_id, appointment_service_id, service_id, area_id`,
       )
       .eq('venue_id', staff.venue_id)
       .gte('booking_date', todayStrVenue)
@@ -186,6 +204,9 @@ export async function buildDashboardHomePayload(
 
   const todayBookings = todayBookingsRes.data ?? [];
   const weekBookings = weekBookingsRes.data ?? [];
+  const weekBookingsForOps = useServiceAreaScope
+    ? weekBookings.filter((b) => String((b as { area_id?: string | null }).area_id ?? '') === String(defaultAreaId))
+    : weekBookings;
 
   const todayByModel: Record<string, number> = {};
   for (const b of todayBookings) {
@@ -222,7 +243,7 @@ export async function buildDashboardHomePayload(
 
   const forecast: Array<{ date: string; day: string; covers: number; bookings: number }> = [];
   for (const dateStr of dateStrs) {
-    const dayBookings = weekBookings.filter((b) => b.booking_date === dateStr);
+    const dayBookings = weekBookingsForOps.filter((b) => b.booking_date === dateStr);
     forecast.push({
       date: dateStr,
       day: weekdayShortForDateStr(dateStr),
@@ -251,7 +272,7 @@ export async function buildDashboardHomePayload(
 
   for (let i = 0; i < 7; i++) {
     const dateStr = dateStrs[i]!;
-    const dayBookings = weekBookings.filter((b) => b.booking_date === dateStr);
+    const dayBookings = weekBookingsForOps.filter((b) => b.booking_date === dateStr);
     const engineInput = engine === 'service' ? engineInputsByDate?.get(dateStr) ?? null : null;
     const defaultDur = defaultDurationForDashboardDay(engine, engineInput, availabilityConfig);
 
@@ -270,6 +291,71 @@ export async function buildDashboardHomePayload(
     const cap = caps[i] ?? null;
     const fillPercent = cap != null && cap > 0 ? Math.min(100, Math.round((peak / cap) * 100)) : null;
 
+    let by_service:
+      | Array<{
+          service_id: string;
+          service_name: string;
+          daily_total_covers: number;
+          peak_in_house_covers: number;
+          concurrent_cap: number | null;
+          fill_percent: number | null;
+        }>
+      | undefined;
+    if (useServiceAreaScope && engineInput && engineInput.services.length > 0) {
+      const capRows = perServiceConcurrentSlotCaps(engineInput, staff.venue_id, dateStr);
+      const capMap = new Map(capRows.map((r) => [r.serviceId, r] as const));
+      const sortedServices = [...engineInput.services].sort((a, b) => a.sort_order - b.sort_order);
+      by_service = sortedServices.map((service) => {
+        const capRow = capMap.get(service.id);
+        const svcCap = capRow?.cap ?? null;
+        const effective = resolveServiceForDate(
+          service,
+          engineInput.schedule_exceptions,
+          staff.venue_id,
+          dateStr,
+          dayOfWeek,
+        );
+        if (!effective) {
+          return {
+            service_id: service.id,
+            service_name: service.name,
+            daily_total_covers: 0,
+            peak_in_house_covers: 0,
+            concurrent_cap: null,
+            fill_percent: null,
+          };
+        }
+        const winStart = timeToMinutes(effective.start_time);
+        let winEnd = timeToMinutes(effective.end_time);
+        if (winEnd <= winStart) winEnd += 24 * 60;
+        const svcDurations = engineInput.durations.filter((d) => d.service_id === service.id);
+        const svcDur =
+          svcDurations.length > 0
+            ? Math.min(...svcDurations.map((d) => d.duration_minutes))
+            : defaultDur;
+        const svcBookings = dayBookings.filter(
+          (b) => String((b as { service_id?: string | null }).service_id ?? '') === service.id,
+        );
+        const svcPeak = peakOverlappingCovers(toLoadBookings(svcBookings), {
+          earliestMin: winStart,
+          latestMin: winEnd,
+          stepMinutes: 30,
+          defaultDurationMinutes: svcDur,
+        });
+        const svcDaily = svcBookings.reduce((sum, b) => sum + b.party_size, 0);
+        const svcFill =
+          svcCap != null && svcCap > 0 ? Math.min(100, Math.round((svcPeak / svcCap) * 100)) : null;
+        return {
+          service_id: service.id,
+          service_name: service.name,
+          daily_total_covers: svcDaily,
+          peak_in_house_covers: svcPeak,
+          concurrent_cap: svcCap,
+          fill_percent: svcFill,
+        };
+      });
+    }
+
     heatmap.push({
       date: dateStr,
       day: forecast[i]!.day,
@@ -277,6 +363,7 @@ export async function buildDashboardHomePayload(
       peak_in_house_covers: peak ?? 0,
       concurrent_cap: cap ?? null,
       fill_percent: fillPercent ?? null,
+      ...(by_service && by_service.length > 0 ? { by_service } : {}),
     });
   }
 

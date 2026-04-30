@@ -1199,10 +1199,17 @@ export function AppointmentBookingsDashboard({
                 type="button"
                 disabled={confirmAttendanceLoadingId === b.id}
                 onClick={() => void confirmBookingAttendance(b.id)}
-                className="hidden items-center rounded-lg border border-teal-200 bg-teal-50 px-2.5 py-1 text-xs font-semibold text-teal-900 shadow-sm transition-colors hover:bg-teal-100 focus:outline-none focus:ring-2 focus:ring-teal-400/30 disabled:opacity-50 sm:inline-flex"
+                className="hidden min-w-[4.75rem] items-center justify-center gap-1.5 rounded-lg border border-teal-200 bg-teal-50 px-2.5 py-1 text-xs font-semibold text-teal-900 shadow-sm transition-colors duration-150 hover:bg-teal-100 focus:outline-none focus:ring-2 focus:ring-teal-400/30 disabled:opacity-60 sm:inline-flex"
                 aria-label={`Confirm attendance for ${b.guest_name}`}
+                aria-busy={confirmAttendanceLoadingId === b.id}
               >
-                {confirmAttendanceLoadingId === b.id ? '…' : 'Confirm'}
+                {confirmAttendanceLoadingId === b.id ? (
+                  <span
+                    className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-teal-700/25 border-t-teal-800"
+                    aria-hidden
+                  />
+                ) : null}
+                <span>Confirm</span>
               </button>
             )}
             {showCancelConfirm && (
@@ -1210,10 +1217,17 @@ export function AppointmentBookingsDashboard({
                 type="button"
                 disabled={confirmAttendanceLoadingId === b.id}
                 onClick={() => void cancelStaffAttendanceConfirmation(b.id)}
-                className="hidden items-center rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-400/30 disabled:opacity-50 sm:inline-flex"
+                className="hidden min-w-[5.5rem] items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 shadow-sm transition-colors duration-150 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-400/30 disabled:opacity-60 sm:inline-flex"
                 aria-label={`Cancel staff attendance confirmation for ${b.guest_name}`}
+                aria-busy={confirmAttendanceLoadingId === b.id}
               >
-                {confirmAttendanceLoadingId === b.id ? '…' : 'Unconfirm'}
+                {confirmAttendanceLoadingId === b.id ? (
+                  <span
+                    className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-slate-400/30 border-t-slate-600"
+                    aria-hidden
+                  />
+                ) : null}
+                <span>Unconfirm</span>
               </button>
             )}
           </div>
@@ -1433,9 +1447,16 @@ export function AppointmentBookingsDashboard({
               type="button"
               disabled={confirmAttendanceLoadingId === b.id}
               onClick={() => void confirmBookingAttendance(b.id)}
-              className="inline-flex min-h-[36px] items-center rounded-lg border border-teal-200 bg-teal-50 px-3 py-1.5 text-sm font-semibold text-teal-900 shadow-sm transition-colors hover:bg-teal-100 focus:outline-none focus:ring-2 focus:ring-teal-400/30 disabled:opacity-50"
+              className="inline-flex min-h-[36px] min-w-[9.5rem] items-center justify-center gap-2 rounded-lg border border-teal-200 bg-teal-50 px-3 py-1.5 text-sm font-semibold text-teal-900 shadow-sm transition-colors duration-150 hover:bg-teal-100 focus:outline-none focus:ring-2 focus:ring-teal-400/30 disabled:opacity-60"
+              aria-busy={confirmAttendanceLoadingId === b.id}
             >
-              {confirmAttendanceLoadingId === b.id ? 'Confirming…' : 'Confirm booking'}
+              {confirmAttendanceLoadingId === b.id ? (
+                <span
+                  className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-teal-700/25 border-t-teal-800"
+                  aria-hidden
+                />
+              ) : null}
+              <span>Confirm booking</span>
             </button>
           )}
           {showCancelConfirm && (
@@ -1443,9 +1464,16 @@ export function AppointmentBookingsDashboard({
               type="button"
               disabled={confirmAttendanceLoadingId === b.id}
               onClick={() => void cancelStaffAttendanceConfirmation(b.id)}
-              className="inline-flex min-h-[36px] items-center rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-400/30 disabled:opacity-50"
+              className="inline-flex min-h-[36px] min-w-[11rem] items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 shadow-sm transition-colors duration-150 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-400/30 disabled:opacity-60"
+              aria-busy={confirmAttendanceLoadingId === b.id}
             >
-              {confirmAttendanceLoadingId === b.id ? '…' : 'Cancel confirmation'}
+              {confirmAttendanceLoadingId === b.id ? (
+                <span
+                  className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-slate-400/30 border-t-slate-600"
+                  aria-hidden
+                />
+              ) : null}
+              <span>Cancel confirmation</span>
             </button>
           )}
           <div className="ml-auto flex flex-wrap gap-2">
@@ -1726,7 +1754,11 @@ export function AppointmentBookingsDashboard({
         <DashboardStatCard label="No-shows" value={stats.noShows} color="slate" />
       </div>
 
-      <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
+      <div className="relative space-y-3 overflow-hidden rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
+        <div
+          className={`pointer-events-none absolute inset-x-0 top-0 z-10 h-0.5 bg-brand-500 transition-opacity duration-200 ease-out ${isRefreshing ? 'opacity-100' : 'opacity-0'}`}
+          aria-hidden
+        />
         <p className="text-xs font-medium text-slate-500">Status</p>
         <div className="-mx-0.5 flex snap-x snap-mandatory gap-2 overflow-x-auto overscroll-x-contain pb-1 pt-0.5 [scrollbar-width:thin] touch-pan-x sm:-mx-1">
           {STATUS_FILTERS.map((f) => (
@@ -1812,7 +1844,6 @@ export function AppointmentBookingsDashboard({
             />
           </label>
         </div>
-        {isRefreshing && <p className="text-xs text-slate-500">Syncing…</p>}
       </div>
 
       {selectedBookingIds.length > 0 && (

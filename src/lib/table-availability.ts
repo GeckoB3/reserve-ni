@@ -55,6 +55,18 @@ function getBookingTimeRange(b: BookingWithTime, defaultDuration = 90): { startM
   } else {
     endMin = startMin + defaultDuration;
   }
+  if (endMin <= startMin) {
+    endMin += 24 * 60;
+  }
+  return { startMin, endMin };
+}
+
+function getBlockTimeRange(block: TableBlock): { startMin: number; endMin: number } {
+  const startMin = timeToMinutes((block.start_at.split('T')[1] ?? '00:00:00').slice(0, 5));
+  let endMin = timeToMinutes((block.end_at.split('T')[1] ?? '00:00:00').slice(0, 5));
+  if (endMin <= startMin) {
+    endMin += 24 * 60;
+  }
   return { startMin, endMin };
 }
 
@@ -414,7 +426,16 @@ export async function getTableAvailabilityGrid(
   });
 
   const startMin = serviceStartTime ? timeToMinutes(serviceStartTime) : 9 * 60;
-  const endMin = serviceEndTime ? timeToMinutes(serviceEndTime) : 23 * 60;
+  const configuredEndMin = serviceEndTime ? timeToMinutes(serviceEndTime) : 23 * 60;
+  const latestBookingEndMin = bookings.reduce(
+    (latest, booking) => Math.max(latest, getBookingTimeRange(booking).endMin),
+    configuredEndMin,
+  );
+  const latestBlockEndMin = blocks.reduce(
+    (latest, block) => Math.max(latest, getBlockTimeRange(block).endMin),
+    latestBookingEndMin,
+  );
+  const endMin = Math.ceil(latestBlockEndMin / slotInterval) * slotInterval;
 
   const cells: TableGridCell[] = [];
   const tablesInUse = new Set<string>();
@@ -438,11 +459,12 @@ export async function getTableAvailabilityGrid(
       }
 
       let matchedBlock: TableBlock | null = null;
+      let matchedBlockRange: { startMin: number; endMin: number } | null = null;
       for (const block of tableBlocks) {
-        const blockStart = timeToMinutes((block.start_at.split('T')[1] ?? '00:00:00').slice(0, 5));
-        const blockEnd = timeToMinutes((block.end_at.split('T')[1] ?? '00:00:00').slice(0, 5));
-        if (doIntervalsOverlap(m, m + slotInterval, blockStart, blockEnd)) {
+        const blockRange = getBlockTimeRange(block);
+        if (doIntervalsOverlap(m, m + slotInterval, blockRange.startMin, blockRange.endMin)) {
           matchedBlock = block;
+          matchedBlockRange = blockRange;
           break;
         }
       }
@@ -458,8 +480,8 @@ export async function getTableAvailabilityGrid(
           ? {
               id: matchedBlock.id,
               reason: matchedBlock.reason,
-              start_time: (matchedBlock.start_at.split('T')[1] ?? '00:00:00').slice(0, 5),
-              end_time: (matchedBlock.end_at.split('T')[1] ?? '00:00:00').slice(0, 5),
+              start_time: minutesToTime(matchedBlockRange?.startMin ?? 0),
+              end_time: minutesToTime(matchedBlockRange?.endMin ?? 0),
             }
           : null,
         booking_details: matchedBooking

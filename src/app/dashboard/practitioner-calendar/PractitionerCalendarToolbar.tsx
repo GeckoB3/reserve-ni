@@ -2,7 +2,8 @@
 
 import type { ReactNode } from 'react';
 import { CalendarDateTimePicker } from '@/components/calendar/CalendarDateTimePicker';
-import { PageHeader } from '@/components/ui/dashboard/PageHeader';
+import { OperationsWorkspaceToolbar } from '@/components/dashboard/OperationsWorkspaceToolbar';
+import type { ViewToolbarSummary } from '@/components/dashboard/ViewToolbar';
 
 export type CalendarToolbarViewMode = 'day' | 'week' | 'month';
 
@@ -17,8 +18,12 @@ export interface PractitionerCalendarToolbarProps {
   startHour: number;
   endHour: number;
   onTimeRangeChange: (start: number, end: number) => void;
-  /** Filters, actions, and stats — same row as day/week/month (wraps on small screens). */
-  toolbarExtension?: ReactNode;
+  onRefresh: () => void;
+  onNewBooking: () => void;
+  onWalkIn: () => void;
+  controlsPanel: ReactNode;
+  controlsLabel?: string;
+  summaryContent: ReactNode;
 }
 
 const WEEKDAYS_LONG = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -27,10 +32,6 @@ const MONTHS_LONG = [
   'July', 'August', 'September', 'October', 'November', 'December',
 ];
 const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
-function todayISO(): string {
-  return new Date().toISOString().slice(0, 10);
-}
 
 function addDays(date: string, days: number): string {
   const d = new Date(date + 'T12:00:00');
@@ -61,21 +62,8 @@ function formatCalendarPeriodLabel(
   return `${MONTHS_LONG[d.getMonth()]} ${d.getFullYear()}`;
 }
 
-function isPeriodContainingToday(
-  viewMode: CalendarToolbarViewMode,
-  date: string,
-  weekStart: string,
-  monthAnchor: string,
-): boolean {
-  const today = todayISO();
-  if (viewMode === 'day') return date === today;
-  if (viewMode === 'week') return today >= weekStart && today <= addDays(weekStart, 6);
-  return today.slice(0, 7) === monthAnchor.slice(0, 7);
-}
-
 /**
- * Calendar toolbar. Day view uses CalendarDateTimePicker (scrollable date strip + dropdowns).
- * Week/month views use the classic chevron nav.
+ * Calendar toolbar using the shared compact operations chrome.
  */
 export function PractitionerCalendarToolbar({
   viewMode,
@@ -88,92 +76,113 @@ export function PractitionerCalendarToolbar({
   startHour,
   endHour,
   onTimeRangeChange,
-  toolbarExtension,
+  onRefresh,
+  onNewBooking,
+  onWalkIn,
+  controlsPanel,
+  controlsLabel = 'Filter',
+  summaryContent,
 }: PractitionerCalendarToolbarProps) {
   const periodLabel = formatCalendarPeriodLabel(viewMode, date, weekStart, monthAnchor);
-  const showTodayBadge = isPeriodContainingToday(viewMode, date, weekStart, monthAnchor);
+  const toolbarSummary: ViewToolbarSummary = {
+    total_covers_booked: 0,
+    total_covers_capacity: 0,
+    tables_in_use: 0,
+    tables_total: 0,
+    unassigned_count: 0,
+    combos_in_use: 0,
+  };
+
+  const viewModeSwitcher = (
+    <div className="-mx-1 flex max-w-full items-center gap-1 overflow-x-auto px-1 pb-0.5 [-webkit-overflow-scrolling:touch] sm:mx-0 sm:overflow-visible sm:px-0 sm:pb-0">
+      {(['day', 'week', 'month'] as const).map((m) => (
+        <button
+          key={m}
+          type="button"
+          aria-label={`${m} schedule view`}
+          aria-pressed={viewMode === m}
+          onClick={() => onViewModeChange(m)}
+          className={`min-h-8 shrink-0 rounded-lg px-3 py-1 text-[11px] font-semibold capitalize transition-all sm:text-xs ${
+            viewMode === m
+              ? 'bg-brand-600 text-white shadow-sm shadow-brand-900/20 ring-1 ring-brand-600'
+              : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+          }`}
+        >
+          {m}
+        </button>
+      ))}
+    </div>
+  );
+
+  const datePickerPanel = (
+    <div className="rounded-xl border border-slate-200 bg-white p-2.5 shadow-sm sm:p-3">
+      <CalendarDateTimePicker
+        date={date}
+        onDateChange={onDateChange}
+        startHour={startHour}
+        endHour={endHour}
+        onTimeRangeChange={onTimeRangeChange}
+      />
+    </div>
+  );
+
+  const timeRangePanel = (
+    <div className="space-y-3">
+      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Visible time range</p>
+      <div className="grid grid-cols-2 gap-2">
+        <label className="block">
+          <span className="mb-1 block text-xs font-medium text-slate-600">From</span>
+          <select
+            value={startHour}
+            onChange={(e) => onTimeRangeChange(Number(e.target.value), endHour)}
+            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+          >
+            {Array.from({ length: 23 }, (_, h) => h).map((h) => (
+              <option key={h} value={h} disabled={h >= endHour}>
+                {String(h).padStart(2, '0')}:00
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-xs font-medium text-slate-600">Until</span>
+          <select
+            value={endHour}
+            onChange={(e) => onTimeRangeChange(startHour, Number(e.target.value))}
+            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+          >
+            {Array.from({ length: 24 }, (_, i) => i + 1).map((h) => (
+              <option key={h} value={h} disabled={h <= startHour}>
+                {String(h).padStart(2, '0')}:00
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+    </div>
+  );
 
   return (
-    <div className="space-y-3">
-      <PageHeader
-        eyebrow="Schedule"
-        title="Calendar"
-        subtitle="Plan the day, open bookings instantly, and review your calendars with ease."
-        actions={
-          showTodayBadge ? (
-            <span className="inline-flex items-center gap-2 rounded-full bg-brand-50 px-2.5 py-1 text-xs font-semibold text-brand-800 ring-1 ring-brand-100">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 shadow-sm shadow-emerald-500/30" aria-hidden />
-              Today
-            </span>
-          ) : null
-        }
-      />
-
-      <div className="flex w-full flex-wrap items-center gap-x-3 gap-y-2">
-        <div className="shrink-0 overflow-x-auto">
-          <div className="flex w-max rounded-2xl border border-slate-200 bg-white p-1 shadow-sm shadow-slate-900/5 ring-1 ring-slate-100/80">
-            {(['day', 'week', 'month'] as const).map((m) => (
-              <button
-                key={m}
-                type="button"
-                aria-label={`${m} schedule view`}
-                aria-pressed={viewMode === m}
-                onClick={() => onViewModeChange(m)}
-                className={`min-h-11 rounded-xl px-4 py-2 text-sm font-semibold capitalize transition-all sm:px-5 ${
-                  viewMode === m
-                    ? 'bg-brand-600 text-white shadow-sm shadow-brand-900/20 ring-1 ring-brand-600'
-                    : 'text-slate-600 hover:bg-slate-50'
-                }`}
-              >
-                {m}
-              </button>
-            ))}
-          </div>
-        </div>
-        {toolbarExtension}
-      </div>
-
-      {/* Day view: full date/time picker with scrollable strip */}
-      {viewMode === 'day' && (
-        <div className="rounded-[1.5rem] border border-slate-200 bg-white p-3 shadow-sm shadow-slate-900/5">
-          <CalendarDateTimePicker
-            date={date}
-            onDateChange={onDateChange}
-            startHour={startHour}
-            endHour={endHour}
-            onTimeRangeChange={onTimeRangeChange}
-          />
-        </div>
-      )}
-
-      {/* Week / month view: classic chevron period nav */}
-      {viewMode !== 'day' && (
-        <div className="flex items-center justify-between rounded-[1.5rem] border border-slate-200 bg-white px-3 py-3 shadow-sm shadow-slate-900/5 sm:px-4">
-          <button
-            type="button"
-            onClick={() => onNavigateDay(-1)}
-            className="min-h-11 min-w-11 rounded-xl p-2 text-slate-400 transition-colors hover:bg-slate-50 hover:text-slate-600"
-            aria-label="Previous period"
-          >
-            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
-            </svg>
-          </button>
-          <div className="min-w-0 flex-1 px-2 text-center">
-            <h2 className="truncate text-sm font-bold text-slate-900 sm:text-base">{periodLabel}</h2>
-          </div>
-          <button
-            type="button"
-            onClick={() => onNavigateDay(1)}
-            className="min-h-11 min-w-11 rounded-xl p-2 text-slate-400 transition-colors hover:bg-slate-50 hover:text-slate-600"
-            aria-label="Next period"
-          >
-            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
-              <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
-            </svg>
-          </button>
-        </div>
-      )}
-    </div>
+    <OperationsWorkspaceToolbar
+      title="Calendar"
+      summary={toolbarSummary}
+      summaryContent={summaryContent}
+      date={date}
+      dateLabel={periodLabel}
+      onDateChange={onDateChange}
+      onPreviousDate={() => onNavigateDay(-1)}
+      onNextDate={() => onNavigateDay(1)}
+      liveState="live"
+      onRefresh={onRefresh}
+      onNewBooking={onNewBooking}
+      onWalkIn={onWalkIn}
+      datePickerPanel={datePickerPanel}
+      timelinePanel={timeRangePanel}
+      timelineLabel={`${String(startHour).padStart(2, '0')}:00-${String(endHour).padStart(2, '0')}:00`}
+      controlsPanel={controlsPanel}
+      controlsLabel={controlsLabel}
+      compact
+      pinnedRow={viewModeSwitcher}
+    />
   );
 }

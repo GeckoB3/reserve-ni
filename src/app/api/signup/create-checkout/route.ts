@@ -136,7 +136,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ redirect_url: '/onboarding' });
     }
 
-    // Appointments Light: card-required subscription checkout (£6 + 8p SMS metered)
+    // Appointments Light: card-required subscription checkout (£10 + 8p SMS metered)
     if (plan === 'light') {
       if (config.model === 'table_reservation') {
         return NextResponse.json(

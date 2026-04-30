@@ -66,7 +66,6 @@ import {
 import { bookingStatusDisplayLabel, isTableReservationBooking } from '@/lib/booking/infer-booking-row-model';
 import { ScheduleFeedColumn } from './ScheduleFeedColumn';
 import { WeekScheduleCdeStrip } from './WeekScheduleCdeStrip';
-import { CalendarColumnsFilter } from './CalendarColumnsFilter';
 import { MonthScheduleGrid } from './MonthScheduleGrid';
 import { PractitionerCalendarToolbar } from './PractitionerCalendarToolbar';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
@@ -195,6 +194,17 @@ function bookingMatchesCalendarStatusFilter(b: Booking, filterKey: string): bool
   if (filterKey === 'Seated') return b.status === 'Seated';
   return b.status === filterKey;
 }
+
+const CALENDAR_STATUS_FILTERS = [
+  { value: 'all', label: 'All statuses' },
+  { value: 'Pending', label: 'Pending' },
+  { value: 'Booked', label: 'Booked' },
+  { value: 'Confirmed', label: 'Confirmed' },
+  { value: 'Seated', label: 'Started' },
+  { value: 'Completed', label: 'Completed' },
+  { value: 'No-Show', label: 'No Show' },
+  { value: 'Cancelled', label: 'Cancelled' },
+] as const;
 
 function serviceIdForBooking(b: Booking): string | null {
   return b.appointment_service_id ?? b.service_item_id ?? null;
@@ -1460,15 +1470,6 @@ export function PractitionerCalendarView({
     setEndHourOverride(end);
   }
 
-  function goToday() {
-    clearTimeRangeOverridesForDayChange();
-    const now = new Date();
-    const t = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-    setDate(t);
-    setWeekStart(t);
-    setMonthAnchor(t);
-  }
-
   function openNewAtSlot(pracId: string, dateStr: string, time: string) {
     setPrefillPractitionerId(pracId);
     setPrefillDate(dateStr);
@@ -1737,6 +1738,134 @@ export function PractitionerCalendarView({
   const bookedCount = bookingsForToolbarStats.filter((b) => b.status === 'Booked').length;
   const completedCount = bookingsForToolbarStats.filter((b) => b.status === 'Completed').length;
 
+  const calendarFilterCount = (calendarFilterIds === null ? 0 : 1) + (filterStatus !== 'all' ? 1 : 0);
+  const calendarControlsLabel = calendarFilterCount > 0 ? `Filter (${calendarFilterCount})` : 'Filter';
+  const calendarSummaryContent = (
+    <div
+      className="flex flex-wrap items-center gap-1 text-[11px] sm:gap-1.5 sm:text-xs"
+      title="Bookings on a team column in the visible date range (day, week, or calendar month). Excludes padding weeks around month view."
+    >
+      <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-slate-200/90 bg-slate-50 px-1.5 py-0.5 font-medium text-slate-800">
+        <span className="font-normal text-slate-500">On grid</span>
+        <span className="tabular-nums">{activeToolbarBookings.length}</span>
+      </span>
+      <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-slate-200/90 bg-slate-50 px-1.5 py-0.5 font-medium text-slate-800">
+        <span className="font-normal text-slate-500">Booked</span>
+        <span className="tabular-nums text-sky-600">{bookedCount}</span>
+      </span>
+      <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-slate-200/90 bg-slate-50 px-1.5 py-0.5 font-medium text-slate-800">
+        <span className="font-normal text-slate-500">Confirmed</span>
+        <span className="tabular-nums text-emerald-600">{confirmedCount}</span>
+      </span>
+      <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-slate-200/90 bg-slate-50 px-1.5 py-0.5 font-medium text-slate-800">
+        <span className="font-normal text-slate-500">Completed</span>
+        <span className="tabular-nums text-violet-600">{completedCount}</span>
+      </span>
+    </div>
+  );
+
+  const calendarFilterPanel = (
+    <div className="space-y-4">
+      <div>
+        <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">Calendars</p>
+        {columnPractitioners.length === 0 ? (
+          <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-500">
+            No calendars
+          </p>
+        ) : (
+          <div className="space-y-1">
+            <button
+              type="button"
+              onClick={() => setVisibleCalendarIdsState(null)}
+              className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm font-semibold transition-colors ${
+                calendarFilterIds === null
+                  ? 'bg-brand-600 text-white shadow-sm ring-1 ring-brand-600/20'
+                  : 'bg-slate-50 text-slate-700 hover:bg-slate-100'
+              }`}
+            >
+              <span>All calendars</span>
+              {calendarFilterIds === null ? <span className="text-xs">Selected</span> : null}
+            </button>
+            <div className="max-h-56 space-y-1 overflow-y-auto pr-1">
+              {columnPractitioners.map((col) => {
+                const mine = myCalendarIds.includes(col.id);
+                const label =
+                  mine && myCalendarIds.length === 1
+                    ? 'My appointments'
+                    : mine
+                      ? `Mine - ${col.name}`
+                      : col.name;
+                const checked = calendarFilterIds !== null && calendarFilterIds.includes(col.id);
+                return (
+                  <button
+                    key={col.id}
+                    type="button"
+                    onClick={() => {
+                      const current = new Set(calendarFilterIds ?? []);
+                      if (calendarFilterIds === null) {
+                        setVisibleCalendarIdsState([col.id]);
+                        return;
+                      }
+                      if (checked) current.delete(col.id);
+                      else current.add(col.id);
+                      const ordered = columnPractitioners
+                        .filter((p) => current.has(p.id))
+                        .map((p) => p.id);
+                      setVisibleCalendarIdsState(
+                        ordered.length === 0 || ordered.length === columnPractitioners.length ? null : ordered,
+                      );
+                    }}
+                    className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm font-semibold transition-colors ${
+                      checked
+                        ? 'bg-brand-50 text-brand-800 ring-1 ring-brand-200'
+                        : 'bg-slate-50 text-slate-700 hover:bg-slate-100'
+                    }`}
+                  >
+                    <span className="truncate">{label}</span>
+                    {checked ? <span className="text-xs">Selected</span> : null}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div>
+        <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">Status</p>
+        <div className="flex flex-wrap gap-1.5">
+          {CALENDAR_STATUS_FILTERS.map((status) => (
+            <button
+              key={status.value}
+              type="button"
+              onClick={() => setFilterStatus(status.value)}
+              className={`rounded-full px-3 py-1.5 text-xs font-semibold transition-colors duration-150 ease-out ${
+                filterStatus === status.value
+                  ? 'bg-brand-600 text-white shadow-sm ring-1 ring-brand-600/20'
+                  : 'bg-slate-50 text-slate-600 hover:bg-slate-100 hover:text-slate-800'
+              }`}
+            >
+              {status.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {calendarFilterCount > 0 ? (
+        <button
+          type="button"
+          onClick={() => {
+            setVisibleCalendarIdsState(null);
+            setFilterStatus('all');
+          }}
+          className="text-xs font-semibold text-brand-600 hover:text-brand-700 hover:underline"
+        >
+          Clear filters
+        </button>
+      ) : null}
+    </div>
+  );
+
   const weekDays = useMemo(() => weekDatesFrom(weekStart), [weekStart]);
 
   const monthCells = useMemo(() => {
@@ -1842,86 +1971,19 @@ export function PractitionerCalendarView({
           startHour={startHour}
           endHour={endHour}
           onTimeRangeChange={handleTimeRangeChange}
-          toolbarExtension={
-            <>
-              <CalendarColumnsFilter
-                columns={columnPractitioners.map((p) => ({ id: p.id, name: p.name }))}
-                myCalendarIds={myCalendarIds}
-                value={calendarFilterIds}
-                onChange={setVisibleCalendarIdsState}
-              />
-              <select
-                value={filterStatus}
-                onChange={(e) => setFilterStatus(e.target.value)}
-                className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-              >
-                <option value="all">All statuses</option>
-                <option value="Pending">Pending</option>
-                <option value="Booked">Booked</option>
-                <option value="Confirmed">Confirmed</option>
-                <option value="Seated">Started</option>
-                <option value="Completed">Completed</option>
-                <option value="No-Show">No Show</option>
-                <option value="Cancelled">Cancelled</option>
-              </select>
-
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPrefillDate(viewMode === 'day' ? date : undefined);
-                    setPrefillTime(undefined);
-                    setPrefillPractitionerId(
-                      calendarFilterIds?.length === 1 ? calendarFilterIds[0] : undefined,
-                    );
-                    setStaffBookingModal('new');
-                  }}
-                  className="flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-brand-700"
-                >
-                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-                  </svg>
-                  {newBookingToolbarLabel}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setStaffBookingModal('walk-in')}
-                  className="flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-emerald-700"
-                >
-                  Walk-in
-                </button>
-              </div>
-
-              <div className="flex w-full flex-wrap items-center gap-x-4 gap-y-2 sm:ml-auto sm:w-auto">
-                <div
-                  className="flex flex-wrap items-center gap-4 text-sm"
-                  title="Bookings on a team column in the visible date range (day, week, or calendar month). Excludes padding weeks around month view."
-                >
-                  <span className="text-slate-500">
-                    <span className="font-semibold text-slate-900">{activeToolbarBookings.length}</span> on grid
-                  </span>
-                  <span className="hidden sm:inline text-slate-500">
-                    <span className="font-semibold text-sky-600">{bookedCount}</span> booked
-                  </span>
-                  <span className="hidden sm:inline text-slate-500">
-                    <span className="font-semibold text-emerald-600">{confirmedCount}</span> confirmed
-                  </span>
-                  <span className="hidden sm:inline text-slate-500">
-                    <span className="font-semibold text-violet-600">{completedCount}</span> completed
-                  </span>
-                </div>
-                {viewMode !== 'day' && (
-                  <button
-                    type="button"
-                    onClick={goToday}
-                    className="shrink-0 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-sm hover:bg-slate-50"
-                  >
-                    Today
-                  </button>
-                )}
-              </div>
-            </>
-          }
+          onRefresh={() => void fetchData()}
+          onNewBooking={() => {
+            setPrefillDate(viewMode === 'day' ? date : undefined);
+            setPrefillTime(undefined);
+            setPrefillPractitionerId(
+              calendarFilterIds?.length === 1 ? calendarFilterIds[0] : undefined,
+            );
+            setStaffBookingModal('new');
+          }}
+          onWalkIn={() => setStaffBookingModal('walk-in')}
+          controlsPanel={calendarFilterPanel}
+          controlsLabel={calendarControlsLabel}
+          summaryContent={calendarSummaryContent}
         />
       </div>
 

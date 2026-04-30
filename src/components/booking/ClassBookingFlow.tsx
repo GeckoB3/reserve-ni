@@ -89,6 +89,7 @@ function paymentSummaryLines(
   slot: ClassSlot,
   spots: number,
   currency: string,
+  suppressOnlinePayment = false,
 ): { lines: string[]; chargePence: number } {
   const sym = symForCurrency(currency);
   const price = slot.price_pence ?? 0;
@@ -99,7 +100,7 @@ function paymentSummaryLines(
     return { lines: ['Free - no payment required'], chargePence: 0 };
   }
 
-  if (req === 'none') {
+  if (req === 'none' || suppressOnlinePayment) {
     return {
       lines: [
         `${sym}${(price / 100).toFixed(2)} per person - pay at venue.`,
@@ -174,6 +175,7 @@ export function ClassBookingFlow({
   onBookingCreated,
 }: ClassBookingFlowProps) {
   const isStaff = bookingAudience === 'staff';
+  const isStaffWalkIn = isStaff && staffBookingSource === 'walk-in';
   const detailsAudience =
     isStaff && staffBookingSource === 'walk-in' ? ('staff_walk_in' as const) : isStaff ? ('staff' as const) : ('public' as const);
   const currency = venue.currency ?? 'GBP';
@@ -297,8 +299,8 @@ export function ClassBookingFlow({
 
   const summary = useMemo(() => {
     if (!selectedClass) return null;
-    return paymentSummaryLines(selectedClass, spots, currency);
-  }, [selectedClass, spots, currency]);
+    return paymentSummaryLines(selectedClass, spots, currency, isStaffWalkIn);
+  }, [selectedClass, spots, currency, isStaffWalkIn]);
 
   const classRefundNoticeHours = useMemo(() => {
     const h = selectedClass?.cancellation_notice_hours;
@@ -396,7 +398,7 @@ export function ClassBookingFlow({
     [venue.id, selectedClass, spots, isStaff, staffBookingSource, onBookingCreated, payWithClassCredits],
   );
 
-  const depositPenceForDetails = payWithClassCredits ? 0 : (summary?.chargePence ?? 0);
+  const depositPenceForDetails = isStaffWalkIn || payWithClassCredits ? 0 : (summary?.chargePence ?? 0);
 
   const handlePaymentComplete = useCallback(async () => {
     if (createResult?.booking_id) {
@@ -905,11 +907,11 @@ export function ClassBookingFlow({
               appointmentDepositPence={depositPenceForDetails > 0 ? depositPenceForDetails : null}
               appointmentChargeLabel={selectedClass.payment_requirement === 'full_payment' ? 'full_payment' : 'deposit'}
               payAtVenueBalancePence={
-                selectedClass.payment_requirement === 'none' && (selectedClass.price_pence ?? 0) > 0
+                (isStaffWalkIn || selectedClass.payment_requirement === 'none') && (selectedClass.price_pence ?? 0) > 0
                   ? (selectedClass.price_pence ?? 0) * spots
                   : null
               }
-              payAtVenuePaymentRequirement={selectedClass.payment_requirement}
+              payAtVenuePaymentRequirement={isStaffWalkIn ? 'none' : selectedClass.payment_requirement}
               currencySymbol={sym}
               refundNoticeHours={classRefundNoticeHours}
               phoneDefaultCountry={phoneDefaultCountry}

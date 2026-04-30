@@ -10,10 +10,28 @@ import {
   FLOOR_PLAN_DEFAULT_LAYOUT_HEIGHT,
   FLOOR_PLAN_DEFAULT_LAYOUT_WIDTH,
 } from '@/lib/floor-plan/fit-view';
+import type { VenueTable } from '@/types/table-management';
 
 const TABLE_TYPE_VALUES = ['Regular', 'High-Top', 'Counter', 'Bar', 'Outdoor'] as const;
 
 const TABLE_SHAPES = ['rectangle', 'circle', 'square', 'oval', 'l-shape', 'polygon'] as const;
+
+interface ActiveFloorPlanRow {
+  id: string;
+  canvas_width: number | null;
+  canvas_height: number | null;
+}
+
+interface FloorPlanPositionRow {
+  table_id: string;
+  position_x: number | null;
+  position_y: number | null;
+  width: number | null;
+  height: number | null;
+  rotation: number | null;
+  seat_angles?: (number | null)[] | null;
+  polygon_points?: { x: number; y: number }[] | null;
+}
 
 const tableSchema = z.object({
   name: z.string().min(1).max(50),
@@ -111,7 +129,7 @@ export async function GET(request: NextRequest) {
     (() => {
       let fpQuery = staff.db
         .from('floor_plans')
-        .select('canvas_width, canvas_height')
+        .select('id, canvas_width, canvas_height')
         .eq('venue_id', staff.venue_id)
         .order('sort_order', { ascending: true })
         .order('created_at', { ascending: true })
@@ -124,9 +142,7 @@ export async function GET(request: NextRequest) {
   ]);
 
   const venue = venueResult.data;
-  const fpRow = floorPlanResult.data?.[0] as
-    | { canvas_width: number | null; canvas_height: number | null }
-    | undefined;
+  const fpRow = floorPlanResult.data?.[0] as ActiveFloorPlanRow | undefined;
   let layoutW = FLOOR_PLAN_DEFAULT_LAYOUT_WIDTH;
   let layoutH = FLOOR_PLAN_DEFAULT_LAYOUT_HEIGHT;
   if (
@@ -139,8 +155,40 @@ export async function GET(request: NextRequest) {
     layoutH = Math.round(fpRow.canvas_height);
   }
 
+  let mergedTables = (tables ?? []) as VenueTable[];
+  if (fpRow?.id) {
+    const { data: positions, error: positionsError } = await staff.db
+      .from('floor_plan_table_positions')
+      .select('table_id, position_x, position_y, width, height, rotation, seat_angles, polygon_points')
+      .eq('floor_plan_id', fpRow.id);
+
+    if (positionsError) {
+      console.error('GET /api/venue/tables positions merge failed:', positionsError);
+    } else {
+      const positionMap = new Map(
+        ((positions ?? []) as FloorPlanPositionRow[]).map((position) => [position.table_id, position]),
+      );
+
+      mergedTables = mergedTables.map((table) => {
+        const position = positionMap.get(table.id);
+        if (!position) return table;
+
+        return {
+          ...table,
+          position_x: position.position_x,
+          position_y: position.position_y,
+          width: position.width,
+          height: position.height,
+          rotation: position.rotation,
+          seat_angles: position.seat_angles ?? table.seat_angles ?? null,
+          polygon_points: position.polygon_points ?? table.polygon_points ?? null,
+        };
+      });
+    }
+  }
+
   return NextResponse.json({
-    tables: tables ?? [],
+    tables: mergedTables,
     floor_plan_layout: { width: layoutW, height: layoutH },
     settings: {
       table_management_enabled: venue?.table_management_enabled ?? false,

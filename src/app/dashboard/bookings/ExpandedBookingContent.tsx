@@ -539,9 +539,16 @@ export function ExpandedBookingContent({
                   type="button"
                   disabled={sendingMessage || draftMessage.trim().length === 0}
                   onClick={() => onSendMessage(guestMessageChannel)}
-                  className="rounded-lg bg-slate-800 px-4 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-slate-900 disabled:opacity-50"
+                  className="inline-flex min-w-[5.25rem] items-center justify-center gap-2 rounded-lg bg-slate-800 px-4 py-1.5 text-xs font-semibold text-white transition-colors duration-150 hover:bg-slate-900 disabled:opacity-50"
+                  aria-busy={sendingMessage}
                 >
-                  {sendingMessage ? 'Sending…' : 'Send'}
+                  {sendingMessage ? (
+                    <span
+                      className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-white/25 border-t-white"
+                      aria-hidden
+                    />
+                  ) : null}
+                  <span>Send</span>
                 </button>
               </div>
             </div>

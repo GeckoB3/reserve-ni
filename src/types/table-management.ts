@@ -27,6 +27,8 @@ export interface VenueTable {
   sort_order: number;
   server_section: string | null;
   is_active: boolean;
+  is_temporary?: boolean;
+  temporary_booking_id?: string | null;
   /** Per-seat angle overrides in radians. null at an index = use computed position. */
   seat_angles?: (number | null)[] | null;
   /** Normalised polygon vertices (0–100% of bounding box) for 'polygon' shape. */

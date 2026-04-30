@@ -92,6 +92,7 @@ export function ResourceBookingFlow({
   initialTime,
 }: ResourceBookingFlowProps) {
   const isStaff = bookingAudience === 'staff';
+  const isStaffWalkIn = isStaff && staffBookingSource === 'walk-in';
   const detailsAudience =
     isStaff && staffBookingSource === 'walk-in' ? ('staff_walk_in' as const) : isStaff ? ('staff' as const) : ('public' as const);
   const phoneDefaultCountry = defaultPhoneCountryForVenueCurrency(venue.currency);
@@ -337,6 +338,7 @@ export function ResourceBookingFlow({
   const totalPricePence = (priceBasis?.price_per_slot_pence ?? 0) * numSlotsCalc;
   const payReq = priceBasis?.payment_requirement ?? 'none';
   const onlineChargePence = useMemo(() => {
+    if (isStaffWalkIn) return 0;
     if (!priceBasis) return 0;
     const req = priceBasis.payment_requirement ?? 'none';
     const n = Math.ceil(duration / priceBasis.slot_interval_minutes);
@@ -344,7 +346,7 @@ export function ResourceBookingFlow({
     if (req === 'full_payment' && total > 0) return total;
     if (req === 'deposit' && (priceBasis.deposit_amount_pence ?? 0) > 0) return priceBasis.deposit_amount_pence ?? 0;
     return 0;
-  }, [priceBasis, duration]);
+  }, [priceBasis, duration, isStaffWalkIn]);
 
   const resourceRefundNoticeHours = useMemo(() => {
     const basis = selectedResource ?? selectedMeta;
@@ -363,13 +365,13 @@ export function ResourceBookingFlow({
     if (totalPricePence <= 0) {
       return { primary: 'Free', secondary: null as string | null };
     }
-    if (payReq === 'full_payment') {
+    if (!isStaffWalkIn && payReq === 'full_payment') {
       return {
         primary: `${sym}${(totalPricePence / 100).toFixed(2)} due now (paid online in full)`,
         secondary: null,
       };
     }
-    if (payReq === 'deposit' && onlineChargePence > 0) {
+    if (!isStaffWalkIn && payReq === 'deposit' && onlineChargePence > 0) {
       return {
         primary: `${sym}${(onlineChargePence / 100).toFixed(2)} deposit due now online`,
         secondary:
@@ -382,7 +384,7 @@ export function ResourceBookingFlow({
       primary: `${sym}${(totalPricePence / 100).toFixed(2)} (pay at venue)`,
       secondary: null,
     };
-  }, [totalPricePence, payReq, onlineChargePence, venue.currency]);
+  }, [totalPricePence, payReq, onlineChargePence, venue.currency, isStaffWalkIn]);
 
   const handleDetailsSubmit = useCallback(
     async (details: GuestDetails) => {
@@ -742,10 +744,10 @@ export function ResourceBookingFlow({
               onBack={() => setStep('summary')}
               requiresDeposit={false}
               variant="appointment"
-              appointmentDepositPence={onlineChargePence > 0 ? onlineChargePence : null}
+              appointmentDepositPence={isStaffWalkIn ? null : onlineChargePence > 0 ? onlineChargePence : null}
               appointmentChargeLabel={payReq === 'full_payment' ? 'full_payment' : 'deposit'}
-              payAtVenueBalancePence={payReq === 'none' && totalPricePence > 0 ? totalPricePence : null}
-              payAtVenuePaymentRequirement={payReq === 'none' ? 'none' : undefined}
+              payAtVenueBalancePence={(isStaffWalkIn || payReq === 'none') && totalPricePence > 0 ? totalPricePence : null}
+              payAtVenuePaymentRequirement={isStaffWalkIn || payReq === 'none' ? 'none' : undefined}
               currencySymbol={currencySymbolFromCode(venue.currency)}
               refundNoticeHours={resourceRefundNoticeHours}
               phoneDefaultCountry={phoneDefaultCountry}

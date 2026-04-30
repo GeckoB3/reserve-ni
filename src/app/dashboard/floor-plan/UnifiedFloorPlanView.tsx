@@ -1,10 +1,8 @@
 'use client';
 
-import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { TabBar } from '@/components/ui/dashboard/TabBar';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { FloorPlanLiveView } from './FloorPlanLiveView';
+import { FloorPlanLiveView, type FloorPlanAreaNavConfig } from './FloorPlanLiveView';
 import type { BookingModel } from '@/types/booking-models';
 import type { VenueArea } from '@/types/areas';
 
@@ -25,27 +23,34 @@ export function UnifiedFloorPlanView({
   const searchParams = useSearchParams();
   const [diningAreas, setDiningAreas] = useState<VenueArea[]>([]);
   const [diningAreaId, setDiningAreaId] = useState<string | null>(null);
+  const [areasLoaded, setAreasLoaded] = useState(bookingModel !== 'table_reservation');
 
   const showDiningAreaChrome =
     bookingModel === 'table_reservation' && diningAreas.filter((a) => a.is_active).length > 1;
 
   useEffect(() => {
-    if (bookingModel !== 'table_reservation') return;
+    if (bookingModel !== 'table_reservation') {
+      return;
+    }
     let cancelled = false;
     void fetch('/api/venue/areas')
       .then((res) => (res.ok ? res.json() : null))
       .then((j) => {
-        if (cancelled || !j?.areas) return;
-        setDiningAreas(j.areas as VenueArea[]);
+        if (cancelled) return;
+        setDiningAreas(Array.isArray(j?.areas) ? (j.areas as VenueArea[]) : []);
+        setAreasLoaded(true);
       })
-      .catch((e) => console.error('[UnifiedFloorPlanView] /api/venue/areas preload failed:', e));
+      .catch((e) => {
+        console.error('[UnifiedFloorPlanView] /api/venue/areas preload failed:', e);
+        if (!cancelled) setAreasLoaded(true);
+      });
     return () => {
       cancelled = true;
     };
   }, [bookingModel]);
 
   useEffect(() => {
-    if (bookingModel !== 'table_reservation') return;
+    if (bookingModel !== 'table_reservation' || !areasLoaded) return;
     const active = diningAreas.filter((a) => a.is_active);
     const fromUrl = searchParams.get('area');
     let fromLs: string | null = null;
@@ -71,9 +76,13 @@ export function UnifiedFloorPlanView({
             : active[0]!.id;
       setDiningAreaId(pick);
     });
-  }, [bookingModel, diningAreas, searchParams, venueId]);
+  }, [bookingModel, areasLoaded, diningAreas, searchParams, venueId]);
 
   const effectiveDiningAreaId = bookingModel === 'table_reservation' ? diningAreaId : null;
+  const activeDiningAreas = useMemo(() => diningAreas.filter((a) => a.is_active), [diningAreas]);
+  const waitingForDiningArea =
+    bookingModel === 'table_reservation' &&
+    (!areasLoaded || (activeDiningAreas.length > 0 && !effectiveDiningAreaId));
 
   const setDiningAreaFilter = useCallback(
     (id: string) => {
@@ -96,37 +105,38 @@ export function UnifiedFloorPlanView({
       : '/dashboard/availability?tab=table&fp=layout';
 
   const areaTabs = useMemo(
-    () => diningAreas.filter((a) => a.is_active).map((a) => ({ id: a.id, label: a.name })),
-    [diningAreas],
+    () => activeDiningAreas.map((a) => ({ id: a.id, label: a.name })),
+    [activeDiningAreas],
   );
 
+  const areaNav: FloorPlanAreaNavConfig | null =
+    showDiningAreaChrome && effectiveDiningAreaId
+      ? {
+          showTabs: true,
+          tabs: areaTabs,
+          value: effectiveDiningAreaId,
+          onChange: setDiningAreaFilter,
+        }
+      : null;
+
   return (
-    <div className="space-y-2 sm:space-y-3">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        {showDiningAreaChrome && effectiveDiningAreaId ? (
-          <TabBar tabs={areaTabs} value={effectiveDiningAreaId} onChange={setDiningAreaFilter} />
-        ) : null}
-        <div
-          className={`flex items-center ${showDiningAreaChrome ? 'sm:justify-end' : ''} ${!showDiningAreaChrome && !isAdmin ? 'hidden' : ''}`}
-        >
-          {isAdmin && (
-            <Link
-              href={editLayoutHref}
-              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-amber-500 px-4 py-2.5 text-sm font-medium text-white hover:bg-amber-600 sm:min-h-0 sm:px-3 sm:py-2"
-            >
-              Edit Layout
-            </Link>
-          )}
+    <div className="flex min-h-[calc(100dvh-6rem)] flex-1 flex-col gap-1.5 sm:gap-2">
+      {waitingForDiningArea ? (
+        <div className="flex min-h-[calc(100dvh-13rem)] items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 text-sm text-slate-500">
+          Loading floor plan...
         </div>
-      </div>
-      <FloorPlanLiveView
-        isAdmin={isAdmin}
-        venueId={venueId}
-        currency={currency}
-        bookingModel={bookingModel}
-        enabledModels={enabledModels}
-        diningAreaId={effectiveDiningAreaId}
-      />
+      ) : (
+        <FloorPlanLiveView
+          isAdmin={isAdmin}
+          venueId={venueId}
+          currency={currency}
+          bookingModel={bookingModel}
+          enabledModels={enabledModels}
+          diningAreaId={effectiveDiningAreaId}
+          areaNav={areaNav}
+          editLayoutHref={isAdmin ? editLayoutHref : undefined}
+        />
+      )}
     </div>
   );
 }

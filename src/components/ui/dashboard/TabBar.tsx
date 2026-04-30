@@ -7,21 +7,30 @@ export function TabBar<T extends string>({
   value,
   pendingValue,
   onChange,
+  mobileNote = 'Scroll sideways to see all settings tabs',
+  density = 'default',
 }: {
   tabs: readonly { id: T; label: string; description?: string }[];
   value: T;
   pendingValue?: T | null;
   onChange: (id: T) => void;
+  mobileNote?: string | null;
+  density?: 'default' | 'compact';
 }) {
   const active = tabs.find((t) => t.id === value);
+  const isCompact = density === 'compact';
   return (
-    <div className="min-w-0 max-w-full space-y-2">
-      <p className="text-[11px] font-medium text-slate-500 sm:hidden" role="note">
-        Scroll sideways to see all settings tabs
-      </p>
+    <div className={`${isCompact ? 'space-y-1' : 'space-y-2'} min-w-0 max-w-full`}>
+      {mobileNote ? (
+        <p className="text-[11px] font-medium text-slate-500 sm:hidden" role="note">
+          {mobileNote}
+        </p>
+      ) : null}
       <div className="overflow-x-auto overscroll-x-contain [-webkit-overflow-scrolling:touch] pb-0.5 sm:overflow-visible sm:pb-0">
         <div
-          className="inline-flex min-h-11 flex-nowrap gap-1 rounded-2xl border border-slate-200/90 bg-slate-50/90 p-1 shadow-inner sm:flex-wrap sm:gap-1.5"
+          className={`inline-flex flex-nowrap gap-1 rounded-2xl border border-slate-200/90 bg-slate-50/90 p-1 shadow-inner sm:flex-wrap sm:gap-1.5 ${
+            isCompact ? 'min-h-9' : 'min-h-11'
+          }`}
           role="tablist"
         >
           {tabs.map((t) => {
@@ -37,7 +46,11 @@ export function TabBar<T extends string>({
                 aria-current={isActive ? 'page' : undefined}
                 title={t.description}
                 onClick={() => onChange(t.id)}
-                className={`min-h-11 shrink-0 snap-start rounded-xl px-3.5 py-2.5 text-left text-sm font-semibold transition-all sm:min-h-10 sm:px-4 sm:py-2 ${
+                className={`shrink-0 snap-start rounded-xl text-left font-semibold transition-colors duration-150 ease-out ${
+                  isCompact
+                    ? 'min-h-9 px-3 py-1.5 text-xs sm:min-h-9 sm:px-3.5 sm:py-1.5'
+                    : 'min-h-11 px-3.5 py-2.5 text-sm sm:min-h-10 sm:px-4 sm:py-2'
+                } ${
                   isActive
                     ? 'bg-white text-brand-800 shadow-md shadow-slate-900/10 ring-1 ring-slate-200/80'
                     : 'text-slate-600 hover:bg-white/70 hover:text-slate-900'

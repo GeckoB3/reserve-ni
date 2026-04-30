@@ -67,6 +67,7 @@ function eventPaymentSummaryLines(
   totalTickets: number,
   totalPricePence: number,
   currency: string,
+  suppressOnlinePayment = false,
 ): { lines: string[]; chargePence: number } {
   const sym = symForCurrency(currency);
   const req = occurrence.payment_requirement ?? 'none';
@@ -76,7 +77,7 @@ function eventPaymentSummaryLines(
     return { lines: ['Free - no payment required'], chargePence: 0 };
   }
 
-  if (req === 'none') {
+  if (req === 'none' || suppressOnlinePayment) {
     return {
       lines: [
         `Total: ${sym}${(totalPricePence / 100).toFixed(2)} - pay at venue.`,
@@ -139,6 +140,7 @@ export function EventBookingFlow({
   onBookingCreated,
 }: EventBookingFlowProps) {
   const isStaff = bookingAudience === 'staff';
+  const isStaffWalkIn = isStaff && staffBookingSource === 'walk-in';
   const detailsAudience =
     isStaff && staffBookingSource === 'walk-in' ? ('staff_walk_in' as const) : isStaff ? ('staff' as const) : ('public' as const);
   const currency = venue.currency ?? 'GBP';
@@ -235,8 +237,8 @@ export function EventBookingFlow({
 
   const paymentSummary = useMemo(() => {
     if (!selectedOccurrence || totalTickets <= 0) return null;
-    return eventPaymentSummaryLines(selectedOccurrence, totalTickets, totalPricePence, currency);
-  }, [selectedOccurrence, totalTickets, totalPricePence, currency]);
+    return eventPaymentSummaryLines(selectedOccurrence, totalTickets, totalPricePence, currency, isStaffWalkIn);
+  }, [selectedOccurrence, totalTickets, totalPricePence, currency, isStaffWalkIn]);
 
   const chargePence = paymentSummary?.chargePence ?? 0;
 
@@ -580,13 +582,13 @@ export function EventBookingFlow({
               onBack={() => setStep('summary')}
               requiresDeposit={false}
               variant="class"
-              appointmentDepositPence={chargePence > 0 ? chargePence : null}
+              appointmentDepositPence={isStaffWalkIn ? null : chargePence > 0 ? chargePence : null}
               appointmentChargeLabel={selectedOccurrence.payment_requirement === 'full_payment' ? 'full_payment' : 'deposit'}
               payAtVenueBalancePence={
-                selectedOccurrence.payment_requirement === 'none' && totalPricePence > 0 ? totalPricePence : null
+                (isStaffWalkIn || selectedOccurrence.payment_requirement === 'none') && totalPricePence > 0 ? totalPricePence : null
               }
               payAtVenuePaymentRequirement={
-                selectedOccurrence.payment_requirement === 'none' ? 'none' : undefined
+                isStaffWalkIn || selectedOccurrence.payment_requirement === 'none' ? 'none' : undefined
               }
               currencySymbol={sym}
               refundNoticeHours={eventRefundNoticeHours}

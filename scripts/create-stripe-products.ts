@@ -72,12 +72,12 @@ async function main() {
 
   const lightProduct = await stripe.products.create({
     name: 'Reserve NI Appointments Light',
-    description: 'Appointments Light — £6/month, one calendar, one login, PAYG SMS at 8p.',
+    description: 'Appointments Light — £10/month, one calendar, one login, PAYG SMS at 8p.',
   });
 
   const lightPrice = await stripe.prices.create({
     product: lightProduct.id,
-    unit_amount: 600,
+    unit_amount: 1000,
     currency: 'gbp',
     recurring: { interval: 'month' },
   });

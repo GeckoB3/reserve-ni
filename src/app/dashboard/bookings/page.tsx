@@ -42,7 +42,9 @@ export default async function BookingsPage() {
   );
   const currency = (venue?.currency as string) ?? 'GBP';
   const pricingTier = (venue as { pricing_tier?: string | null } | null)?.pricing_tier;
-  const isAppointmentShell = isAppointmentDashboardExperience(pricingTier, bookingModel, enabledModels);
+  const isTablePrimaryShell = bookingModel === 'table_reservation';
+  const isAppointmentShell =
+    !isTablePrimaryShell && isAppointmentDashboardExperience(pricingTier, bookingModel, enabledModels);
   const title =
     isUnifiedSchedulingVenue(bookingModel) && enabledModels.length === 0
       ? 'Appointments'
@@ -59,8 +61,10 @@ export default async function BookingsPage() {
 
   return (
     <div className="min-h-0 min-w-0 px-3 pb-[max(1rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))] sm:px-4 md:p-6 md:pb-8 md:pt-6 lg:p-8">
-      <div className="mx-auto max-w-6xl min-w-0">
-        <h1 className="mb-4 text-xl font-semibold tracking-tight text-slate-900 sm:mb-6 sm:text-2xl">{title}</h1>
+      <div className={`mx-auto min-w-0 ${isTablePrimaryShell ? 'max-w-none' : 'max-w-6xl'}`}>
+        {!isTablePrimaryShell ? (
+          <h1 className="mb-4 text-xl font-semibold tracking-tight text-slate-900 sm:mb-6 sm:text-2xl">{title}</h1>
+        ) : null}
         <ToastProvider>
           <Suspense fallback={<BookingsDashboardSkeleton />}>
             {isAppointmentShell ? (

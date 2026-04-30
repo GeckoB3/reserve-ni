@@ -20,12 +20,12 @@ import {
   type BookingStatus,
 } from '@/lib/table-management/booking-status';
 import { useToast } from '@/components/ui/Toast';
-import { DashboardStatCard } from '@/components/dashboard/DashboardStatCard';
 import { PageFrame } from '@/components/ui/dashboard/PageFrame';
-import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 import { EmptyState as DashboardEmptyState } from '@/components/ui/dashboard/EmptyState';
 import { TabBar } from '@/components/ui/dashboard/TabBar';
 import { Pill, type PillVariant } from '@/components/ui/dashboard/Pill';
+import { OperationsWorkspaceToolbar } from '@/components/dashboard/OperationsWorkspaceToolbar';
+import type { ViewToolbarSummary } from '@/components/dashboard/ViewToolbar';
 import type { BookingModel } from '@/types/booking-models';
 import { BOOKING_MODEL_ORDER } from '@/lib/booking/enabled-models';
 import {
@@ -137,6 +137,24 @@ const STATUS_FILTER_OPTIONS: StatusFilterOption[] = [
 const GUEST_UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+function bookingTypeFilterLabel(model: BookingModel): string {
+  switch (model) {
+    case 'table_reservation':
+      return 'Table';
+    case 'unified_scheduling':
+    case 'practitioner_appointment':
+      return 'Appointment';
+    case 'event_ticket':
+      return 'Event';
+    case 'resource_booking':
+      return 'Resource';
+    case 'class_session':
+      return 'Class';
+    default:
+      return bookingModelShortLabel(model);
+  }
+}
+
 interface FetchBookingsOptions {
   silent?: boolean;
   ids?: string[];
@@ -147,6 +165,13 @@ interface DiningService {
   name: string;
   is_active: boolean;
   area_id?: string | null;
+}
+
+interface BookingCalendarFilterOption {
+  id: string;
+  name: string;
+  is_active?: boolean;
+  calendar_type?: string | null;
 }
 
 function todayISO(): string {
@@ -242,6 +267,7 @@ export function BookingsDashboard({
   const [modelFilter, setModelFilter] = useState<'all' | BookingModel>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [serviceFilter, setServiceFilter] = useState<string>('all');
+  const [calendarFilter, setCalendarFilter] = useState<string>('all');
   const [bookings, setBookings] = useState<BookingRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -309,7 +335,8 @@ export function BookingsDashboard({
     }
   }, [viewMode]);
 
-  const showModelFilters = enabledModels.length > 0;
+  const isRestaurantTablePrimary = primaryBookingModel === 'table_reservation';
+  const showModelFilters = !isRestaurantTablePrimary && enabledModels.length > 0;
   const filterModels = useMemo(() => {
     const uniq = new Set<BookingModel>([primaryBookingModel, ...enabledModels]);
     return [...uniq].sort((a, b) => BOOKING_MODEL_ORDER.indexOf(a) - BOOKING_MODEL_ORDER.indexOf(b));
@@ -334,30 +361,43 @@ export function BookingsDashboard({
 
   const [diningAreas, setDiningAreas] = useState<Array<{ id: string; name: string; colour: string; is_active: boolean }>>([]);
   const [diningServices, setDiningServices] = useState<DiningService[]>([]);
+  const [bookingCalendars, setBookingCalendars] = useState<BookingCalendarFilterOption[]>([]);
   useEffect(() => {
     if (primaryBookingModel !== 'table_reservation') return;
     let cancelled = false;
     void Promise.all([
       fetch('/api/venue/areas').then((res) => (res.ok ? res.json() : null)),
       fetch('/api/venue/services').then((res) => (res.ok ? res.json() : null)),
+      enabledModels.length > 0
+        ? fetch('/api/venue/practitioners?active_only=1').then((res) => (res.ok ? res.json() : null))
+        : Promise.resolve(null),
     ])
-      .then(([areasJson, servicesJson]) => {
+      .then(([areasJson, servicesJson, calendarsJson]) => {
         if (cancelled) return;
         if (areasJson?.areas) setDiningAreas(areasJson.areas as typeof diningAreas);
         if (servicesJson?.services) setDiningServices(servicesJson.services as DiningService[]);
+        if (calendarsJson?.practitioners) {
+          setBookingCalendars(calendarsJson.practitioners as BookingCalendarFilterOption[]);
+        }
       })
       .catch((e) => console.error('[BookingsDashboard] table filter preload failed:', e));
     return () => {
       cancelled = true;
     };
-  }, [primaryBookingModel]);
+  }, [enabledModels.length, primaryBookingModel]);
 
   const showAreaBookingsChrome = primaryBookingModel === 'table_reservation' && diningAreas.filter((a) => a.is_active).length > 1;
   const activeDiningServices = useMemo(
     () => diningServices.filter((service) => service.is_active),
     [diningServices],
   );
+  const activeBookingCalendars = useMemo(
+    () => bookingCalendars.filter((calendar) => calendar.is_active !== false),
+    [bookingCalendars],
+  );
   const showServiceBookingsChrome = primaryBookingModel === 'table_reservation' && activeDiningServices.length > 1;
+  const showCalendarBookingsChrome =
+    primaryBookingModel === 'table_reservation' && enabledModels.length > 0 && activeBookingCalendars.length > 0;
 
   const setAreaFilter = useCallback(
     (value: string) => {
@@ -401,6 +441,18 @@ export function BookingsDashboard({
     if (activeDiningServices.some((service) => service.id === serviceFilter)) return;
     setServiceFilter('all');
   }, [activeDiningServices, serviceFilter]);
+
+  useEffect(() => {
+    if (calendarFilter === 'all') return;
+    if (activeBookingCalendars.some((calendar) => calendar.id === calendarFilter)) return;
+    setCalendarFilter('all');
+  }, [activeBookingCalendars, calendarFilter]);
+
+  useEffect(() => {
+    if (filterModels.length > 1) return;
+    if (modelFilter === 'all') return;
+    setModelFilter('all');
+  }, [filterModels.length, modelFilter]);
 
   useEffect(() => {
     const ob = searchParams.get('openBooking');
@@ -531,6 +583,7 @@ export function BookingsDashboard({
       if (!ids && filterGuestId) params.set('guest', filterGuestId);
       if (!ids && filterAreaId) params.set('area', filterAreaId);
       if (!ids && serviceFilter !== 'all') params.set('service', serviceFilter);
+      if (!ids && calendarFilter !== 'all') params.set('calendar', calendarFilter);
       const res = await fetch(`/api/venue/bookings/list?${params}`);
       if (!res.ok) {
         const json = await res.json().catch(() => ({}));
@@ -558,7 +611,7 @@ export function BookingsDashboard({
       if (silent) setIsRefreshing(false);
       else setLoading(false);
     }
-  }, [filterAreaId, filterGuestId, from, invalidCustomRange, serviceFilter, statusFilter, to, viewMode]);
+  }, [calendarFilter, filterAreaId, filterGuestId, from, invalidCustomRange, serviceFilter, statusFilter, to, viewMode]);
 
   const changeTableSaveLock = useRef(false);
 
@@ -1095,8 +1148,6 @@ export function BookingsDashboard({
     }
   };
 
-  const goToToday = () => setAnchorDate(todayISO());
-
   const modelScopedBookings = useMemo(() => {
     if (modelFilter === 'all') return bookings;
     return bookings.filter((b) => inferBookingRowModel(b) === modelFilter);
@@ -1148,6 +1199,217 @@ export function BookingsDashboard({
     return { total, totalCovers, active, confirmed, pending };
   }, [filteredBookings]);
 
+  const bookingToolbarSummary: ViewToolbarSummary = useMemo(() => ({
+    total_covers_booked: stats.totalCovers,
+    total_covers_capacity: stats.totalCovers,
+    tables_in_use: stats.confirmed,
+    tables_total: stats.total,
+    unassigned_count: stats.pending,
+    combos_in_use: stats.active,
+  }), [stats]);
+
+  const bookingSummaryContent = useMemo(() => {
+    const chip =
+      'inline-flex max-w-full items-center gap-1 rounded-md border border-slate-200/90 bg-slate-50 px-1.5 py-0.5 font-medium text-slate-800';
+    const label = 'text-slate-500 font-normal';
+    return (
+      <div className="flex flex-wrap items-center gap-1 text-[11px] sm:gap-1.5 sm:text-xs" aria-label="Booking summary">
+        <span className={chip}>
+          <span className={label}>Bookings</span>
+          <span className="tabular-nums">{stats.total}</span>
+        </span>
+        <span className={chip}>
+          <span className={label}>Covers</span>
+          <span className="tabular-nums">{stats.totalCovers}</span>
+        </span>
+        <span className={chip}>
+          <span className={label}>Confirmed</span>
+          <span className="tabular-nums">{stats.confirmed}/{stats.total}</span>
+        </span>
+        <span className={chip}>
+          <span className={label}>Pending</span>
+          <span className="tabular-nums">{stats.pending}</span>
+        </span>
+      </div>
+    );
+  }, [stats]);
+
+  const filterCount =
+    (statusFilter !== 'All' ? 1 : 0) +
+    (modelFilter !== 'all' ? 1 : 0) +
+    (serviceFilter !== 'all' ? 1 : 0) +
+    (calendarFilter !== 'all' ? 1 : 0) +
+    (filterAreaId ? 1 : 0);
+
+  const bookingsDatePanel = (
+    viewMode === 'custom' ? (
+      <div className="space-y-3">
+        <div>
+          <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">From</label>
+          <input type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
+        </div>
+        <div>
+          <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">To</label>
+          <input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
+        </div>
+        {invalidCustomRange && (
+          <p className="text-xs font-medium text-red-600">From date must be before or equal to To date.</p>
+        )}
+      </div>
+    ) : (
+      <div className="rounded-xl border border-slate-200 bg-white p-2.5 shadow-sm sm:p-3">
+        <CalendarDateTimePicker
+          date={anchorDate}
+          onDateChange={setAnchorDate}
+          startHour={pickerStartHour}
+          endHour={pickerEndHour}
+          onTimeRangeChange={(start, end) => {
+            setStartHourOverride(start);
+            setEndHourOverride(end);
+            setTimeRangeFilterActive(viewMode === 'day');
+          }}
+        />
+        {viewMode === 'day' && timeRangeFilterActive && (
+          <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2">
+            <p className="text-xs text-slate-600">
+              Showing bookings from <span className="font-medium text-slate-800">{String(pickerStartHour).padStart(2, '0')}:00</span> to{' '}
+              <span className="font-medium text-slate-800">{String(pickerEndHour).padStart(2, '0')}:00</span>.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setStartHourOverride(null);
+                setEndHourOverride(null);
+                setTimeRangeFilterActive(false);
+              }}
+              className="shrink-0 text-xs font-medium text-brand-600 hover:text-brand-700 hover:underline"
+            >
+              Clear time filter
+            </button>
+          </div>
+        )}
+      </div>
+    )
+  );
+
+  const bookingsFilterPanel = (
+    <div className="space-y-4">
+      {filterModels.length > 1 && (
+        <div>
+          <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">Booking type</p>
+          <div className="flex flex-wrap gap-1.5">
+            <button
+              type="button"
+              onClick={() => setModelFilter('all')}
+              className={`rounded-full px-3 py-1.5 text-xs font-semibold transition-colors duration-150 ease-out ${
+                modelFilter === 'all'
+                  ? 'bg-brand-600 text-white shadow-sm ring-1 ring-brand-600/20'
+                  : 'bg-slate-50 text-slate-600 hover:bg-slate-100 hover:text-slate-800'
+              }`}
+            >
+              All
+            </button>
+            {filterModels.map((model) => (
+              <button
+                key={model}
+                type="button"
+                onClick={() => setModelFilter(model)}
+                className={`rounded-full px-3 py-1.5 text-xs font-semibold transition-colors duration-150 ease-out ${
+                  modelFilter === model
+                    ? 'bg-brand-600 text-white shadow-sm ring-1 ring-brand-600/20'
+                    : 'bg-slate-50 text-slate-600 hover:bg-slate-100 hover:text-slate-800'
+                }`}
+              >
+                {bookingTypeFilterLabel(model)}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {showServiceBookingsChrome && (
+        <label className="block">
+          <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Service</span>
+          <select
+            value={serviceFilter}
+            onChange={(e) => setServiceFilter(e.target.value)}
+            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+          >
+            <option value="all">All services</option>
+            {activeDiningServices.map((service) => (
+              <option key={service.id} value={service.id}>{service.name}</option>
+            ))}
+          </select>
+        </label>
+      )}
+      {showAreaBookingsChrome && (
+        <label className="block">
+          <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Area</span>
+          <select
+            value={filterAreaId ?? ''}
+            onChange={(e) => setAreaFilter(e.target.value)}
+            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+          >
+            <option value="">All areas</option>
+            {diningAreas
+              .filter((a) => a.is_active)
+              .map((a) => (
+                <option key={a.id} value={a.id}>{a.name}</option>
+              ))}
+          </select>
+        </label>
+      )}
+      {showCalendarBookingsChrome && (
+        <label className="block">
+          <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Calendar</span>
+          <select
+            value={calendarFilter}
+            onChange={(e) => setCalendarFilter(e.target.value)}
+            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+          >
+            <option value="all">All calendars</option>
+            {activeBookingCalendars.map((calendar) => (
+              <option key={calendar.id} value={calendar.id}>{calendar.name}</option>
+            ))}
+          </select>
+        </label>
+      )}
+      <div>
+        <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">Status</p>
+        <div className="flex flex-wrap gap-1.5">
+          {STATUS_FILTER_OPTIONS.map((s) => (
+            <button
+              key={s.label}
+              type="button"
+              onClick={() => setStatusFilter(s.label)}
+              className={`rounded-full px-3 py-1.5 text-xs font-semibold transition-colors duration-150 ease-out ${
+                statusFilter === s.label
+                  ? 'bg-brand-600 text-white shadow-sm ring-1 ring-brand-600/20'
+                  : 'bg-slate-50 text-slate-600 hover:bg-slate-100 hover:text-slate-800'
+              }`}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {filterCount > 0 ? (
+        <button
+          type="button"
+          onClick={() => {
+            setStatusFilter('All');
+            setModelFilter('all');
+            setServiceFilter('all');
+            setCalendarFilter('all');
+            if (filterAreaId) setAreaFilter('');
+          }}
+          className="text-xs font-semibold text-brand-600 hover:text-brand-700 hover:underline"
+        >
+          Clear filters
+        </button>
+      ) : null}
+    </div>
+  );
+
   const exportCsv = useCallback(() => {
     const esc = (value: string) => `"${value.replace(/"/g, '""')}"`;
     const rows = filteredBookings.map((b) => [
@@ -1182,11 +1444,6 @@ export function BookingsDashboard({
 
   return (
     <PageFrame>
-      <PageHeader
-        eyebrow="Operations"
-        title="Bookings"
-        subtitle="Filter by date, status, service, and area. Expand any row for full guest details and actions."
-      />
       <div className="space-y-6">
       {realtimeConnected === false && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
@@ -1211,204 +1468,100 @@ export function BookingsDashboard({
         </div>
       )}
 
-      {showModelFilters && (
-        <div className="overflow-x-auto pb-0.5">
-          <TabBar<'all' | BookingModel>
-            tabs={[
-              { id: 'all', label: 'All types' },
-              ...filterModels.map((m) => ({ id: m as 'all' | BookingModel, label: bookingModelShortLabel(m) })),
-            ]}
-            value={modelFilter}
-            onChange={setModelFilter}
-          />
-        </div>
-      )}
-
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="overflow-x-auto pb-0.5">
-          <TabBar<ViewMode>
-            tabs={[
-              { id: 'day', label: 'Day' },
-              { id: 'week', label: 'Week' },
-              { id: 'month', label: 'Month' },
-              { id: 'custom', label: 'Custom' },
-            ]}
-            value={viewMode}
-            onChange={(id) => { setViewMode(id); if (id !== 'custom') setAnchorDate(todayISO()); }}
-          />
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <button type="button" onClick={goToToday} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 shadow-sm">
-            Today
-          </button>
+      <OperationsWorkspaceToolbar
+        title="Bookings"
+        summary={bookingToolbarSummary}
+        summaryContent={bookingSummaryContent}
+        date={anchorDate}
+        dateLabel={viewMode === 'custom' ? `${customFrom} – ${customTo}` : formatDateLabel(anchorDate, viewMode)}
+        onDateChange={setAnchorDate}
+        onPreviousDate={() => navigate(-1)}
+        onNextDate={() => navigate(1)}
+        liveState={realtimeConnected === false ? 'reconnecting' : 'live'}
+        onRefresh={() => { void fetchBookings({ silent: true }); }}
+        onNewBooking={() => setNewBookingOpen(true)}
+        onWalkIn={() => setWalkInOpen(true)}
+        compact
+        controlsLabel={filterCount > 0 ? `Filter (${filterCount})` : 'Filter'}
+        controlsPanel={bookingsFilterPanel}
+        datePickerPanel={bookingsDatePanel}
+        toolbarTools={(
           <button
             type="button"
             onClick={exportCsv}
-            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 shadow-sm"
+            className="inline-flex h-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white px-2 text-[11px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50 sm:px-2.5 sm:text-xs"
           >
             Export
           </button>
-          <button type="button" onClick={() => setNewBookingOpen(true)} className="flex items-center gap-1.5 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700">
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
-            New Booking
-          </button>
-          <button type="button" onClick={() => setWalkInOpen(true)} className="flex items-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700">
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0ZM12 14a7 7 0 0 0-7 7h14a7 7 0 0 0-7-7Z" /></svg>
-            Walk-in
-          </button>
-        </div>
-      </div>
-
-      {viewMode !== 'custom' ? (
-        viewMode === 'day' ? (
-          <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-            <CalendarDateTimePicker
-              date={anchorDate}
-              onDateChange={setAnchorDate}
-              startHour={pickerStartHour}
-              endHour={pickerEndHour}
-              onTimeRangeChange={(start, end) => {
-                setStartHourOverride(start);
-                setEndHourOverride(end);
-                setTimeRangeFilterActive(true);
-              }}
-            />
-            {timeRangeFilterActive && (
-              <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2">
-                <p className="text-xs text-slate-600">
-                  Showing bookings with start times from{' '}
-                  <span className="font-medium text-slate-800">
-                    {String(pickerStartHour).padStart(2, '0')}:00
-                  </span>{' '}
-                  up to{' '}
-                  <span className="font-medium text-slate-800">
-                    {String(pickerEndHour).padStart(2, '0')}:00
-                  </span>{' '}
-                  (not including the end hour).
-                </p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setStartHourOverride(null);
-                    setEndHourOverride(null);
-                    setTimeRangeFilterActive(false);
-                  }}
-                  className="shrink-0 text-xs font-medium text-brand-600 hover:text-brand-700 hover:underline"
-                >
-                  Clear time filter
-                </button>
+        )}
+        searchActive={searchQuery.trim().length > 0}
+        searchPanel={(
+          <div className="space-y-2">
+            <label htmlFor="bookings-toolbar-search" className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Search
+            </label>
+            <div className="relative">
+              <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+                <svg className="h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
+                </svg>
+              </div>
+              <input
+                id="bookings-toolbar-search"
+                type="text"
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                placeholder="Search guest, phone, email…"
+                className="w-full rounded-xl border border-slate-200 bg-slate-50/60 py-2 pl-9 pr-3 text-sm placeholder:text-slate-400 focus:border-brand-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-100"
+              />
+            </div>
+            {searchQuery.trim() ? (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="text-xs font-semibold text-brand-600 hover:text-brand-700 hover:underline"
+              >
+                Clear search
+              </button>
+            ) : null}
+          </div>
+        )}
+        inlineTools={(
+          <div className="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+            <div className="overflow-x-auto pb-0.5">
+              <TabBar<ViewMode>
+                tabs={[
+                  { id: 'day', label: 'Day' },
+                  { id: 'week', label: 'Week' },
+                  { id: 'month', label: 'Month' },
+                  { id: 'custom', label: 'Custom' },
+                ]}
+                value={viewMode}
+                onChange={(id) => { setViewMode(id); if (id !== 'custom') setAnchorDate(todayISO()); }}
+              />
+            </div>
+            {showModelFilters && (
+              <div className="overflow-x-auto pb-0.5">
+                <TabBar<'all' | BookingModel>
+                  tabs={[
+                    { id: 'all', label: 'All types' },
+                    ...filterModels.map((m) => ({ id: m as 'all' | BookingModel, label: bookingModelShortLabel(m) })),
+                  ]}
+                  value={modelFilter}
+                  onChange={setModelFilter}
+                />
               </div>
             )}
           </div>
-        ) : (
-          <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-3 shadow-sm sm:px-4">
-            <button type="button" onClick={() => navigate(-1)} className="rounded-lg p-2 text-slate-400 hover:bg-slate-50 hover:text-slate-600">
-              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>
-            </button>
-            <div className="min-w-0 flex-1 px-2 text-center">
-              <h2 className="truncate text-sm font-semibold text-slate-900 sm:text-base">{formatDateLabel(anchorDate, viewMode)}</h2>
-              {anchorDate === todayISO() && <span className="text-xs font-medium text-brand-600">Today</span>}
-            </div>
-            <button type="button" onClick={() => navigate(1)} className="rounded-lg p-2 text-slate-400 hover:bg-slate-50 hover:text-slate-600">
-              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg>
-            </button>
-          </div>
-        )
-      ) : (
-        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-          <div className="flex items-center gap-2">
-            <label className="text-sm font-medium text-slate-600">From</label>
-            <input type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
-          </div>
-          <div className="flex items-center gap-2">
-            <label className="text-sm font-medium text-slate-600">To</label>
-            <input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
-          </div>
-          {invalidCustomRange && (
-            <p className="text-sm font-medium text-red-600">From date must be before or equal to To date.</p>
-          )}
-        </div>
-      )}
-
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:gap-4">
-        <DashboardStatCard label="Bookings" value={stats.total} color="brand" />
-        <DashboardStatCard label="Total covers" value={stats.totalCovers} color="violet" />
-        <DashboardStatCard label="Confirmed" value={`${stats.confirmed}/${stats.total}`} color="emerald" />
-        <DashboardStatCard label="Pending" value={stats.pending} color="amber" />
-      </div>
+        )}
+      />
       {/* Confirmed means staff-confirmed, guest-confirmed, or legacy rows with status === 'Confirmed'. */}
 
-      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm shadow-slate-900/5">
-        <div className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
-          <div className="flex flex-wrap items-center gap-1.5">
-            {showServiceBookingsChrome && (
-              <select
-                value={serviceFilter}
-                onChange={(e) => setServiceFilter(e.target.value)}
-                className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-                aria-label="Filter by booking service"
-              >
-                <option value="all">All services</option>
-                {activeDiningServices.map((service) => (
-                  <option key={service.id} value={service.id}>
-                    {service.name}
-                  </option>
-                ))}
-              </select>
-            )}
-            {showAreaBookingsChrome && (
-              <select
-                value={filterAreaId ?? ''}
-                onChange={(e) => setAreaFilter(e.target.value)}
-                className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-                aria-label="Filter by dining area"
-              >
-                <option value="">All areas</option>
-                {diningAreas
-                  .filter((a) => a.is_active)
-                  .map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.name}
-                    </option>
-                  ))}
-              </select>
-            )}
-            {STATUS_FILTER_OPTIONS.map((s) => (
-              <button
-                key={s.label}
-                type="button"
-                onClick={() => setStatusFilter(s.label)}
-                className={`rounded-full px-3 py-1.5 text-xs font-semibold transition-all ${
-                  statusFilter === s.label
-                    ? 'bg-brand-600 text-white shadow-sm ring-1 ring-brand-600/20'
-                    : 'bg-slate-50 text-slate-600 hover:bg-slate-100 hover:text-slate-800'
-                }`}
-              >
-                {s.label}
-              </button>
-            ))}
-          </div>
-          <div className="relative w-full sm:w-64">
-            <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-              <svg className="h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
-              </svg>
-            </div>
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder="Search guest, phone, email…"
-              className="w-full rounded-xl border border-slate-200 bg-slate-50/60 py-2 pl-9 pr-3 text-sm placeholder:text-slate-400 focus:border-brand-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-100"
-            />
-          </div>
-        </div>
-        {isRefreshing && (
-          <div className="border-t border-slate-100 px-5 py-1.5">
-            <span className="text-[11px] text-slate-400">Syncing…</span>
-          </div>
-        )}
+      <div className="relative overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm shadow-slate-900/5">
+        <div
+          className={`pointer-events-none absolute inset-x-0 top-0 z-10 h-0.5 bg-brand-500 transition-opacity duration-200 ease-out ${isRefreshing ? 'opacity-100' : 'opacity-0'}`}
+          aria-hidden
+        />
       </div>
 
       {loading ? (
@@ -1918,17 +2071,23 @@ function BookingsAccordionList({
                     return null;
                   }
                   return (
-                     
                     <div onClick={(e) => e.stopPropagation()} className="flex flex-shrink-0 flex-wrap items-center justify-end gap-1.5">
                       {showAttendanceConfirm && (
                         <button
                           type="button"
                           disabled={confirmAttendanceLoadingId === booking.id}
                           onClick={() => onConfirmBookingAttendance(booking.id)}
-                          className="inline-flex items-center rounded-lg border border-teal-200 bg-teal-50 px-2.5 py-1 text-xs font-semibold text-teal-900 shadow-sm transition-colors hover:bg-teal-100 focus:outline-none focus:ring-2 focus:ring-teal-400/30 disabled:opacity-50"
+                          className="inline-flex min-w-[8.75rem] items-center justify-center gap-1.5 rounded-lg border border-teal-200 bg-teal-50 px-2.5 py-1 text-xs font-semibold text-teal-900 shadow-sm transition-colors duration-150 hover:bg-teal-100 focus:outline-none focus:ring-2 focus:ring-teal-400/30 disabled:opacity-60"
                           aria-label={`Confirm attendance for ${booking.guest_name}`}
+                          aria-busy={confirmAttendanceLoadingId === booking.id}
                         >
-                          {confirmAttendanceLoadingId === booking.id ? '…' : 'Confirm Booking'}
+                          {confirmAttendanceLoadingId === booking.id ? (
+                            <span
+                              className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-teal-700/25 border-t-teal-800"
+                              aria-hidden
+                            />
+                          ) : null}
+                          <span>Confirm Booking</span>
                         </button>
                       )}
                       {showAttendanceCancel && (
@@ -1936,17 +2095,24 @@ function BookingsAccordionList({
                           type="button"
                           disabled={confirmAttendanceLoadingId === booking.id}
                           onClick={() => onCancelStaffAttendanceConfirmation(booking.id)}
-                          className="inline-flex items-center rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-400/30 disabled:opacity-50"
+                          className="inline-flex min-w-[9.5rem] items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 shadow-sm transition-colors duration-150 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-400/30 disabled:opacity-60"
                           aria-label={`Cancel staff attendance confirmation for ${booking.guest_name}`}
+                          aria-busy={confirmAttendanceLoadingId === booking.id}
                         >
-                          {confirmAttendanceLoadingId === booking.id ? '…' : 'Cancel confirmation'}
+                          {confirmAttendanceLoadingId === booking.id ? (
+                            <span
+                              className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-slate-400/30 border-t-slate-600"
+                              aria-hidden
+                            />
+                          ) : null}
+                          <span>Cancel confirmation</span>
                         </button>
                       )}
                       {action && (
                         <button
                           type="button"
                           onClick={() => onStatusAction(booking, action.target)}
-                          className="inline-flex items-center rounded-lg bg-brand-600 px-2.5 py-1 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+                          className="inline-flex min-h-8 min-w-[4.5rem] touch-manipulation items-center justify-center rounded-lg bg-brand-600 px-2.5 py-1 text-xs font-semibold text-white shadow-sm transition-colors duration-150 hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500/40 active:bg-brand-800"
                           aria-label={`${primaryLabel ?? action.label} booking for ${booking.guest_name}`}
                         >
                           {primaryLabel}
@@ -1956,7 +2122,7 @@ function BookingsAccordionList({
                         <button
                           type="button"
                           onClick={() => onStatusAction(booking, 'Booked')}
-                          className="inline-flex items-center rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-900 shadow-sm transition-colors hover:bg-amber-100 focus:outline-none focus:ring-2 focus:ring-amber-400/30"
+                          className="inline-flex min-h-8 touch-manipulation items-center justify-center rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-900 shadow-sm transition-colors duration-150 hover:bg-amber-100 focus:outline-none focus:ring-2 focus:ring-amber-400/30 active:bg-amber-100/80"
                           aria-label={`Undo start for ${booking.guest_name}`}
                         >
                           Undo Start
@@ -1966,7 +2132,7 @@ function BookingsAccordionList({
                         <button
                           type="button"
                           onClick={() => onRequestChangeTable(booking)}
-                          className="inline-flex items-center rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-400/30"
+                          className="inline-flex min-h-8 touch-manipulation items-center justify-center rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 shadow-sm transition-colors duration-150 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-400/30 active:bg-slate-100"
                           aria-label={`Change table for ${booking.guest_name}`}
                         >
                           Change table

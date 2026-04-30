@@ -288,8 +288,10 @@ export function resolveDuration(
     let specificity = 0;
     if (d.day_of_week != null) {
       if (d.day_of_week !== dayOfWeek) continue;
-      specificity += 1;
+      specificity += 1_000;
     }
+    // Prefer the most specific party-size band when several rows match.
+    specificity += Math.max(0, 999 - (d.max_party_size - d.min_party_size));
 
     if (specificity > bestSpecificity) {
       bestSpecificity = specificity;
@@ -298,6 +300,55 @@ export function resolveDuration(
   }
 
   return best?.duration_minutes ?? DEFAULT_DURATION_MINUTES;
+}
+
+/**
+ * Staff walk-ins can be added just after service closes. In that case, keep using
+ * the dining service that most recently finished so party-size turn-time rules stay intuitive.
+ */
+export function selectServiceForWalkInTime(
+  input: EngineInput,
+  venueId: string,
+  dateStr: string,
+  time: string,
+): VenueService | null {
+  const dayOfWeek = getDayOfWeek(dateStr);
+  const requestMinutesRaw = timeToMinutes(time);
+  const effectiveServices = [...input.services]
+    .sort((a, b) => a.sort_order - b.sort_order)
+    .map((service) => {
+      const effectiveService = resolveServiceForDate(
+        service,
+        input.schedule_exceptions,
+        venueId,
+        dateStr,
+        dayOfWeek,
+      );
+      if (!effectiveService) return null;
+
+      const startMinutes = timeToMinutes(effectiveService.start_time);
+      let endMinutes = timeToMinutes(effectiveService.end_time);
+      if (endMinutes <= startMinutes) endMinutes += 24 * 60;
+      const requestMinutes =
+        endMinutes > 24 * 60 && requestMinutesRaw < startMinutes
+          ? requestMinutesRaw + 24 * 60
+          : requestMinutesRaw;
+
+      return { service, startMinutes, endMinutes, requestMinutes };
+    })
+    .filter((row): row is NonNullable<typeof row> => row != null);
+
+  const current = effectiveServices.find(
+    (row) => row.requestMinutes >= row.startMinutes && row.requestMinutes < row.endMinutes,
+  );
+  if (current) return current.service;
+
+  const mostRecentlyFinished = effectiveServices
+    .filter((row) => row.endMinutes <= row.requestMinutes)
+    .sort((a, b) => b.endMinutes - a.endMinutes)[0];
+  if (mostRecentlyFinished) return mostRecentlyFinished.service;
+
+  return effectiveServices[0]?.service ?? null;
 }
 
 /** Resolve the restriction row for a service. */

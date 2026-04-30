@@ -1,7 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { NumericInput } from '@/components/ui/NumericInput';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { PhoneWithCountryField } from '@/components/phone/PhoneWithCountryField';
 import { normalizeToE164 } from '@/lib/phone/e164';
 import { defaultPhoneCountryForVenueCurrency } from '@/lib/phone/default-country';
@@ -20,6 +19,22 @@ interface Suggestion {
 function currentTime(): string {
   const now = new Date();
   return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+}
+
+const WALK_IN_PARTY_MIN = 1;
+const WALK_IN_PARTY_MAX = 50;
+const PARTY_GRID = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] as const;
+
+/** Matches server / availability engine bounds for sitting duration. */
+const COVER_TIME_MIN = 15;
+const COVER_TIME_MAX = 300;
+
+function ChevronDown({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" d="m19 9-7 7-7-7" />
+    </svg>
+  );
 }
 
 export function WalkInModal({
@@ -51,6 +66,8 @@ export function WalkInModal({
     [venueCurrency],
   );
   const [partySize, setPartySize] = useState(2);
+  const [partyPanelOpen, setPartyPanelOpen] = useState(false);
+  const partyPanelRef = useRef<HTMLDivElement>(null);
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [dietaryNotes, setDietaryNotes] = useState('');
@@ -63,6 +80,17 @@ export function WalkInModal({
     setBookingTime(initialTime ?? currentTime());
   }, [initialDate, initialTime]);
 
+  useEffect(() => {
+    if (!partyPanelOpen) return;
+    function handler(e: MouseEvent) {
+      if (partyPanelRef.current && !partyPanelRef.current.contains(e.target as Node)) {
+        setPartyPanelOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [partyPanelOpen]);
+
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [selectedSuggestionKey, setSelectedSuggestionKey] = useState<string | null>(null);
   const [tablePickerOpen, setTablePickerOpen] = useState(false);
@@ -70,6 +98,8 @@ export function WalkInModal({
   const [tableAssignMode, setTableAssignMode] = useState<'suggested' | 'floor'>('suggested');
   const [manualTableIds, setManualTableIds] = useState<string[]>([]);
   const [occupiedTableIds, setOccupiedTableIds] = useState<string[]>([]);
+  const [useTemporaryTable, setUseTemporaryTable] = useState(false);
+  const [temporaryTableName, setTemporaryTableName] = useState('');
 
   const [prefetchedTables, setPrefetchedTables] = useState<MiniFloorTableRow[] | null>(null);
   const [publicBookingAreaMode, setPublicBookingAreaMode] = useState<'auto' | 'manual'>('auto');
@@ -79,6 +109,18 @@ export function WalkInModal({
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  /** Expected minutes at the table (turn time); synced from venue defaults unless staff edits. */
+  const [coverDurationMinutes, setCoverDurationMinutes] = useState(90);
+  const [coverDurationDirty, setCoverDurationDirty] = useState(false);
+  const prevWalkInSuggestInputKeyRef = useRef<string | null>(null);
+
+  const walkInSuggestInputKey = useMemo(() => {
+    const timePart = bookingTime.length >= 5 ? bookingTime.slice(0, 5) : bookingTime;
+    const areaPart =
+      publicBookingAreaMode === 'manual' && floorPlanViewAreaId ? floorPlanViewAreaId : '';
+    return `${bookingDate}|${timePart}|${partySize}|${areaPart}`;
+  }, [bookingDate, bookingTime, partySize, publicBookingAreaMode, floorPlanViewAreaId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -151,49 +193,106 @@ export function WalkInModal({
     return () => { cancelled = true; };
   }, [advancedMode]);
 
-  // Fetch table suggestions eagerly so they're ready when the user opens the picker
+  // Resolve cover time from venue defaults and (in advanced mode) table suggestions / floor busy state
   useEffect(() => {
-    if (!advancedMode || !bookingDate || !bookingTime) {
-      setSuggestions([]);
-      setSelectedSuggestionKey(null);
-      setOccupiedTableIds([]);
-      setManualTableIds([]);
+    if (!bookingDate || !bookingTime || partySize < 1) {
+      if (advancedMode) {
+        setSuggestions([]);
+        setSelectedSuggestionKey(null);
+        setOccupiedTableIds([]);
+        setManualTableIds([]);
+        setUseTemporaryTable(false);
+      }
       return;
     }
-    setManualTableIds([]);
+
+    const prevKey = prevWalkInSuggestInputKeyRef.current;
+    const inputKeyChanged = prevKey !== null && walkInSuggestInputKey !== prevKey;
+    prevWalkInSuggestInputKeyRef.current = walkInSuggestInputKey;
+
+    const effectiveDurationDirty = inputKeyChanged ? false : coverDurationDirty;
+    if (inputKeyChanged && coverDurationDirty) {
+      setCoverDurationDirty(false);
+    }
+
+    if (advancedMode) {
+      setManualTableIds([]);
+      setUseTemporaryTable(false);
+    }
+
     let cancelled = false;
-    setSuggestionLoading(true);
+    if (advancedMode) {
+      setSuggestionLoading(true);
+    }
+
+    const timeParam = bookingTime.length >= 5 ? bookingTime.slice(0, 5) : bookingTime;
+    const durationParams = new URLSearchParams({
+      date: bookingDate,
+      time: timeParam,
+      party_size: String(partySize),
+    });
+    if (publicBookingAreaMode === 'manual' && floorPlanViewAreaId) {
+      durationParams.set('area_id', floorPlanViewAreaId);
+    }
+
     void (async () => {
       try {
-        const timeParam = bookingTime.length >= 5 ? bookingTime.slice(0, 5) : bookingTime;
-        const params = new URLSearchParams({
-          date: bookingDate,
-          time: timeParam,
-          party_size: String(partySize),
-          duration_minutes: '90',
-        });
-        if (publicBookingAreaMode === 'manual' && floorPlanViewAreaId) {
-          params.set('area_id', floorPlanViewAreaId);
+        let durationForSuggestions = coverDurationMinutes;
+        if (!effectiveDurationDirty) {
+          const durationRes = await fetch(`/api/venue/bookings/walk-in?${durationParams.toString()}`);
+          if (durationRes.ok && !cancelled) {
+            const durationPayload = await durationRes.json() as { duration_minutes?: number };
+            const resolved = durationPayload.duration_minutes;
+            if (typeof resolved === 'number') {
+              durationForSuggestions = resolved;
+              setCoverDurationMinutes((m) => (m === resolved ? m : resolved));
+            }
+          }
         }
-        const res = await fetch(`/api/venue/tables/combinations/suggest?${params.toString()}`);
+
+        const suggestionParams = new URLSearchParams(durationParams);
+        suggestionParams.set(
+          'duration_minutes',
+          String(effectiveDurationDirty ? coverDurationMinutes : durationForSuggestions),
+        );
+        const res = await fetch(`/api/venue/tables/combinations/suggest?${suggestionParams.toString()}`);
         if (!res.ok || cancelled) return;
-        const payload = await res.json();
+        const payload = await res.json() as {
+          suggestions?: Suggestion[];
+          occupied_table_ids?: string[];
+          resolved_duration_minutes?: number;
+        };
         if (cancelled) return;
+
+        if (!advancedMode) return;
+
         const next = (payload.suggestions ?? []) as Suggestion[];
-        const busy = (payload.occupied_table_ids ?? []) as string[];
+        const busy = payload.occupied_table_ids ?? [];
         setSuggestions(next);
         setOccupiedTableIds(Array.isArray(busy) ? busy : []);
-        // Auto-select the first suggestion if nothing is chosen yet
         setSelectedSuggestionKey((prev) => {
           if (prev !== null) return prev;
           return next.length > 0 ? `${next[0].source}:${next[0].table_ids.join('|')}` : null;
         });
       } finally {
-        if (!cancelled) setSuggestionLoading(false);
+        if (advancedMode && !cancelled) setSuggestionLoading(false);
       }
     })();
-    return () => { cancelled = true; };
-  }, [advancedMode, bookingDate, bookingTime, partySize, publicBookingAreaMode, floorPlanViewAreaId]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    advancedMode,
+    bookingDate,
+    bookingTime,
+    coverDurationDirty,
+    coverDurationMinutes,
+    floorPlanViewAreaId,
+    partySize,
+    publicBookingAreaMode,
+    walkInSuggestInputKey,
+  ]);
 
   const tablesForFloorPlanPicker = useMemo(() => {
     if (!prefetchedTables?.length) return null;
@@ -207,12 +306,21 @@ export function WalkInModal({
     [selectedSuggestionKey, suggestions],
   );
 
+  const updatePartySizeFromSelector = (nextPartySize: number) => {
+    setPartySize(nextPartySize);
+    setCoverDurationDirty(false);
+    setSelectedSuggestionKey(null);
+  };
+
   const tableIdsToAssign = useMemo(() => {
+    if (useTemporaryTable) return null;
     if (tableAssignMode === 'floor' && manualTableIds.length > 0) return manualTableIds;
     if (tableAssignMode === 'suggested' && selectedSuggestion?.table_ids?.length)
       return selectedSuggestion.table_ids;
     return null;
-  }, [manualTableIds, selectedSuggestion, tableAssignMode]);
+  }, [manualTableIds, selectedSuggestion, tableAssignMode, useTemporaryTable]);
+
+  const temporaryTableOverrideAvailable = advancedMode && !suggestionLoading && suggestions.length === 0;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -225,6 +333,11 @@ export function WalkInModal({
         setLoading(false);
         return;
       }
+      const clampedCoverMins = Math.min(
+        COVER_TIME_MAX,
+        Math.max(COVER_TIME_MIN, Math.round(Number(coverDurationMinutes)) || COVER_TIME_MIN),
+      );
+
       const walkinBody: Record<string, unknown> = {
         party_size: partySize,
         name: name.trim() || 'Walk In',
@@ -234,6 +347,19 @@ export function WalkInModal({
         booking_date: bookingDate,
         booking_time: bookingTime,
       };
+      /** Omit unless staff overrode venue default — avoids posting a stale placeholder before suggest resolves. */
+      if (coverDurationDirty) {
+        walkinBody.duration_minutes = clampedCoverMins;
+      }
+      if (temporaryTableOverrideAvailable && useTemporaryTable) {
+        const trimmedTemporaryTableName = temporaryTableName.trim();
+        if (!trimmedTemporaryTableName) {
+          setError('Enter a temporary table name');
+          setLoading(false);
+          return;
+        }
+        walkinBody.temporary_table_name = trimmedTemporaryTableName;
+      }
       if (!advancedMode && coversSelectedTableIds.length > 0) {
         walkinBody.table_ids = coversSelectedTableIds;
       }
@@ -326,9 +452,9 @@ export function WalkInModal({
               ⚠ {capacityWarning}
             </div>
           )}
-          {/* Date + Time */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
+          {/* Date, time + party size */}
+          <div className="grid grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)_minmax(4.5rem,0.55fr)] gap-2 sm:gap-3">
+            <div className="min-w-0">
               <label htmlFor="walkin-date" className="mb-1.5 block text-sm font-medium text-slate-700">
                 Date
               </label>
@@ -337,10 +463,10 @@ export function WalkInModal({
                 type="date"
                 value={bookingDate}
                 onChange={(e) => setBookingDate(e.target.value)}
-                className="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+                className="w-full min-w-0 rounded-xl border border-slate-200 px-2.5 py-2.5 text-sm transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 sm:px-3"
               />
             </div>
-            <div>
+            <div className="min-w-0">
               <label htmlFor="walkin-time" className="mb-1.5 block text-sm font-medium text-slate-700">
                 Time
               </label>
@@ -349,25 +475,106 @@ export function WalkInModal({
                 type="time"
                 value={bookingTime}
                 onChange={(e) => setBookingTime(e.target.value)}
-                className="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+                className="w-full min-w-0 rounded-xl border border-slate-200 px-2.5 py-2.5 text-sm transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 sm:px-3"
               />
             </div>
+
+          <div ref={partyPanelRef} className="relative min-w-0">
+            <p id="walkin-party-label" className="mb-1.5 block truncate text-sm font-medium text-slate-700">
+              Party size
+            </p>
+            <button
+              id="walkin-party"
+              type="button"
+              aria-labelledby="walkin-party-label walkin-party"
+              aria-expanded={partyPanelOpen}
+              onClick={() => setPartyPanelOpen((open) => !open)}
+              className={`flex min-h-[40px] w-full touch-manipulation items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-semibold tabular-nums transition-colors ${
+                partyPanelOpen
+                  ? 'border-brand-300 bg-brand-50 text-brand-700'
+                  : 'border-slate-200 bg-white text-slate-900 hover:border-slate-300'
+              }`}
+            >
+              {partySize}
+              <ChevronDown className={`h-3.5 w-3.5 text-slate-400 transition-transform duration-150 ${partyPanelOpen ? 'rotate-180' : ''}`} />
+            </button>
+
+            {partyPanelOpen && (
+              <div className="absolute right-0 z-20 mt-1.5 w-[min(17rem,calc(100vw-2rem))] rounded-xl border border-slate-200 bg-white p-2 shadow-lg sm:w-56 sm:p-3">
+                <div className="grid grid-cols-4 gap-1.5">
+                  {PARTY_GRID.map((n) => (
+                    <button
+                      key={n}
+                      type="button"
+                      onClick={() => {
+                        updatePartySizeFromSelector(n);
+                        setPartyPanelOpen(false);
+                      }}
+                      className={`rounded-lg py-2 text-center text-sm font-semibold tabular-nums transition-all ${
+                        partySize === n
+                          ? 'bg-brand-600 text-white shadow-sm'
+                          : 'bg-slate-50 text-slate-700 hover:bg-brand-50 hover:text-brand-700'
+                      }`}
+                    >
+                      {n}
+                    </button>
+                  ))}
+                </div>
+                <div className="mt-2 flex items-center gap-2 border-t border-slate-100 pt-2">
+                  <span className="text-xs text-slate-400">Other:</span>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    autoComplete="off"
+                    placeholder="13+"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        const v = parseInt((e.target as HTMLInputElement).value, 10);
+                        if (!Number.isNaN(v) && v >= WALK_IN_PARTY_MIN && v <= WALK_IN_PARTY_MAX) {
+                          updatePartySizeFromSelector(v);
+                          setPartyPanelOpen(false);
+                        }
+                      }
+                    }}
+                    onBlur={(e) => {
+                      const v = parseInt(e.target.value, 10);
+                      if (!Number.isNaN(v) && v >= WALK_IN_PARTY_MIN && v <= WALK_IN_PARTY_MAX) {
+                        updatePartySizeFromSelector(v);
+                        setPartyPanelOpen(false);
+                      }
+                    }}
+                    className="h-7 w-14 rounded-md border border-slate-200 bg-white px-2 text-center text-sm font-semibold tabular-nums focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
           </div>
 
-          {/* Party size */}
+          {/* Cover time (turn) — drives suggestions, floor busy state, and saved booking end */}
           <div>
-            <label htmlFor="walkin-party" className="mb-1.5 block text-sm font-medium text-slate-700">
-              Party size
+            <label htmlFor="walkin-cover-duration" className="mb-1.5 block text-sm font-medium text-slate-700">
+              Cover time
             </label>
-            <NumericInput
-              id="walkin-party"
-              min={1}
-              max={50}
-              value={partySize}
-              onChange={(v) => setPartySize(v)}
-              className="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
-              required
-            />
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                id="walkin-cover-duration"
+                type="number"
+                min={COVER_TIME_MIN}
+                max={COVER_TIME_MAX}
+                step={5}
+                value={coverDurationMinutes}
+                onChange={(e) => {
+                  const raw = parseInt(e.target.value, 10);
+                  if (Number.isNaN(raw)) return;
+                  setCoverDurationDirty(true);
+                  setCoverDurationMinutes(Math.min(COVER_TIME_MAX, Math.max(COVER_TIME_MIN, raw)));
+                }}
+                className="w-24 rounded-xl border border-slate-200 px-3 py-2.5 text-sm tabular-nums transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+              />
+              <span className="text-sm text-slate-600">minutes at the table</span>
+            </div>
           </div>
 
           {/* Guest name */}
@@ -490,6 +697,7 @@ export function WalkInModal({
                   type="button"
                   onClick={() => {
                     setTableAssignMode('floor');
+                    setUseTemporaryTable(false);
                     if (manualTableIds.length === 0 && selectedSuggestion?.table_ids?.length) {
                       setManualTableIds(selectedSuggestion.table_ids);
                     }
@@ -519,7 +727,9 @@ export function WalkInModal({
                       <span className={selectedSuggestion ? 'font-medium' : ''}>
                         {selectedSuggestion
                           ? selectedSuggestion.table_names.join(' + ')
-                          : 'Select table...'}
+                          : !suggestionLoading && suggestions.length === 0
+                            ? 'No tables available. Add temporary table?'
+                            : 'Select table...'}
                       </span>
                       <div className="flex flex-shrink-0 items-center gap-2">
                         {suggestionLoading && (
@@ -546,9 +756,47 @@ export function WalkInModal({
                           Loading suggestions...
                         </div>
                       ) : suggestions.length === 0 ? (
-                        <p className="text-xs text-amber-700">
-                          No table suggestions for a party of {partySize} at this time. Try floor plan.
-                        </p>
+                        <div className="space-y-3">
+                          <p className="text-xs text-amber-700">
+                            No table suggestions for a party of {partySize} at this time. You can still seat this walk-in at a temporary table.
+                          </p>
+                          <label className="flex items-start gap-2 rounded-lg border border-amber-200 bg-white px-3 py-2 text-xs text-slate-700">
+                            <input
+                              type="checkbox"
+                              checked={useTemporaryTable}
+                              onChange={(event) => {
+                                setUseTemporaryTable(event.target.checked);
+                                if (event.target.checked) {
+                                  setSelectedSuggestionKey(null);
+                                  setManualTableIds([]);
+                                }
+                              }}
+                              className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                            />
+                            <span>
+                              <span className="block font-semibold text-slate-900">Seat at a temporary table</span>
+                              <span className="block text-slate-500">
+                                This table appears at the bottom of the grid and is deleted when the booking is completed.
+                              </span>
+                            </span>
+                          </label>
+                          {useTemporaryTable ? (
+                            <div>
+                              <label htmlFor="temporary-table-name" className="mb-1 block text-xs font-semibold text-slate-700">
+                                Temporary table name
+                              </label>
+                              <input
+                                id="temporary-table-name"
+                                type="text"
+                                value={temporaryTableName}
+                                onChange={(event) => setTemporaryTableName(event.target.value)}
+                                placeholder="e.g. Temp 1, Bar squeeze"
+                                maxLength={50}
+                                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                              />
+                            </div>
+                          ) : null}
+                        </div>
                       ) : (
                         <div className="space-y-1.5">
                           <button
