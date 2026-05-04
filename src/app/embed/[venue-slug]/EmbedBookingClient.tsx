@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { BookPublicBookingFlow } from '@/components/booking/BookPublicBookingFlow';
 import type { VenuePublic } from '@/components/booking/types';
+import { EMBED_IFRAME_MIN_REPORTED_HEIGHT_PX } from '@/lib/embed/widget-frame';
 
 let lastSentHeight = 0;
 function sendHeight(height: number) {
@@ -13,7 +14,7 @@ function sendHeight(height: number) {
 }
 
 function measureEmbedMain(root: HTMLElement): number {
-  return Math.ceil(root.scrollHeight);
+  return Math.max(Math.ceil(root.scrollHeight), EMBED_IFRAME_MIN_REPORTED_HEIGHT_PX);
 }
 
 export function EmbedBookingClient({

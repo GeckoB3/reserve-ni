@@ -1,4 +1,11 @@
 import Script from 'next/script';
+import { EMBED_IFRAME_DEFAULT_HEIGHT_PX } from '@/lib/embed/widget-frame';
+import { normalizePublicBaseUrl } from '@/lib/public-base-url';
+
+/** Ember Steakhouse marketing site: same origin for iframe + resize.js as the dashboard widget snippet. */
+const emberPublicOrigin = normalizePublicBaseUrl(process.env.NEXT_PUBLIC_BASE_URL);
+const emberEmbedSrc = `${emberPublicOrigin}/embed/ember-steakhouse`;
+const emberResizeScriptSrc = `${emberPublicOrigin}/embed/resize.js`;
 
 const heroImage = '/images/Ember-steakhouse%20(6).jpg';
 const diningRoomImage = '/images/Ember-steakhouse%20(2).jpg';
@@ -169,9 +176,9 @@ export default function EmberSteakhousePage() {
 
           <div className="overflow-hidden rounded-[2rem] border border-amber-900/10 bg-white shadow-2xl shadow-amber-950/10">
             <iframe
-              src="https://www.reserveni.com/embed/ember-steakhouse"
+              src={emberEmbedSrc}
               width="100%"
-              height="700"
+              height={EMBED_IFRAME_DEFAULT_HEIGHT_PX}
               style={{ border: 'none', overflow: 'hidden' }}
               scrolling="no"
               id="reserveni-widget"
@@ -188,7 +195,7 @@ export default function EmberSteakhousePage() {
         </div>
       </footer>
 
-      <Script src="https://www.reserveni.com/embed/resize.js" strategy="afterInteractive" />
+      <Script src={emberResizeScriptSrc} strategy="afterInteractive" />
     </main>
   );
 }

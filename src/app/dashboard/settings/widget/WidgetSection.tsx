@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import { PUBLIC_BOOK_TAB_SLUGS } from '@/lib/booking/public-book-tabs';
+import { EMBED_IFRAME_DEFAULT_HEIGHT_PX } from '@/lib/embed/widget-frame';
 
 interface WidgetSectionProps {
   venueName: string;
@@ -16,8 +17,17 @@ export function WidgetSection({ venueName, venueSlug, baseUrl }: WidgetSectionPr
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const embedUrl = `${baseUrl.replace(/\/$/, '')}/embed/${venueSlug}${accentColour ? `?accent=${accentColour.replace(/^#/, '')}` : ''}`;
   const bookUrl = `${baseUrl.replace(/\/$/, '')}/book/${venueSlug}`;
-  const snippet = `<iframe src="${embedUrl}" width="100%" height="700" style="border:none;overflow:hidden;" scrolling="no" id="reserveni-widget"></iframe>
+  const snippet = `<iframe src="${embedUrl}" width="100%" height="${EMBED_IFRAME_DEFAULT_HEIGHT_PX}" style="border:none;overflow:hidden;" scrolling="no" id="reserveni-widget"></iframe>
 <script src="${baseUrl.replace(/\/$/, '')}/embed/resize.js"></script>`;
+
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
+  const copyResetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (copyResetRef.current) clearTimeout(copyResetRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     QRCode.toDataURL(bookUrl, { width: 256, margin: 2 })
@@ -25,8 +35,17 @@ export function WidgetSection({ venueName, venueSlug, baseUrl }: WidgetSectionPr
       .catch(() => setQrDataUrl(null));
   }, [bookUrl]);
 
-  const copyEmbed = useCallback(() => {
-    void navigator.clipboard.writeText(snippet);
+  const copyEmbed = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(snippet);
+      setCopyState('copied');
+      if (copyResetRef.current) clearTimeout(copyResetRef.current);
+      copyResetRef.current = setTimeout(() => setCopyState('idle'), 2500);
+    } catch {
+      setCopyState('error');
+      if (copyResetRef.current) clearTimeout(copyResetRef.current);
+      copyResetRef.current = setTimeout(() => setCopyState('idle'), 4000);
+    }
   }, [snippet]);
 
   const downloadQr = useCallback(() => {
@@ -84,13 +103,27 @@ export function WidgetSection({ venueName, venueSlug, baseUrl }: WidgetSectionPr
         <pre className="mt-4 overflow-x-auto rounded border border-neutral-200 bg-neutral-50 p-4 text-xs text-neutral-800">
           {snippet}
         </pre>
-        <button
-          type="button"
-          onClick={copyEmbed}
-          className="mt-3 rounded bg-neutral-900 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-800"
-        >
-          Copy code
-        </button>
+        <div className="mt-3 flex flex-col items-start gap-2">
+          <button
+            type="button"
+            onClick={() => void copyEmbed()}
+            className="rounded bg-neutral-900 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-800"
+          >
+            {copyState === 'copied' ? 'Copied!' : copyState === 'error' ? 'Copy failed — try again' : 'Copy code'}
+          </button>
+          <p
+            id="embed-copy-feedback"
+            className={`text-sm ${copyState === 'copied' ? 'text-emerald-700' : copyState === 'error' ? 'text-red-600' : 'sr-only'}`}
+            role="status"
+            aria-live="polite"
+          >
+            {copyState === 'copied'
+              ? 'Embed code copied to your clipboard.'
+              : copyState === 'error'
+                ? 'Clipboard access was denied. Check browser permissions or copy from the box above.'
+                : ''}
+          </p>
+        </div>
         <p className="mt-4 text-sm text-neutral-600">
           <span className="font-medium text-neutral-800">Open a specific tab (embed matches /book)</span> - append{' '}
           <code className="rounded bg-neutral-100 px-1 py-0.5 text-xs">?tab=</code> with the same slug as the full-page

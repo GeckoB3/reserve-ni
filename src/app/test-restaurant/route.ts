@@ -1,3 +1,5 @@
+import { EMBED_IFRAME_DEFAULT_HEIGHT_PX } from '@/lib/embed/widget-frame';
+
 export const dynamic = 'force-static';
 
 export function GET() {
@@ -272,7 +274,7 @@ export function GET() {
     <p class="subtitle">Book online below, or call us on 028 9024 XXXX for groups of 8 or more.</p>
 
     <div class="iframe-container">
-      <iframe src="https://www.reserveni.com/embed/test-restaurant" width="100%" height="700" style="border:none;overflow:hidden;" scrolling="no" id="reserveni-widget"></iframe>
+      <iframe src="https://www.reserveni.com/embed/test-restaurant" width="100%" height="${EMBED_IFRAME_DEFAULT_HEIGHT_PX}" style="border:none;overflow:hidden;" scrolling="no" id="reserveni-widget"></iframe>
       <script src="https://www.reserveni.com/embed/resize.js"></script>
     </div>
   </section>

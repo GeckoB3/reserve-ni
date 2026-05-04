@@ -1,4 +1,5 @@
 (function () {
+  // Child frame sends heights ≥ EMBED_IFRAME_MIN_REPORTED_HEIGHT_PX (see src/lib/embed/widget-frame.ts).
   var iframe = document.getElementById('reserveni-widget');
   if (!iframe) return;
 
