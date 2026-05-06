@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { calculateSmsOverageDelta, resolveSmsBillingPeriod, wouldExceedSmsQuota } from '@/lib/sms-usage';
+import {
+  buildStripeSmsMeterEventIdentifier,
+  calculateSmsOverageDelta,
+  resolveSmsBillingPeriod,
+  wouldExceedSmsQuota,
+} from '@/lib/sms-usage';
 
 describe('wouldExceedSmsQuota', () => {
   it('blocks when allowance is zero', () => {
@@ -53,5 +58,18 @@ describe('resolveSmsBillingPeriod', () => {
     expect(period.billingMonth).toBe('2026-05-01');
     expect(period.periodStartIso).toBeNull();
     expect(period.periodEndIso).toBeNull();
+  });
+});
+
+describe('buildStripeSmsMeterEventIdentifier', () => {
+  it('builds a stable Stripe-safe identifier under the meter event limit', () => {
+    const identifier = buildStripeSmsMeterEventIdentifier({
+      usageId: '80f5ff01-679e-4d2f-8cd1-c8fc3165c3ad',
+      overageReportedCount: 0,
+      overageCount: 12,
+    });
+
+    expect(identifier).toBe('sms_80f5ff01679e4d2f8cd1c8fc3165c3ad_0_12');
+    expect(identifier.length).toBeLessThanOrEqual(100);
   });
 });

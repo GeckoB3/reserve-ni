@@ -51,6 +51,29 @@ type SmsUsageIncrementResult = {
   overage_reported_count?: number;
 };
 
+const DEFAULT_STRIPE_SMS_METER_EVENT_NAME = 'sms_usage_over_allowance';
+const DEFAULT_STRIPE_SMS_METER_CUSTOMER_PAYLOAD_KEY = 'stripe_customer_id';
+const DEFAULT_STRIPE_SMS_METER_VALUE_PAYLOAD_KEY = 'value';
+const STRIPE_METER_PAYLOAD_KEY_RE = /^[A-Za-z0-9_]+$/;
+
+function stripeMeterPayloadKey(envName: string, fallback: string): string {
+  const value = process.env[envName]?.trim();
+  if (!value) return fallback;
+  if (STRIPE_METER_PAYLOAD_KEY_RE.test(value)) return value;
+
+  console.error(`[sms-usage] Invalid ${envName}; using ${fallback}`);
+  return fallback;
+}
+
+export function buildStripeSmsMeterEventIdentifier(opts: {
+  usageId: string;
+  overageReportedCount: number;
+  overageCount: number;
+}): string {
+  const usageIdCompact = opts.usageId.replace(/[^A-Za-z0-9]/g, '');
+  return `sms_${usageIdCompact}_${opts.overageReportedCount}_${opts.overageCount}`.slice(0, 100);
+}
+
 export function resolveSmsBillingPeriod(
   venue: VenueSmsCountRow,
   referenceDate = new Date(),
@@ -79,44 +102,69 @@ export function resolveSmsBillingPeriod(
 }
 
 async function sendStripeSmsUsageMeterEvent(opts: {
+  venueId: string;
   stripeCustomerId: string;
   value: number;
   timestamp: number;
-  idempotencyKey: string;
+  identifier: string;
 }): Promise<boolean> {
   const secret = process.env.STRIPE_SECRET_KEY;
   if (!secret) {
-    console.error('[sms-usage] Stripe meter event skipped: STRIPE_SECRET_KEY is not configured');
+    console.error('[sms-usage] Stripe meter event skipped: STRIPE_SECRET_KEY is not configured', {
+      venueId: opts.venueId,
+      identifier: opts.identifier,
+    });
     return false;
   }
 
   const value = Math.max(0, Math.floor(opts.value));
   if (value <= 0) return true;
 
+  const eventName = process.env.STRIPE_SMS_METER_EVENT_NAME?.trim() || DEFAULT_STRIPE_SMS_METER_EVENT_NAME;
+  const customerPayloadKey = stripeMeterPayloadKey(
+    'STRIPE_SMS_METER_CUSTOMER_PAYLOAD_KEY',
+    DEFAULT_STRIPE_SMS_METER_CUSTOMER_PAYLOAD_KEY,
+  );
+  const valuePayloadKey = stripeMeterPayloadKey(
+    'STRIPE_SMS_METER_VALUE_PAYLOAD_KEY',
+    DEFAULT_STRIPE_SMS_METER_VALUE_PAYLOAD_KEY,
+  );
+
   const params = new URLSearchParams();
-  params.set('event_name', 'sms_usage_over_allowance');
-  params.set('identifier', opts.idempotencyKey);
+  params.set('event_name', eventName);
+  params.set('identifier', opts.identifier);
   params.set('timestamp', String(opts.timestamp));
-  params.set('payload[stripe_customer_id]', opts.stripeCustomerId);
-  params.set('payload[customer]', opts.stripeCustomerId);
-  params.set('payload[value]', String(value));
+  params.set(`payload[${customerPayloadKey}]`, opts.stripeCustomerId);
+  params.set(`payload[${valuePayloadKey}]`, String(value));
 
   const res = await fetch('https://api.stripe.com/v1/billing/meter_events', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${secret}`,
       'Content-Type': 'application/x-www-form-urlencoded',
-      'Idempotency-Key': opts.idempotencyKey,
     },
     body: params.toString(),
   });
+  const responseText = await res.text();
 
   if (!res.ok) {
-    const errText = await res.text();
-    console.error('[sms-usage] Stripe meter event failed:', res.status, errText);
+    console.error('[sms-usage] Stripe meter event failed:', res.status, responseText, {
+      venueId: opts.venueId,
+      eventName,
+      identifier: opts.identifier,
+      customerPayloadKey,
+      valuePayloadKey,
+      value,
+    });
     return false;
   }
 
+  console.info('[sms-usage] Stripe meter event reported', {
+    venueId: opts.venueId,
+    eventName,
+    identifier: opts.identifier,
+    value,
+  });
   return true;
 }
 
@@ -229,10 +277,15 @@ export async function reportSmsOverageSegmentsToStripe(opts: {
   if (delta <= 0) return false;
 
   const ok = await sendStripeSmsUsageMeterEvent({
+    venueId: opts.venueId,
     stripeCustomerId: customerId,
     value: delta,
     timestamp: opts.timestamp,
-    idempotencyKey: `sms-overage:${opts.usageId}:${opts.overageReportedCount}:${opts.overageCount}`,
+    identifier: buildStripeSmsMeterEventIdentifier({
+      usageId: opts.usageId,
+      overageReportedCount: opts.overageReportedCount,
+      overageCount: opts.overageCount,
+    }),
   });
   if (!ok) return false;
 
