@@ -274,6 +274,7 @@ function PlanSection({
   const planSuccessLoaded = useRef(false);
   const billingPortalRefreshPending = useRef(false);
   const billingPortalOpenedAt = useRef<number | null>(null);
+  const billingPortalSyncTimeouts = useRef<number[]>([]);
 
   const tier = venue.pricing_tier ?? 'appointments';
   const planStatus = venue.plan_status ?? 'active';
@@ -331,7 +332,16 @@ function PlanSection({
       applyBillingStatus(data);
       router.refresh();
       if (opts.showSuccess) {
-        setPlanSuccess('Billing details synced from Stripe.');
+        if (data.plan_status === 'cancelling') {
+          const endLabel = formatSubscriptionDateLabel(data.subscription_current_period_end);
+          setPlanSuccess(
+            endLabel
+              ? `Your subscription has been cancelled. You keep access until ${endLabel}.`
+              : 'Your subscription has been cancelled. You keep access until the end of the current billing period.',
+          );
+        } else {
+          setPlanSuccess('Billing details synced from Stripe.');
+        }
       }
     } catch {
       if (opts.showSuccess) {
@@ -415,12 +425,27 @@ function PlanSection({
 
   useEffect(() => {
     if (isFreeAccess) return;
+    const clearPortalSyncRetries = () => {
+      for (const id of billingPortalSyncTimeouts.current) {
+        window.clearTimeout(id);
+      }
+      billingPortalSyncTimeouts.current = [];
+    };
+    const schedulePortalSyncRetries = () => {
+      clearPortalSyncRetries();
+      billingPortalSyncTimeouts.current = [2500, 7000, 15000].map((ms) =>
+        window.setTimeout(() => {
+          void fetchBillingStatus({ showSuccess: true });
+        }, ms),
+      );
+    };
     const syncIfPortalMayHaveChangedBilling = () => {
       if (!billingPortalRefreshPending.current) return;
       if (document.visibilityState === 'hidden') return;
       if (billingPortalOpenedAt.current && Date.now() - billingPortalOpenedAt.current < 1500) return;
       billingPortalRefreshPending.current = false;
       void fetchBillingStatus({ showSuccess: true });
+      schedulePortalSyncRetries();
     };
 
     window.addEventListener('focus', syncIfPortalMayHaveChangedBilling);
@@ -428,6 +453,7 @@ function PlanSection({
     return () => {
       window.removeEventListener('focus', syncIfPortalMayHaveChangedBilling);
       document.removeEventListener('visibilitychange', syncIfPortalMayHaveChangedBilling);
+      clearPortalSyncRetries();
     };
   }, [fetchBillingStatus, isFreeAccess]);
 
@@ -534,7 +560,7 @@ function PlanSection({
     : planStatus === 'past_due'
       ? 'Payment due'
       : planStatus === 'cancelling'
-        ? 'Cancelling'
+        ? 'Cancelled'
         : planStatus === 'cancelled'
           ? 'Cancelled'
           : planStatus;
@@ -586,6 +612,25 @@ function PlanSection({
           {planPillLabel}
         </Pill>
       </div>
+      {isCancelling && !isFreeAccess ? (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+          <p className="font-semibold">Your subscription has been cancelled.</p>
+          <p className="mt-1 leading-relaxed">
+            {periodEndLabel ? (
+              <>
+                You will keep access to your current ReserveNI plan until{' '}
+                <span className="font-semibold">{periodEndLabel}</span>. Stripe will not charge again after that date
+                unless the subscription is restarted before the billing period ends.
+              </>
+            ) : (
+              <>
+                You will keep access to your current ReserveNI plan until the end of the current billing period. Stripe
+                will not charge again unless the subscription is restarted before then.
+              </>
+            )}
+          </p>
+        </div>
+      ) : null}
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="rounded-xl border border-slate-200 bg-slate-50/90 px-3 py-3">
           <p className="text-xs uppercase tracking-wide text-slate-500">Current plan</p>
@@ -709,20 +754,9 @@ function PlanSection({
       )}
       {isCancelling && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-          <p className="font-medium">Plan ends</p>
+          <p className="font-medium">Changed your mind?</p>
           <p className="mt-1 text-amber-800">
-            {periodEndLabel ? (
-              <>
-                Your subscription is cancelled, but you keep full access until{' '}
-                <span className="font-semibold">{periodEndLabel}</span> (end of this billing period). Stripe will not
-                charge again after that date.
-              </>
-            ) : (
-              <>
-                Your subscription is cancelled, but you keep full access until the end of your current billing period.
-                Stripe will not charge again after that.
-              </>
-            )}
+            Restart the subscription before the billing period ends to keep your current plan active without interruption.
             {isLight ? <> On Appointments Light, SMS remains pay-as-you-go until then.</> : null}
           </p>
           <button
