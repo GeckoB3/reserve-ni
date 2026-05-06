@@ -115,15 +115,6 @@ function resolveInitialTab(initialTab: string | undefined, isAdmin: boolean): Ta
   return 'profile';
 }
 
-type LightPlanStatusPayload = {
-  plan_status: string | null;
-  stripe_subscription_id: string | null;
-  has_default_payment_method: boolean;
-  stripe_subscription_status: string | null;
-  subscription_current_period_start: string | null;
-  subscription_current_period_end: string | null;
-};
-
 type AppointmentsPlanStatusPayload = {
   pricing_tier: string | null;
   plan_status: string | null;
@@ -132,6 +123,10 @@ type AppointmentsPlanStatusPayload = {
   subscription_current_period_start: string | null;
   subscription_current_period_end: string | null;
   calendar_count?: number | null;
+};
+
+type BillingStatusPayload = AppointmentsPlanStatusPayload & {
+  has_default_payment_method?: boolean;
 };
 
 type MoneyPayload = {
@@ -267,12 +262,18 @@ function PlanSection({
   smsCountUsesStripePeriod?: boolean;
   onVenueUpdate: (patch: Partial<VenueSettings>) => void;
 }) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [loading, setLoading] = useState(false);
+  const [billingSyncing, setBillingSyncing] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [planSuccess, setPlanSuccess] = useState<string | null>(null);
   const [planPreviews, setPlanPreviews] = useState<Partial<Record<AppointmentsPlanTier, AppointmentsPlanPreviewPayload>>>({});
   const [selectedPlanChange, setSelectedPlanChange] = useState<AppointmentsPlanTier | null>(null);
   const planSuccessLoaded = useRef(false);
+  const billingPortalRefreshPending = useRef(false);
+  const billingPortalOpenedAt = useRef<number | null>(null);
 
   const tier = venue.pricing_tier ?? 'appointments';
   const planStatus = venue.plan_status ?? 'active';
@@ -302,30 +303,50 @@ function PlanSection({
       ? Math.max(0, Math.min(100, Math.round((calendarUsed / calendarLimit) * 100)))
       : null;
 
-  const applyLightStatus = useCallback(
-    (data: LightPlanStatusPayload) => {
-      onVenueUpdate({
+  const applyBillingStatus = useCallback(
+    (data: BillingStatusPayload) => {
+      const patch: Partial<VenueSettings> = {
+        pricing_tier: data.pricing_tier ?? undefined,
         plan_status: data.plan_status ?? undefined,
         stripe_subscription_id: data.stripe_subscription_id,
         subscription_current_period_start: data.subscription_current_period_start ?? undefined,
         subscription_current_period_end: data.subscription_current_period_end ?? undefined,
-      });
+      };
+      if (data.calendar_count !== undefined) {
+        patch.calendar_count = data.calendar_count;
+      }
+      onVenueUpdate(patch);
     },
     [onVenueUpdate],
   );
 
-  const fetchLightPlanStatus = useCallback(async () => {
-    const res = await fetch('/api/venue/light-plan/status');
-    if (!res.ok) return;
-    const data = (await res.json()) as LightPlanStatusPayload;
-    applyLightStatus(data);
-  }, [applyLightStatus]);
+  const fetchBillingStatus = useCallback(async (opts: { showSuccess?: boolean } = {}) => {
+    if (isFreeAccess) return;
+    setBillingSyncing(true);
+    setActionError(null);
+    try {
+      const res = await fetch('/api/venue/billing/status');
+      if (!res.ok) return;
+      const data = (await res.json()) as BillingStatusPayload;
+      applyBillingStatus(data);
+      router.refresh();
+      if (opts.showSuccess) {
+        setPlanSuccess('Billing details synced from Stripe.');
+      }
+    } catch {
+      if (opts.showSuccess) {
+        setActionError('Could not sync billing details from Stripe. Please refresh the page in a moment.');
+      }
+    } finally {
+      setBillingSyncing(false);
+    }
+  }, [applyBillingStatus, isFreeAccess, router]);
 
   useEffect(() => {
-    if (!isLight || isFreeAccess) return;
-    const t = window.setTimeout(() => void fetchLightPlanStatus(), 0);
+    if (isFreeAccess) return;
+    const t = window.setTimeout(() => void fetchBillingStatus(), 0);
     return () => clearTimeout(t);
-  }, [isLight, isFreeAccess, fetchLightPlanStatus]);
+  }, [isFreeAccess, fetchBillingStatus]);
 
   useEffect(() => {
     if (!isAppointmentsPlan || !appointmentsTier || !hasStripeSub || !billingActive || isCancelling) {
@@ -381,6 +402,35 @@ function PlanSection({
     }
   }, []);
 
+  useEffect(() => {
+    if (searchParams.get('portal_return') !== '1' || isFreeAccess) return;
+    setPlanSuccess('Syncing billing details from Stripe…');
+    void fetchBillingStatus({ showSuccess: true });
+
+    const next = new URLSearchParams(searchParams.toString());
+    next.set('tab', 'plan');
+    next.delete('portal_return');
+    router.replace(`${pathname}?${next.toString()}`, { scroll: false });
+  }, [fetchBillingStatus, isFreeAccess, pathname, router, searchParams]);
+
+  useEffect(() => {
+    if (isFreeAccess) return;
+    const syncIfPortalMayHaveChangedBilling = () => {
+      if (!billingPortalRefreshPending.current) return;
+      if (document.visibilityState === 'hidden') return;
+      if (billingPortalOpenedAt.current && Date.now() - billingPortalOpenedAt.current < 1500) return;
+      billingPortalRefreshPending.current = false;
+      void fetchBillingStatus({ showSuccess: true });
+    };
+
+    window.addEventListener('focus', syncIfPortalMayHaveChangedBilling);
+    document.addEventListener('visibilitychange', syncIfPortalMayHaveChangedBilling);
+    return () => {
+      window.removeEventListener('focus', syncIfPortalMayHaveChangedBilling);
+      document.removeEventListener('visibilitychange', syncIfPortalMayHaveChangedBilling);
+    };
+  }, [fetchBillingStatus, isFreeAccess]);
+
   async function openManageBilling() {
     setLoading(true);
     setActionError(null);
@@ -394,11 +444,14 @@ function PlanSection({
         setActionError(data.error || 'Could not open Stripe billing portal. Please try again.');
         return;
       }
+      billingPortalRefreshPending.current = true;
+      billingPortalOpenedAt.current = Date.now();
       window.open(data.url, '_blank', 'noopener,noreferrer');
     } catch {
       setActionError('Network error. Please check your connection and try again.');
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }
 
   async function handleAction(action: 'resume_subscription') {
@@ -517,6 +570,14 @@ function PlanSection({
             Update
           </Pill>
           <span>{planSuccess}</span>
+        </div>
+      ) : null}
+      {billingSyncing ? (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-sky-200/80 bg-sky-50/70 px-3 py-2.5 text-sm text-sky-950">
+          <Pill variant="brand" size="sm" dot>
+            Syncing
+          </Pill>
+          <span>Checking Stripe for the latest billing status…</span>
         </div>
       ) : null}
       <div className="flex flex-wrap items-center gap-2">
