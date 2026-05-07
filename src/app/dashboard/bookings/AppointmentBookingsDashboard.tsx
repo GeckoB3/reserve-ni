@@ -1,14 +1,15 @@
 'use client';
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
-import type { ReactNode, RefObject } from 'react';
+import type { RefObject } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/browser';
 import { DashboardStaffBookingModal } from '@/components/booking/DashboardStaffBookingModal';
 import {
-  AppointmentDetailSheet,
-  type AppointmentDetailPrefetch,
-} from '@/components/booking/AppointmentDetailSheet';
+  ExpandedBookingContent,
+  type BookingDetailLite,
+  type BookingRow,
+} from './ExpandedBookingContent';
 import type { RegistryAppointment } from '@/components/booking/AppointmentRegistryCard';
 import { OperationsWorkspaceToolbar } from '@/components/dashboard/OperationsWorkspaceToolbar';
 import { PageFrame } from '@/components/ui/dashboard/PageFrame';
@@ -16,7 +17,6 @@ import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { currencySymbolFromCode } from '@/lib/money/currency-symbol';
 import { useToast } from '@/components/ui/Toast';
 import { buildCsvFromRows, downloadCsvString, formatMoneyPence } from '@/lib/appointments-csv';
-import { BOOKING_MUTABLE_STATUSES } from '@/lib/table-management/constants';
 import type { BookingModel } from '@/types/booking-models';
 import { BOOKING_MODEL_ORDER, venueExposesBookingModel } from '@/lib/booking/enabled-models';
 import { inferBookingRowModel, bookingModelShortLabel } from '@/lib/booking/infer-booking-row-model';
@@ -40,13 +40,6 @@ import { isBookingTimeInHourRange } from '@/lib/booking-time-window';
 import type { OpeningHours } from '@/types/availability';
 import { BulkGuestMessageModal } from '@/components/booking/BulkGuestMessageModal';
 import type { GuestMessageChannel } from '@/lib/booking/guest-message-channel';
-import { GuestMessageChannelSelect } from '@/components/booking/GuestMessageChannelSelect';
-import {
-  bookingExpandAccordionBodyClass,
-  bookingExpandAccordionDetailsClass,
-  bookingExpandAccordionMessagingBodyClass,
-  bookingExpandAccordionSummaryClass,
-} from '@/app/dashboard/bookings/booking-expand-accordion-classes';
 import { ClampedFixedDropdown } from '@/components/ui/ClampedFixedDropdown';
 import { Skeleton } from '@/components/ui/Skeleton';
 
@@ -263,27 +256,31 @@ function filterRegistryAppointments(
   );
 }
 
-function registryToPrefetch(b: RegistryAppointment): AppointmentDetailPrefetch {
+function registryToExpandedBookingRow(b: RegistryAppointment): BookingRow {
   return {
     id: b.id,
     booking_date: b.booking_date,
     booking_time: b.booking_time,
-    booking_end_time: b.booking_end_time,
-    status: b.status,
-    practitioner_id: b.practitioner_id,
-    appointment_service_id: serviceIdForRegistry(b),
-    special_requests: b.special_requests,
-    internal_notes: b.internal_notes,
-    client_arrived_at: b.client_arrived_at,
-    guest_attendance_confirmed_at: b.guest_attendance_confirmed_at ?? null,
-    staff_attendance_confirmed_at: b.staff_attendance_confirmed_at ?? null,
-    deposit_amount_pence: b.deposit_amount_pence,
-    deposit_status: b.deposit_status,
+    estimated_end_time: b.booking_end_time ? `${b.booking_date}T${b.booking_end_time.slice(0, 5)}:00.000Z` : null,
+    created_at: null,
     party_size: b.party_size,
+    status: b.status,
+    source: b.source,
+    deposit_status: b.deposit_status,
+    deposit_amount_pence: b.deposit_amount_pence,
+    dietary_notes: null,
+    occasion: null,
     guest_name: b.guest_name,
     guest_email: b.guest_email,
     guest_phone: b.guest_phone,
-    guest_visit_count: b.guest_visit_count,
+    guest_id: b.guest_id,
+    experience_event_id: b.experience_event_id,
+    class_instance_id: b.class_instance_id,
+    resource_id: b.resource_id,
+    event_session_id: b.event_session_id,
+    calendar_id: b.calendar_id,
+    service_item_id: b.service_item_id,
+    inferred_booking_model: inferRegistryModel(b),
   };
 }
 
@@ -337,12 +334,12 @@ export function AppointmentBookingsDashboard({
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [realtimeConnected, setRealtimeConnected] = useState<boolean | null>(null);
-  const [detailBookingId, setDetailBookingId] = useState<string | null>(null);
   /** Appointment rows expanded inline in the list. */
   const [expandedIds, setExpandedIds] = useState<string[]>([]);
+  const [detailById, setDetailById] = useState<Record<string, BookingDetailLite>>({});
+  const [detailLoadingIds, setDetailLoadingIds] = useState<string[]>([]);
   const searchParams = useSearchParams();
   const router = useRouter();
-  const [statusUpdatingId, setStatusUpdatingId] = useState<string | null>(null);
   const [confirmAttendanceLoadingId, setConfirmAttendanceLoadingId] = useState<string | null>(null);
   const [walkInOpen, setWalkInOpen] = useState(false);
   const [newBookingOpen, setNewBookingOpen] = useState(false);
@@ -360,7 +357,6 @@ export function AppointmentBookingsDashboard({
   const [bulkGuestMessageOpen, setBulkGuestMessageOpen] = useState(false);
   const [bulkGuestMessageSending, setBulkGuestMessageSending] = useState(false);
   const [messageDraftById, setMessageDraftById] = useState<Record<string, string>>({});
-  const [messageChannelById, setMessageChannelById] = useState<Record<string, GuestMessageChannel>>({});
   const [sendingMessageIds, setSendingMessageIds] = useState<string[]>([]);
 
   const selectedStatusFilter = STATUS_FILTERS.find((f) => f.label === statusKey);
@@ -408,6 +404,26 @@ export function AppointmentBookingsDashboard({
     router.replace(qs ? `/dashboard/bookings?${qs}` : '/dashboard/bookings', { scroll: false });
   }, [router, searchParams]);
 
+  const loadBookingDetail = useCallback(async (bookingId: string, force = false) => {
+    if (!force && detailById[bookingId]) return;
+    setDetailLoadingIds((prev) => (prev.includes(bookingId) ? prev : [...prev, bookingId]));
+    try {
+      const res = await fetch(`/api/venue/bookings/${bookingId}`);
+      if (!res.ok) return;
+      const data = (await res.json()) as BookingDetailLite;
+      setDetailById((prev) => ({ ...prev, [bookingId]: data }));
+      setBookings((rows) =>
+        rows.map((booking) =>
+          booking.id === bookingId && data.inferred_booking_model
+            ? { ...booking, booking_model: data.inferred_booking_model }
+            : booking,
+        ),
+      );
+    } finally {
+      setDetailLoadingIds((prev) => prev.filter((id) => id !== bookingId));
+    }
+  }, [detailById]);
+
   /** Legacy filter label before "Started" rename. */
   useEffect(() => {
     if (statusKey === 'In progress') setStatusKey('Started');
@@ -435,13 +451,14 @@ export function AppointmentBookingsDashboard({
   useEffect(() => {
     const ob = searchParams.get('openBooking');
     if (ob && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(ob)) {
-      setDetailBookingId(ob);
+      setExpandedIds((prev) => (prev.includes(ob) ? prev : [...prev, ob]));
+      void loadBookingDetail(ob);
       const next = new URLSearchParams(searchParams.toString());
       next.delete('openBooking');
       const qs = next.toString();
       router.replace(qs ? `/dashboard/bookings?${qs}` : '/dashboard/bookings', { scroll: false });
     }
-  }, [searchParams, router]);
+  }, [loadBookingDetail, searchParams, router]);
 
   const { from, to } = useMemo(() => {
     if (viewMode === 'day') return { from: anchorDate, to: anchorDate };
@@ -800,7 +817,6 @@ export function AppointmentBookingsDashboard({
   async function updateRowStatus(bookingId: string, nextStatus: string) {
     const prev = bookings.find((x) => x.id === bookingId);
     if (!prev) return;
-    setStatusUpdatingId(bookingId);
     setBookings((rows) => rows.map((r) => (r.id === bookingId ? { ...r, status: nextStatus } : r)));
     try {
       const res = await fetch(`/api/venue/bookings/${bookingId}`, {
@@ -819,8 +835,6 @@ export function AppointmentBookingsDashboard({
     } catch {
       addToast('Could not update status', 'error');
       setBookings((rows) => rows.map((r) => (r.id === bookingId ? prev : r)));
-    } finally {
-      setStatusUpdatingId(null);
     }
   }
 
@@ -840,14 +854,6 @@ export function AppointmentBookingsDashboard({
     const noShows = statsBookings.filter((b) => b.status === 'No-Show').length;
     return { total, confirmed, completed, noShows };
   }, [statsBookings]);
-
-  const detailPrefetch = useMemo((): AppointmentDetailPrefetch | null => {
-    if (!detailBookingId) return null;
-    const b = bookings.find((x) => x.id === detailBookingId);
-    if (!b) return null;
-    if (isCdeModel(inferRegistryModel(b))) return null;
-    return registryToPrefetch(b);
-  }, [detailBookingId, bookings]);
 
   function tableStatusLabel(s: string): string {
     if (s === 'Seated') return 'Started';
@@ -1036,6 +1042,12 @@ export function AppointmentBookingsDashboard({
           return;
         }
         setMessageDraftById((prev) => ({ ...prev, [bookingId]: '' }));
+        setDetailById((prev) => {
+          const next = { ...prev };
+          delete next[bookingId];
+          return next;
+        });
+        void loadBookingDetail(bookingId, true);
         addToast('Message sent', 'success');
       } catch {
         addToast('Could not send message', 'error');
@@ -1043,13 +1055,14 @@ export function AppointmentBookingsDashboard({
         setSendingMessageIds((prev) => prev.filter((id) => id !== bookingId));
       }
     },
-    [addToast],
+    [addToast, loadBookingDetail],
   );
 
   function toggleExpanded(id: string) {
     setExpandedIds((prev) =>
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
     );
+    void loadBookingDetail(id);
   }
 
   function SortControl() {
@@ -1157,7 +1170,6 @@ export function AppointmentBookingsDashboard({
         : null;
     const draftMessage = messageDraftById[b.id] ?? '';
     const sendingMessage = sendingMessageIds.includes(b.id);
-    const messageChannel = messageChannelById[b.id] ?? 'email';
 
     return (
       <div
@@ -1357,294 +1369,31 @@ export function AppointmentBookingsDashboard({
             onClick={(e) => e.stopPropagation()}
             className="border-t border-slate-100/95 bg-slate-50/30 px-2 pb-2.5 pt-2 space-y-2 sm:px-3"
           >
-            {renderExpandedAppointment(b, {
-              svcName,
-              pracName,
-              duration,
-              priceDisplay,
-              draftMessage,
-              sendingMessage,
-              messageChannel,
-            })}
+            <ExpandedBookingContent
+              booking={registryToExpandedBookingRow(b)}
+              detail={detailById[b.id]}
+              detailLoading={detailLoadingIds.includes(b.id)}
+              tableManagementEnabled={bookingModel === 'table_reservation'}
+              venueId={venueId}
+              venueCurrency={currency}
+              draftMessage={draftMessage}
+              sendingMessage={sendingMessage}
+              onMessageDraftChange={(value) => setMessageDraftById((prev) => ({ ...prev, [b.id]: value }))}
+              onSendMessage={(channel) => { void sendGuestMessage(b.id, draftMessage, channel); }}
+              onStatusAction={(status) => { void updateRowStatus(b.id, status); }}
+              onDetailUpdated={() => {
+                setDetailById((prev) => {
+                  const next = { ...prev };
+                  delete next[b.id];
+                  return next;
+                });
+                void loadBookingDetail(b.id, true);
+                void fetchBookings({ silent: true });
+                void fetchBookingsForStats();
+              }}
+            />
           </div>
         )}
-      </div>
-    );
-  }
-
-  function renderExpandedAppointment(
-    b: RegistryAppointment,
-    ctx: {
-      svcName: string;
-      pracName: string;
-      duration: number | null;
-      priceDisplay: string | null;
-      draftMessage: string;
-      sendingMessage: boolean;
-      messageChannel: GuestMessageChannel;
-    },
-  ) {
-    const { svcName, pracName, duration, priceDisplay, draftMessage, sendingMessage, messageChannel } = ctx;
-    const showConfirm = canShowConfirmBookingAttendanceAction(b);
-    const showCancelConfirm = canShowCancelStaffAttendanceConfirmationAction(b);
-    const endTime = b.booking_end_time ? b.booking_end_time.slice(0, 5) : null;
-    const notes = b.special_requests?.trim() || null;
-    const internal = b.internal_notes?.trim() || null;
-    const arrivedAt = b.client_arrived_at
-      ? new Date(b.client_arrived_at).toLocaleString(undefined, {
-          hour: '2-digit',
-          minute: '2-digit',
-          day: '2-digit',
-          month: 'short',
-        })
-      : null;
-
-    const infoTile = (label: string, value: ReactNode, tone = 'slate') => (
-      <div className={`rounded-lg border px-2 py-1.5 ${
-        tone === 'brand'
-          ? 'border-brand-100 bg-brand-50/60'
-          : tone === 'emerald'
-            ? 'border-emerald-100 bg-emerald-50/60'
-            : tone === 'amber'
-              ? 'border-amber-100 bg-amber-50/60'
-              : 'border-slate-200 bg-slate-50/70'
-      }`}>
-        <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">{label}</p>
-        <div className="truncate text-xs font-bold text-slate-800">{value}</div>
-      </div>
-    );
-
-    return (
-      <div className="flex flex-col gap-2.5">
-        <section className="rounded-xl border border-slate-200/90 bg-white p-2.5 shadow-sm ring-1 ring-slate-900/[0.04] sm:p-3">
-          <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex min-w-0 items-center gap-2.5">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-sm font-bold text-brand-700 ring-1 ring-brand-100">
-                {b.guest_name.charAt(0).toUpperCase()}
-              </div>
-              <div className="min-w-0">
-                <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
-                  <p className="max-w-[12rem] truncate text-sm font-bold text-slate-900 sm:max-w-[18rem]">{b.guest_name}</p>
-                  <Pill variant="neutral" size="sm">
-                    {b.guest_visit_count && b.guest_visit_count > 0
-                      ? `${b.guest_visit_count} visit${b.guest_visit_count === 1 ? '' : 's'}`
-                      : 'First visit'}
-                  </Pill>
-                </div>
-                <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
-                  <span className="font-medium text-slate-700">{formatDayHeader(b.booking_date)}</span>
-                  <span className="text-slate-300">·</span>
-                  <span className="font-semibold tabular-nums text-slate-700">
-                    {b.booking_time.slice(0, 5)}{endTime ? `-${endTime}` : ''}
-                  </span>
-                  <span className="text-slate-300">·</span>
-                  <span className="max-w-[12rem] truncate">{svcName}</span>
-                </div>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-1.5 sm:flex sm:shrink-0 sm:items-center">
-              {b.guest_phone ? (
-                <a href={`tel:${b.guest_phone}`} className="inline-flex min-h-8 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 text-[11px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50">
-                  Call
-                </a>
-              ) : null}
-              {b.guest_email ? (
-                <a href={`mailto:${b.guest_email}`} className="inline-flex min-h-8 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 text-[11px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50">
-                  Email
-                </a>
-              ) : null}
-            </div>
-          </div>
-          <div className="mt-2 grid grid-cols-2 gap-1.5 sm:grid-cols-4">
-            {infoTile('Service', svcName, 'brand')}
-            {infoTile('Staff', pracName)}
-            {infoTile('Time', (
-              <span className="tabular-nums">
-                {b.booking_time.slice(0, 5)}{endTime ? `-${endTime}` : ''}
-                {duration != null ? <span className="ml-1 text-slate-500">({duration}m)</span> : null}
-              </span>
-            ))}
-            {infoTile('Payment', priceDisplay ? `${priceDisplay} · ${b.deposit_status}` : b.deposit_status, b.deposit_status === 'Paid' ? 'emerald' : b.deposit_status === 'Pending' ? 'amber' : 'slate')}
-            {infoTile('Source', <Pill variant={sourcePillVariant(b.source)} size="sm">{sourceLabelShort(b.source)}</Pill>)}
-            {arrivedAt ? infoTile('Arrived', arrivedAt, 'emerald') : null}
-            {b.party_size > 1 ? infoTile('Party', `${b.party_size} people`) : null}
-            {infoTile('Ref', (
-              <button
-                type="button"
-                onClick={() => navigator.clipboard?.writeText(b.id)}
-                className="truncate text-left hover:text-brand-700"
-                title="Copy booking reference"
-              >
-                #{b.id.slice(0, 8)}
-              </button>
-            ))}
-          </div>
-        </section>
-
-        <details className={bookingExpandAccordionDetailsClass}>
-          <summary className={bookingExpandAccordionSummaryClass}>
-            <span>SMS / email guest</span>
-            <span className="text-[11px] font-medium text-slate-400 group-open:hidden">
-              {b.guest_phone && b.guest_email ? 'SMS + email' : b.guest_phone ? 'SMS' : b.guest_email ? 'Email' : 'No contact'}
-            </span>
-            <svg className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-open:rotate-180" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
-            </svg>
-          </summary>
-          <div className={bookingExpandAccordionMessagingBodyClass}>
-            <textarea
-              value={draftMessage}
-              onChange={(e) => setMessageDraftById((prev) => ({ ...prev, [b.id]: e.target.value }))}
-              rows={3}
-              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 placeholder:text-slate-400 focus:border-brand-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-100"
-              placeholder="Write a message"
-            />
-            <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <label className="flex flex-wrap items-center gap-2 text-xs font-medium text-slate-500">
-                Send via
-                <GuestMessageChannelSelect
-                  value={messageChannel}
-                  onChange={(value) => setMessageChannelById((prev) => ({ ...prev, [b.id]: value }))}
-                  disabled={sendingMessage}
-                />
-              </label>
-              <button
-                type="button"
-                disabled={sendingMessage || draftMessage.trim().length === 0}
-                onClick={() => void sendGuestMessage(b.id, draftMessage, messageChannel)}
-                className="inline-flex min-h-9 items-center justify-center gap-2 rounded-lg bg-slate-800 px-4 py-2 text-xs font-semibold text-white transition-colors duration-150 hover:bg-slate-900 disabled:opacity-50 sm:min-h-8 sm:py-1.5"
-                aria-busy={sendingMessage}
-              >
-                {sendingMessage ? (
-                  <span className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-white/25 border-t-white" aria-hidden />
-                ) : null}
-                Send
-              </button>
-            </div>
-          </div>
-        </details>
-
-        <details className={bookingExpandAccordionDetailsClass}>
-          <summary className={bookingExpandAccordionSummaryClass}>
-            <span>Appointment details</span>
-            <span className="text-[11px] font-medium text-slate-400 group-open:hidden">{svcName}</span>
-            <svg className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-open:rotate-180" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
-            </svg>
-          </summary>
-          <div className={bookingExpandAccordionBodyClass}>
-            <dl className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              {infoTile('Client', b.guest_name)}
-              {infoTile('Email', b.guest_email ? <a href={`mailto:${b.guest_email}`} className="hover:text-brand-700">{b.guest_email}</a> : 'Not provided')}
-              {infoTile('Phone', b.guest_phone ? <a href={`tel:${b.guest_phone}`} className="hover:text-brand-700">{b.guest_phone}</a> : 'Not provided')}
-              {infoTile('Status', <BookingStatusPill statusKey={b.status}>{tableStatusLabel(b.status)}</BookingStatusPill>)}
-            </dl>
-          </div>
-        </details>
-
-        <details className={bookingExpandAccordionDetailsClass} open={Boolean(notes || internal)}>
-          <summary className={bookingExpandAccordionSummaryClass}>
-            <span>Notes and preferences</span>
-            <span className="text-[11px] font-medium text-slate-400 group-open:hidden">
-              {[notes, internal].filter(Boolean).length || 'None'}
-            </span>
-            <svg className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-open:rotate-180" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
-            </svg>
-          </summary>
-          <section className={`${bookingExpandAccordionBodyClass} space-y-3`}>
-            {notes && (
-              <div>
-                <h5 className="text-[10px] font-semibold uppercase tracking-wide text-amber-700">
-                  Special requests
-                </h5>
-                <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{notes}</p>
-              </div>
-            )}
-            {internal && (
-              <div>
-                <h5 className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                  Internal notes
-                </h5>
-                <p className="mt-1 whitespace-pre-wrap text-sm text-slate-600">{internal}</p>
-              </div>
-            )}
-            {!notes && !internal ? <p className="text-xs text-slate-400">No notes or preferences recorded.</p> : null}
-          </section>
-        </details>
-
-        <section className="flex flex-wrap items-end gap-2 overflow-x-auto rounded-xl border border-slate-200/90 bg-white p-2 shadow-sm ring-1 ring-slate-900/[0.04] sm:p-3">
-          <label className="flex min-w-0 flex-col gap-1">
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-              Status
-            </span>
-            <select
-              value={b.status}
-              disabled={statusUpdatingId === b.id}
-              onChange={(e) => void updateRowStatus(b.id, e.target.value)}
-              className="min-h-[36px] rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50"
-            >
-              {BOOKING_MUTABLE_STATUSES.map((st) => (
-                <option key={st} value={st}>
-                  {tableStatusLabel(st)}
-                </option>
-              ))}
-            </select>
-          </label>
-          {showConfirm && (
-            <button
-              type="button"
-              disabled={confirmAttendanceLoadingId === b.id}
-              onClick={() => void confirmBookingAttendance(b.id)}
-              className={`inline-flex min-h-9 min-w-[7rem] items-center justify-center gap-2 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors duration-150 focus:outline-none focus:ring-2 disabled:opacity-60 ${BOOKING_ATTENDANCE_CONFIRM_SOLID_BUTTON}`}
-              aria-busy={confirmAttendanceLoadingId === b.id}
-            >
-              {confirmAttendanceLoadingId === b.id ? (
-                <span
-                  className={`h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 ${BOOKING_ATTENDANCE_CONFIRM_SPINNER}`}
-                  aria-hidden
-                />
-              ) : null}
-              <span>Confirm</span>
-            </button>
-          )}
-          {showCancelConfirm && (
-            <button
-              type="button"
-              disabled={confirmAttendanceLoadingId === b.id}
-              onClick={() => void cancelStaffAttendanceConfirmation(b.id)}
-              className="inline-flex min-h-9 min-w-[7rem] items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition-colors duration-150 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-400/30 disabled:opacity-60"
-              aria-busy={confirmAttendanceLoadingId === b.id}
-            >
-              {confirmAttendanceLoadingId === b.id ? (
-                <span
-                  className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-slate-400/30 border-t-slate-600"
-                  aria-hidden
-                />
-              ) : null}
-              <span>Unconfirm</span>
-            </button>
-          )}
-          <div className="ml-auto flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => setDetailBookingId(b.id)}
-              className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-brand-200 bg-brand-50 px-3 py-1.5 text-xs font-semibold text-brand-700 shadow-sm transition-colors hover:bg-brand-100 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
-            >
-              Open full view
-              <svg
-                className="h-3.5 w-3.5"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                aria-hidden
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" />
-              </svg>
-            </button>
-          </div>
-        </section>
       </div>
     );
   }
@@ -2195,26 +1944,6 @@ export function AppointmentBookingsDashboard({
         bookingModel={primaryBookingModel}
         enabledModels={enabledModels}
         preselectedPractitionerId={practitionerFilter === 'all' ? undefined : practitionerFilter}
-      />
-
-      <AppointmentDetailSheet
-        open={detailBookingId !== null}
-        bookingId={detailBookingId}
-        onClose={() => setDetailBookingId(null)}
-        onUpdated={() => {
-          void fetchBookings({ silent: true });
-          void fetchBookingsForStats();
-        }}
-        currency={currency}
-        practitioners={activePractitioners}
-        prefetchedBooking={detailPrefetch}
-        services={services.map((s) => ({
-          id: s.id,
-          name: s.name,
-          duration_minutes: s.duration_minutes,
-          colour: s.colour ?? '#6366f1',
-          price_pence: s.price_pence ?? null,
-        }))}
       />
       </div>
     </PageFrame>

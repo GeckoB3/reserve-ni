@@ -196,12 +196,6 @@ export function ConfirmCancelView({
           <h2 className="text-lg font-semibold text-slate-900">
             {doneMessage}
           </h2>
-          <Link
-            href="/"
-            className="mt-4 inline-block text-sm font-medium text-brand-600 hover:text-brand-700"
-          >
-            Go home
-          </Link>
         </div>
       </div>
     );

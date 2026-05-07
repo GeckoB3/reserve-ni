@@ -32,6 +32,7 @@ import { isRestaurantTableProductTier } from '@/lib/tier-enforcement';
  * **Calendar Availability** (`/dashboard/calendar-availability`): when `shouldShowAppointmentAvailabilitySettings` (unified/practitioner primary, or C/D/E primary/secondary).
  *
  * **Model links:** Services, Events, Classes, Resources from `MODEL_NAV_ITEMS` + `mergeModelNavEntries` by primary and `enabled_models`.
+ * Placed after **Contacts** (and below New Booking), before Waitlist when present.
  *
  * **Waitlist:** only when `booking_model === 'table_reservation'`.
  */
@@ -260,15 +261,20 @@ export function DashboardSidebar({
 
     const modelItems = mergeModelNavEntries(MODEL_NAV_ITEMS, bookingModel, enabledModels);
     if (modelItems.length > 0) {
-      const waitIdx = items.findIndex((i) => i.href === '/dashboard/waitlist');
-      if (waitIdx >= 0) {
-        items = [...items.slice(0, waitIdx + 1), ...modelItems, ...items.slice(waitIdx + 1)];
+      const contactsIdx = items.findIndex((i) => i.href === '/dashboard/contacts');
+      if (contactsIdx >= 0) {
+        items = [...items.slice(0, contactsIdx + 1), ...modelItems, ...items.slice(contactsIdx + 1)];
       } else {
-        const newIdx = items.findIndex((i) => i.href === '/dashboard/bookings/new');
-        if (newIdx >= 0) {
-          items = [...items.slice(0, newIdx + 1), ...modelItems, ...items.slice(newIdx + 1)];
+        const waitIdx = items.findIndex((i) => i.href === '/dashboard/waitlist');
+        if (waitIdx >= 0) {
+          items = [...items.slice(0, waitIdx + 1), ...modelItems, ...items.slice(waitIdx + 1)];
         } else {
-          items = [...items, ...modelItems];
+          const newIdx = items.findIndex((i) => i.href === '/dashboard/bookings/new');
+          if (newIdx >= 0) {
+            items = [...items.slice(0, newIdx + 1), ...modelItems, ...items.slice(newIdx + 1)];
+          } else {
+            items = [...items, ...modelItems];
+          }
         }
       }
     }

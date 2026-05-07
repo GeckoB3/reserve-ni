@@ -35,7 +35,7 @@ import {
   bookingExpandActionsBarClass,
 } from '@/app/dashboard/bookings/booking-expand-accordion-classes';
 
-interface BookingRow {
+export interface BookingRow {
   id: string;
   booking_date: string;
   booking_time: string;
@@ -67,7 +67,7 @@ interface BookingRow {
   inferred_booking_model?: BookingModel;
 }
 
-interface BookingDetailLite {
+export interface BookingDetailLite {
   id: string;
   special_requests: string | null;
   internal_notes: string | null;
