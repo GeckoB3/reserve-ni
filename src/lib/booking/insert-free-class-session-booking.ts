@@ -6,6 +6,7 @@ import { resolveCancellationNoticeHoursForCreate } from '@/lib/booking/resolve-c
 import { generateConfirmToken, hashConfirmToken } from '@/lib/confirm-token';
 import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
 import type { GuestRecord } from '@/lib/guests';
+import { formatGuestDisplayName } from '@/lib/guests/name';
 import { sendBookingConfirmationNotifications } from '@/lib/communications/send-templated';
 import { createOrGetBookingShortLink } from '@/lib/booking-short-links';
 import type { ClassPaymentRequirement } from '@/types/booking-models';
@@ -158,6 +159,9 @@ export async function insertFreeClassSessionBooking(
     occasion: null,
     special_requests: null,
     guest_email: guestEmail,
+    guest_first_name: guest.first_name,
+    guest_last_name: guest.last_name,
+    guest_phone: guestPhoneE164 || guest.phone || null,
     deposit_amount_pence: null,
     deposit_status: 'Not Required',
     cancellation_deadline,
@@ -202,7 +206,7 @@ export async function insertFreeClassSessionBooking(
         const { email, sms } = await sendBookingConfirmationNotifications(
           {
             id: bookingId,
-            guest_name: guestName,
+            guest_name: formatGuestDisplayName(guest.first_name, guest.last_name) || guestName,
             guest_email: guest.email ?? guestEmail,
             guest_phone: guest.phone ?? guestPhoneE164,
             booking_date: bookingDate,

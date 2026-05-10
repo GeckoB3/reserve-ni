@@ -35,6 +35,7 @@ import { resolveCancellationNoticeHoursForCreate } from "@/lib/booking/resolve-c
 import { inferBookingRowModel } from "@/lib/booking/infer-booking-row-model";
 import { logBookingOp } from "@/lib/observability/booking-ops-log";
 import type { BookingModel } from "@/types/booking-models";
+import { formatGuestDisplayName } from "@/lib/guests/name";
 
 /**
  * GET /api/confirm?booking_id=uuid&token=xxx  (token-based)
@@ -523,7 +524,7 @@ export async function POST(request: NextRequest) {
         .single();
       const { data: guest } = await supabase
         .from("guests")
-        .select("name, email, phone")
+        .select("first_name, last_name, email, phone")
         .eq("id", booking.guest_id)
         .single();
       const timeStr =
@@ -560,7 +561,7 @@ export async function POST(request: NextRequest) {
       if (guest && venue?.name) {
         const cancelBookingEmail: BookingEmailData = {
           id: bookingId,
-          guest_name: guest.name ?? "Guest",
+          guest_name: formatGuestDisplayName(guest.first_name, guest.last_name),
           guest_email: guest.email ?? null,
           guest_phone: guest.phone ?? null,
           booking_date: booking.booking_date,

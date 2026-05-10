@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
+import { formatGuestDisplayName } from '@/lib/guests/name';
 
 const BOOKING_STATUSES_BLOCK_CONFLICTS = ['Pending', 'Booked', 'Confirmed', 'Seated'] as const;
 
@@ -31,7 +32,7 @@ function intervalsOverlap(a0: number, a1: number, b0: number, b1: number): boole
   return a0 < b1 && a1 > b0;
 }
 
-type GuestEmbed = { name: string | null };
+type GuestEmbed = { first_name: string | null; last_name: string | null };
 
 type BookingEmbed = {
   booking_date: string | null;
@@ -50,7 +51,7 @@ type AssignmentRow = {
 function guestNameFromBookingEmbed(b: BookingEmbed): string {
   const g = b.guest;
   const guest = Array.isArray(g) ? g[0] : g;
-  return guest?.name?.trim() || 'Guest';
+  return formatGuestDisplayName(guest?.first_name, guest?.last_name);
 }
 
 /**
@@ -66,7 +67,7 @@ async function getTableBlockBookingConflict(
   const { data: rows, error } = await db
     .from('booking_table_assignments')
     .select(
-      'booking_id, bookings!inner(booking_date, booking_time, estimated_end_time, status, venue_id, guest:guests(name))',
+      'booking_id, bookings!inner(booking_date, booking_time, estimated_end_time, status, venue_id, guest:guests(first_name, last_name))',
     )
     .eq('table_id', tableId)
     .eq('bookings.venue_id', venueId);

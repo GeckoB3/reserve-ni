@@ -32,7 +32,7 @@ export async function sendMarketingContactMessage(
 
   const { data: guest, error: gErr } = await admin
     .from('guests')
-    .select('id, venue_id, name, email, phone, marketing_opt_out, marketing_consent')
+    .select('id, venue_id, first_name, last_name, email, phone, marketing_opt_out, marketing_consent')
     .eq('id', input.guestId)
     .eq('venue_id', input.venueId)
     .maybeSingle();

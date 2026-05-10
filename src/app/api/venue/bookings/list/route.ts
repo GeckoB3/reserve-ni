@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
+import {
+  formatGuestDisplayName,
+  mergeBookingSnapshotWithGuestProfile,
+  normaliseGuestNamePart,
+} from '@/lib/guests/name';
 import { BOOKING_ACTIVE_STATUSES } from '@/lib/table-management/constants';
 import { isTableReservationBooking } from '@/lib/booking/infer-booking-row-model';
 import { resolveBookingListRowLabels } from '@/lib/booking/booking-list-row-label';
@@ -19,11 +24,11 @@ import { resolveBookingListRowLabels } from '@/lib/booking/booking-list-row-labe
  * `view=calendar` — staff schedule grid: narrower row shape, skips table-assignment query (faster for wide date ranges).
  */
 const BOOKINGS_LIST_SELECT_FULL =
-  'id, booking_date, booking_time, party_size, booking_model, status, source, deposit_status, deposit_amount_pence, dietary_notes, occasion, special_requests, internal_notes, client_arrived_at, guest_attendance_confirmed_at, staff_attendance_confirmed_at, estimated_end_time, created_at, guest_id, service_id, practitioner_id, appointment_service_id, calendar_id, service_item_id, service_variant_id, processing_time_blocks, experience_event_id, class_instance_id, resource_id, booking_end_time, event_session_id, group_booking_id, person_label, area_id';
+  'id, booking_date, booking_time, party_size, booking_model, status, source, deposit_status, deposit_amount_pence, dietary_notes, occasion, special_requests, internal_notes, client_arrived_at, guest_attendance_confirmed_at, staff_attendance_confirmed_at, estimated_end_time, created_at, guest_id, guest_first_name, guest_last_name, service_id, practitioner_id, appointment_service_id, calendar_id, service_item_id, service_variant_id, processing_time_blocks, experience_event_id, class_instance_id, resource_id, booking_end_time, event_session_id, group_booking_id, person_label, area_id';
 
 /** Omits columns not used by the practitioner calendar grid to reduce payload and DB I/O. */
 const BOOKINGS_LIST_SELECT_CALENDAR =
-  'id, booking_date, booking_time, party_size, booking_model, status, source, deposit_status, deposit_amount_pence, special_requests, internal_notes, client_arrived_at, guest_attendance_confirmed_at, staff_attendance_confirmed_at, estimated_end_time, guest_id, service_id, practitioner_id, appointment_service_id, calendar_id, service_item_id, service_variant_id, processing_time_blocks, experience_event_id, class_instance_id, resource_id, booking_end_time, event_session_id, group_booking_id, person_label, area_id';
+  'id, booking_date, booking_time, party_size, booking_model, status, source, deposit_status, deposit_amount_pence, special_requests, internal_notes, client_arrived_at, guest_attendance_confirmed_at, staff_attendance_confirmed_at, estimated_end_time, guest_id, guest_first_name, guest_last_name, service_id, practitioner_id, appointment_service_id, calendar_id, service_item_id, service_variant_id, processing_time_blocks, experience_event_id, class_instance_id, resource_id, booking_end_time, event_session_id, group_booking_id, person_label, area_id';
 
 export async function GET(request: NextRequest) {
   try {
@@ -119,13 +124,14 @@ export async function GET(request: NextRequest) {
     const rawRows = (rows ?? []) as RawBookingRow[];
     const guestIds = [...new Set(rawRows.map((r) => r.guest_id))];
     const { data: guestsRows } = guestIds.length
-      ? await staff.db.from('guests').select('id, name, email, phone, visit_count, tags').in('id', guestIds)
+      ? await staff.db.from('guests').select('id, first_name, last_name, email, phone, visit_count, tags').in('id', guestIds)
       : { data: [] };
     const guestsMap = new Map(
       (guestsRows ?? []).map(
         (g: {
           id: string;
-          name: string | null;
+          first_name: string | null;
+          last_name: string | null;
           email: string | null;
           phone: string | null;
           visit_count?: number | null;
@@ -147,6 +153,17 @@ export async function GET(request: NextRequest) {
     let bookings = rawRows.map((r) => {
       const guest = guestsMap.get(r.guest_id);
       const aid = r.area_id as string | null | undefined;
+      const merged = mergeBookingSnapshotWithGuestProfile({
+        booking_guest_first_name: r.guest_first_name as string | null | undefined,
+        booking_guest_last_name: r.guest_last_name as string | null | undefined,
+        profile_first_name: guest?.first_name,
+        profile_last_name: guest?.last_name,
+      });
+      const snapshotPresent =
+        Boolean(normaliseGuestNamePart(r.guest_first_name as string | null | undefined)) ||
+        Boolean(normaliseGuestNamePart(r.guest_last_name as string | null | undefined));
+      const guestLabel =
+        guest || snapshotPresent ? formatGuestDisplayName(merged.first, merged.last) : '-';
       return {
         id: r.id,
         booking_date: r.booking_date,
@@ -168,7 +185,11 @@ export async function GET(request: NextRequest) {
         booking_end_time: r.booking_end_time,
         created_at: calendarView ? null : r.created_at,
         guest_id: r.guest_id,
-        guest_name: guest?.name ?? '-',
+        guest_name: guestLabel,
+        booking_guest_first_name: normaliseGuestNamePart(r.guest_first_name as string | null | undefined),
+        booking_guest_last_name: normaliseGuestNamePart(r.guest_last_name as string | null | undefined),
+        guest_first_name: merged.first,
+        guest_last_name: merged.last,
         guest_email: guest?.email ?? null,
         guest_phone: guest?.phone ?? null,
         guest_visit_count: guest?.visit_count ?? null,

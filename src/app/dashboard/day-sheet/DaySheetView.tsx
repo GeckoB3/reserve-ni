@@ -152,7 +152,8 @@ interface BookingDetailLite {
   table_assignments?: Array<{ id: string; name: string }>;
   guest: {
     id: string;
-    name: string | null;
+    first_name: string | null;
+    last_name: string | null;
     email: string | null;
     phone: string | null;
     visit_count: number;

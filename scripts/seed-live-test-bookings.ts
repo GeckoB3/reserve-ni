@@ -299,12 +299,12 @@ async function main() {
 
     const email = uniqueTestEmail(usedEmails);
     const phone = randomUkE164();
-    const name = `Test seed ${email.replace('@reserveni.com', '')}`;
+    const lastSeed = email.replace('@reserveni.com', '').slice(0, 80);
 
     const { guest } = await findOrCreateGuest(
       admin,
       venueId,
-      { name, email, phone },
+      { first_name: 'Test', last_name: lastSeed || 'Guest', email, phone },
       { silentAuthSignup: false },
     );
 
@@ -318,6 +318,9 @@ async function main() {
       source: 'phone' as const,
       created_by_staff_id: staff.id,
       guest_email: email,
+      guest_first_name: guest.first_name,
+      guest_last_name: guest.last_name,
+      guest_phone: phone,
       deposit_amount_pence: null as number | null,
       deposit_status: 'Not Required' as const,
       cancellation_deadline: cancellationDeadline,

@@ -31,16 +31,41 @@ import { useViewportBounds } from '@/lib/ui/use-viewport-bounds';
 import { parseProcessingTimeBlocksFromDb } from '@/lib/appointments/processing-time';
 import type { ProcessingTimeBlock } from '@/types/booking-models';
 import { ProcessingTimeTimelineEditor } from '@/components/dashboard/appointment-services/ProcessingTimeTimelineEditor';
+import { formatGuestDisplayName, splitLegacyGuestName } from '@/lib/guests/name';
+
+function displayBookingGuestName(
+  guest: { first_name?: string | null; last_name?: string | null } | null | undefined,
+  legacyLabel?: string | null,
+): string {
+  if (guest) return formatGuestDisplayName(guest.first_name, guest.last_name);
+  const t = legacyLabel?.trim();
+  return t || 'Guest';
+}
 
 interface Guest {
   id: string;
-  name: string | null;
+  first_name: string | null;
+  last_name: string | null;
   email: string | null;
   phone: string | null;
   visit_count: number;
   tags?: string[];
   /** Staff notes on the guest profile; shown on every booking for this customer. */
   customer_profile_notes?: string | null;
+}
+
+function guestFirstLastForBookingRow(
+  guest: Guest | null | undefined,
+  legacySnapshotName?: string | null,
+): { guest_first_name: string | null; guest_last_name: string | null } {
+  if (guest) {
+    return { guest_first_name: guest.first_name, guest_last_name: guest.last_name };
+  }
+  const sp = splitLegacyGuestName(legacySnapshotName ?? '');
+  return {
+    guest_first_name: sp.first || null,
+    guest_last_name: sp.last || null,
+  };
 }
 
 interface EventRow {
@@ -201,7 +226,18 @@ function buildPlaceholderDetail(
     special_requests: snap.specialRequests ?? null,
     internal_notes: null,
     cancellation_deadline: null,
-    guest: { id: '', name: snap.guestName, email: null, phone: null, visit_count: 0, tags: [] },
+    guest: (() => {
+      const sp = splitLegacyGuestName(snap.guestName);
+      return {
+        id: '',
+        first_name: sp.first || null,
+        last_name: sp.last || null,
+        email: null,
+        phone: null,
+        visit_count: 0,
+        tags: [],
+      };
+    })(),
     events: [],
     communications: [],
     table_assignments: [],
@@ -517,7 +553,7 @@ export function BookingDetailPanel({
           : revertAction?.label ?? `Revert to ${newStatus}`;
       setConfirmDialog({
         title: confirmLabel,
-        message: `${detail.guest?.name ?? 'Guest'} (${detail.party_size}) at ${detail.booking_time?.slice(0, 5) ?? ''} on ${detail.booking_date} will be changed from ${detail.status} back to ${newStatus}.`,
+        message: `${displayBookingGuestName(detail.guest)} (${detail.party_size}) at ${detail.booking_time?.slice(0, 5) ?? ''} on ${detail.booking_date} will be changed from ${detail.status} back to ${newStatus}.`,
         confirmLabel,
         onConfirm: () => { void executeStatusChange(newStatus); },
       });
@@ -526,7 +562,7 @@ export function BookingDetailPanel({
     if (isDestructiveBookingStatus(newStatus)) {
       setConfirmDialog({
         title: `Mark ${newStatus}`,
-        message: `${detail.guest?.name ?? 'Guest'} (${detail.party_size}) at ${detail.booking_time?.slice(0, 5) ?? ''} on ${detail.booking_date} will be marked ${newStatus}.`,
+        message: `${displayBookingGuestName(detail.guest)} (${detail.party_size}) at ${detail.booking_time?.slice(0, 5) ?? ''} on ${detail.booking_date} will be marked ${newStatus}.`,
         confirmLabel: `Mark ${newStatus}`,
         onConfirm: () => { void executeStatusChange(newStatus); },
       });
@@ -709,7 +745,8 @@ export function BookingDetailPanel({
                 deposit_amount_pence: d.deposit_amount_pence,
                 dietary_notes: d.dietary_notes,
                 occasion: d.occasion,
-                guest_name: d.guest?.name ?? initialSnapshot?.guestName ?? 'Guest',
+                guest_name: displayBookingGuestName(d.guest, initialSnapshot?.guestName),
+                ...guestFirstLastForBookingRow(d.guest ?? null, initialSnapshot?.guestName),
                 guest_email: d.guest?.email ?? null,
                 guest_phone: d.guest?.phone ?? null,
                 guest_id: d.guest?.id,
@@ -751,7 +788,8 @@ export function BookingDetailPanel({
       deposit_amount_pence: d.deposit_amount_pence,
       dietary_notes: d.dietary_notes,
       occasion: d.occasion,
-      guest_name: d.guest?.name ?? initialSnapshot?.guestName ?? 'Guest',
+      guest_name: displayBookingGuestName(d.guest, initialSnapshot?.guestName),
+      ...guestFirstLastForBookingRow(d.guest ?? null, initialSnapshot?.guestName),
       guest_email: d.guest?.email ?? null,
       guest_phone: d.guest?.phone ?? null,
       guest_id: d.guest?.id,
@@ -773,7 +811,8 @@ export function BookingDetailPanel({
       guest: d.guest
         ? {
             id: d.guest.id,
-            name: d.guest.name,
+            first_name: d.guest.first_name,
+            last_name: d.guest.last_name,
             email: d.guest.email,
             phone: d.guest.phone,
             visit_count: d.guest.visit_count,
@@ -1043,7 +1082,7 @@ export function BookingDetailPanel({
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
-                <h2 className={`truncate font-semibold text-slate-900 ${isPopover ? 'text-[13px]' : 'text-base'}`}>{d.guest?.name ?? 'Booking'}</h2>
+                <h2 className={`truncate font-semibold text-slate-900 ${isPopover ? 'text-[13px]' : 'text-base'}`}>{d.guest ? displayBookingGuestName(d.guest) : 'Booking'}</h2>
                 <BookingStatusPill statusKey={d.status} dot className="shrink-0">
                   {bookingStatusDisplayLabel(d.status, bookingStyleIsTable)}
                 </BookingStatusPill>
@@ -1191,10 +1230,10 @@ export function BookingDetailPanel({
               <SectionCard.Body className={sectionPadding}>
                 <div className={isPopover ? 'flex items-start gap-2' : 'flex items-start gap-3'}>
                   <div className={`${isPopover ? 'h-8 w-8 rounded-lg text-xs' : 'h-10 w-10 rounded-xl text-sm'} flex shrink-0 items-center justify-center bg-brand-50 font-bold text-brand-700 ring-1 ring-brand-100`}>
-                    {(d.guest?.name ?? '?').charAt(0).toUpperCase()}
+                    {displayBookingGuestName(d.guest, initialSnapshot?.guestName).charAt(0).toUpperCase()}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-bold text-slate-900">{d.guest?.name ?? 'Guest'}</p>
+                    <p className="truncate text-sm font-bold text-slate-900">{displayBookingGuestName(d.guest, initialSnapshot?.guestName)}</p>
                     <p className="mt-0.5 text-[11px] text-slate-500">
                       {(d.guest?.visit_count ?? 0) > 0 ? `${d.guest?.visit_count} visit${(d.guest?.visit_count ?? 0) !== 1 ? 's' : ''}` : 'First visit'}
                     </p>
@@ -1593,7 +1632,7 @@ export function BookingDetailPanel({
                   onClick={() => {
                     setConfirmDialog({
                       title: 'Delete booking permanently?',
-                      message: `${d.guest?.name ?? 'Guest'} (${d.party_size}) on ${d.booking_date} at ${d.booking_time?.slice(0, 5) ?? ''} will be removed from the system.`,
+                      message: `${displayBookingGuestName(d.guest, initialSnapshot?.guestName)} (${d.party_size}) on ${d.booking_date} at ${d.booking_time?.slice(0, 5) ?? ''} will be removed from the system.`,
                       confirmLabel: 'Delete permanently',
                       onConfirm: () => { void executePermanentDelete(); },
                     });

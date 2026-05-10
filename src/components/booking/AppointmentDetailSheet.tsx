@@ -28,6 +28,7 @@ import { CustomerProfileNotesCard } from '@/components/booking/CustomerProfileNo
 import { GuestMessageChannelSelect } from '@/components/booking/GuestMessageChannelSelect';
 import type { GuestMessageChannel } from '@/lib/booking/guest-message-channel';
 import { Pill, type PillVariant } from '@/components/ui/dashboard/Pill';
+import { formatGuestDisplayName, splitLegacyGuestName } from '@/lib/guests/name';
 
 export interface DetailPractitionerOption {
   id: string;
@@ -69,7 +70,8 @@ export interface AppointmentDetailPrefetch {
 
 interface GuestDetail {
   id: string;
-  name: string | null;
+  first_name: string | null;
+  last_name: string | null;
   email: string | null;
   phone: string | null;
   visit_count: number | null;
@@ -133,13 +135,17 @@ function prefetchToDetailRecord(p: AppointmentDetailPrefetch): BookingDetailReco
     deposit_status: p.deposit_status,
     resource_payment_requirement: p.resource_payment_requirement ?? null,
     party_size: p.party_size,
-    guest: {
-      id: '__prefetch__',
-      name: p.guest_name,
-      email: p.guest_email,
-      phone: p.guest_phone,
-      visit_count: p.guest_visit_count,
-    },
+    guest: (() => {
+      const split = splitLegacyGuestName(p.guest_name);
+      return {
+        id: '__prefetch__',
+        first_name: split.first || null,
+        last_name: split.last || null,
+        email: p.guest_email,
+        phone: p.guest_phone,
+        visit_count: p.guest_visit_count,
+      };
+    })(),
     communications: [],
   };
 }
@@ -553,7 +559,9 @@ export function AppointmentDetailSheet({
 
               <div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-xl font-semibold text-slate-900">{detail.guest?.name ?? 'Guest'}</span>
+                  <span className="text-xl font-semibold text-slate-900">
+                    {formatGuestDisplayName(detail.guest?.first_name, detail.guest?.last_name)}
+                  </span>
                   <Pill variant={appointmentDetailStatusVariant(detail.status)} size="sm" dot>
                     {bookingStatusDisplayLabel(
                       detail.status,
@@ -602,7 +610,11 @@ export function AppointmentDetailSheet({
               <dl className="grid gap-3 text-sm sm:grid-cols-2">
                 <div>
                   <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Client name</dt>
-                  <dd className="mt-0.5 text-slate-900">{detail.guest?.name ?? '-'}</dd>
+                  <dd className="mt-0.5 text-slate-900">
+                    {detail.guest?.first_name || detail.guest?.last_name
+                      ? formatGuestDisplayName(detail.guest.first_name, detail.guest.last_name)
+                      : '-'}
+                  </dd>
                 </div>
                 <div>
                   <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Email</dt>

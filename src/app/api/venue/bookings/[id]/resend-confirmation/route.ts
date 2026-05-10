@@ -7,6 +7,7 @@ import { sendBookingConfirmationNotifications } from '@/lib/communications/send-
 import { enrichBookingEmailForComms } from '@/lib/emails/booking-email-enrichment';
 import { createOrGetBookingShortLink } from '@/lib/booking-short-links';
 import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
+import { formatGuestDisplayName } from '@/lib/guests/name';
 
 export async function POST(
   request: NextRequest,
@@ -28,7 +29,7 @@ export async function POST(
   if (!booking) return NextResponse.json({ error: 'Booking not found' }, { status: 404 });
 
   const [{ data: guest }, { data: venue }] = await Promise.all([
-    admin.from('guests').select('name, email, phone').eq('id', booking.guest_id).maybeSingle(),
+    admin.from('guests').select('first_name, last_name, email, phone').eq('id', booking.guest_id).maybeSingle(),
     admin.from('venues').select('name, address, email, reply_to_email').eq('id', booking.venue_id).maybeSingle(),
   ]);
   if (!venue?.name || !guest?.email) {
@@ -60,7 +61,7 @@ export async function POST(
 
   const basePayload = {
     id: booking.id,
-    guest_name: guest.name ?? 'Guest',
+    guest_name: formatGuestDisplayName(guest.first_name, guest.last_name),
     guest_email: guest.email,
     guest_phone: guest.phone ?? null,
     booking_date: booking.booking_date,

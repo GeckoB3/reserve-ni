@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { findOrCreateGuest } from '@/lib/guests';
 import { insertFreeClassSessionBooking } from '@/lib/booking/insert-free-class-session-booking';
+import { splitLegacyGuestName } from '@/lib/guests/name';
 
 function addDaysYmd(ymd: string, n: number): string {
   const d = new Date(`${ymd}T12:00:00Z`);
@@ -159,10 +160,16 @@ export async function materializeRecurringReservation(
     };
   }
 
+  const nameParts = splitLegacyGuestName(displayName);
   const { guest } = await findOrCreateGuest(
     admin,
     row.venue_id,
-    { name: displayName, email, phone: null },
+    {
+      first_name: nameParts.first || null,
+      last_name: nameParts.last || null,
+      email,
+      phone: null,
+    },
     { silentAuthSignup: true },
   );
 

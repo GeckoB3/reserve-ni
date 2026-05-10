@@ -727,7 +727,8 @@ function WaitlistForm({
   phoneDefaultCountry: CountryCode;
 }) {
   const [open, setOpen] = useState(false);
-  const [name, setName] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [desiredTime, setDesiredTime] = useState('');
@@ -737,7 +738,7 @@ function WaitlistForm({
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const guestPhone = normalizeToE164(phone, phoneDefaultCountry);
-    if (!name.trim() || !guestPhone) return;
+    if (!firstName.trim() || !lastName.trim() || !guestPhone) return;
     setStatus('submitting');
     try {
       const res = await fetch('/api/booking/waitlist', {
@@ -748,7 +749,8 @@ function WaitlistForm({
           desired_date: date,
           desired_time: desiredTime || undefined,
           party_size: partySize,
-          guest_name: name,
+          first_name: firstName.trim(),
+          last_name: lastName.trim(),
           guest_phone: guestPhone,
           guest_email: email || undefined,
         }),
@@ -786,7 +788,26 @@ function WaitlistForm({
     <form onSubmit={handleSubmit} className="mt-4 w-full space-y-3 rounded-xl border border-slate-200 bg-white p-4 text-left">
       <p className="text-xs font-medium text-slate-600">We&apos;ll notify you if a spot opens up.</p>
       {status === 'error' && <p className="text-xs text-red-600">{message}</p>}
-      <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name" required className="min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-base placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
+      <div className="grid gap-2 sm:grid-cols-2">
+        <input
+          type="text"
+          value={firstName}
+          onChange={(e) => setFirstName(e.target.value)}
+          placeholder="First name"
+          required
+          autoComplete="given-name"
+          className="min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-base placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+        />
+        <input
+          type="text"
+          value={lastName}
+          onChange={(e) => setLastName(e.target.value)}
+          placeholder="Surname"
+          required
+          autoComplete="family-name"
+          className="min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-base placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+        />
+      </div>
       <PhoneWithCountryField
         value={phone}
         onChange={setPhone}
@@ -796,7 +817,16 @@ function WaitlistForm({
       <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email (optional)" className="min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-base placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
       <input type="time" value={desiredTime} onChange={(e) => setDesiredTime(e.target.value)} className="min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-base focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
       <div className="flex gap-2">
-        <button type="submit" disabled={status === 'submitting' || !name.trim() || !normalizeToE164(phone, phoneDefaultCountry)} className="flex-1 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50">
+        <button
+          type="submit"
+          disabled={
+            status === 'submitting' ||
+            !firstName.trim() ||
+            !lastName.trim() ||
+            !normalizeToE164(phone, phoneDefaultCountry)
+          }
+          className="flex-1 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+        >
           {status === 'submitting' ? 'Adding...' : 'Join Standby'}
         </button>
         <button type="button" onClick={() => setOpen(false)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-500 hover:bg-slate-50">

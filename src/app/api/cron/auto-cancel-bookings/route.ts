@@ -3,6 +3,7 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { sendCommunication } from '@/lib/communications';
 import { applyBookingLifecycleStatusEffects, validateBookingStatusTransition } from '@/lib/table-management/lifecycle';
 import { requireCronAuthorisation } from '@/lib/cron-auth';
+import { formatGuestDisplayName } from '@/lib/guests/name';
 
 /**
  * GET/POST /api/cron/auto-cancel-bookings
@@ -82,7 +83,11 @@ export async function POST(request: NextRequest) {
     }
 
     for (const b of bookings ?? []) {
-      const { data: guest } = await supabase.from('guests').select('name, email, phone').eq('id', b.guest_id).single();
+      const { data: guest } = await supabase
+        .from('guests')
+        .select('first_name, last_name, email, phone')
+        .eq('id', b.guest_id)
+        .single();
       const { data: venue } = await supabase.from('venues').select('name').eq('id', b.venue_id).single();
       await sendCommunication({
         type: 'auto_cancel_notification',
@@ -90,7 +95,7 @@ export async function POST(request: NextRequest) {
         booking_id: b.id,
         recipient: { email: guest?.email ?? undefined, phone: guest?.phone ?? undefined },
         payload: {
-          guest_name: guest?.name,
+          guest_name: formatGuestDisplayName(guest?.first_name, guest?.last_name),
           venue_name: venue?.name,
           booking_date: b.booking_date,
           booking_time: b.booking_time,

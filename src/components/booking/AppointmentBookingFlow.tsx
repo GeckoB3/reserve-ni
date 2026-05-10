@@ -931,7 +931,8 @@ export function AppointmentBookingFlow({
             body: JSON.stringify({
               venue_id: venue.id,
               booking_date: date,
-              name: details.name,
+              first_name: details.first_name,
+              last_name: details.last_name,
               email: details.email || undefined,
               phone: details.phone?.trim() || undefined,
               source: isStaff ? staffBookingSource : 'booking_page',
@@ -988,7 +989,8 @@ export function AppointmentBookingFlow({
               booking_date: date,
               booking_time: selectedTime,
               party_size: 1,
-              name: details.name,
+              first_name: details.first_name,
+              last_name: details.last_name,
               phone: details.phone?.trim() || undefined,
               email: details.email || undefined,
               dietary_notes: details.dietary_notes,
@@ -1022,7 +1024,8 @@ export function AppointmentBookingFlow({
             booking_date: date,
             booking_time: selectedTime,
             party_size: 1,
-            name: details.name,
+            first_name: details.first_name,
+              last_name: details.last_name,
             email: details.email || undefined,
             phone: details.phone,
             source: 'booking_page',
@@ -1135,7 +1138,8 @@ export function AppointmentBookingFlow({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           venue_id: venue.id,
-          name: details.name,
+          first_name: details.first_name,
+              last_name: details.last_name,
           email: details.email || undefined,
           phone: details.phone?.trim() || undefined,
           source: isStaff ? staffBookingSource : 'booking_page',
@@ -1906,7 +1910,9 @@ export function AppointmentBookingFlow({
               <p className="mt-1 text-sm text-green-600">{formatDateHuman(date)} at {selectedTime}</p>
             </>
           )}
-          {guestDetails?.name && <p className="mt-3 text-xs text-green-600">A confirmation will be sent to {guestDetails.email || guestDetails.phone}.</p>}
+          {(guestDetails?.email || guestDetails?.phone) ? (
+            <p className="mt-3 text-xs text-green-600">A confirmation will be sent to {guestDetails.email || guestDetails.phone}.</p>
+          ) : null}
           {isStaff && createResult?.payment_url ? (
             <p className="mt-3 text-xs text-green-800">A deposit payment link was sent to the guest.</p>
           ) : null}
@@ -2286,11 +2292,11 @@ export function AppointmentBookingFlow({
             ))}
           </div>
           <p className="mt-3 text-sm text-green-600">{formatDateHuman(groupPeople[0]?.date ?? date)}</p>
-          {guestDetails?.name && (
+          {(guestDetails?.email || guestDetails?.phone) ? (
             <p className="mt-3 text-xs text-green-600">
               A confirmation will be sent to {guestDetails.email || guestDetails.phone}.
             </p>
-          )}
+          ) : null}
           {(groupCreateResult?.total_deposit_pence ?? 0) > 0 ? (
             <p className="mt-4 max-w-md mx-auto text-left text-xs text-green-800/90">
               <span className="font-medium">Refund policy:</span>{' '}

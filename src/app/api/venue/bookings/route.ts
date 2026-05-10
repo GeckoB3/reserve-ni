@@ -44,6 +44,7 @@ import {
   loadServiceEntityBookingWindow,
 } from '@/lib/booking/entity-booking-window';
 import { listActiveAreasForVenue } from '@/lib/areas/resolve-default-area';
+import { formatGuestDisplayName, normaliseGuestNamePart } from '@/lib/guests/name';
 
 const ticketLineSchema = z.object({
   ticket_type_id: z.string().uuid(),
@@ -56,7 +57,9 @@ const phoneBookingSchema = z.object({
   booking_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   booking_time: z.string().regex(/^([01]?[0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$/),
   party_size: z.number().int().min(1).max(50),
-  name: z.string().min(1).max(200),
+  /** Optional for staff/walk-in; both may be omitted. */
+  first_name: z.string().max(100).optional(),
+  last_name: z.string().max(100).optional(),
   /** Required for table (Model A) phone bookings and staff-created practitioner appointments (Model B); optional only for non-appointment unified paths if added later. */
   phone: z.string().max(24).optional(),
   email: z.union([z.literal(''), z.string().email()]).optional(),
@@ -128,7 +131,8 @@ export async function POST(request: NextRequest) {
       booking_date,
       booking_time,
       party_size,
-      name,
+      first_name,
+      last_name,
       phone,
       email,
       dietary_notes,
@@ -183,16 +187,20 @@ export async function POST(request: NextRequest) {
     }
 
     const emailNorm = email && email.trim() !== '' ? email.trim().toLowerCase() : null;
+    const guestFirst = normaliseGuestNamePart(first_name);
+    const guestLast = normaliseGuestNamePart(last_name);
     const { guest } = await findOrCreateGuest(
       admin,
       venueId,
       {
-        name,
+        first_name: guestFirst,
+        last_name: guestLast,
         email: emailNorm,
         phone: phoneE164,
       },
       { silentAuthSignup: Boolean(emailNorm) },
     );
+    const staffGuestDisplayName = formatGuestDisplayName(guest.first_name, guest.last_name, 'walk-in');
     const timeForDb = booking_time.length === 5 ? booking_time + ':00' : booking_time;
     const timeStr = timeForDb.slice(0, 5);
 
@@ -305,6 +313,9 @@ export async function POST(request: NextRequest) {
         source: bookingSource,
         created_by_staff_id: staff.id,
         guest_email: guest.email || null,
+        guest_first_name: guestFirst,
+        guest_last_name: guestLast,
+        guest_phone: phoneE164,
         deposit_amount_pence: requiresDeposit ? depositAmountPence : null,
         deposit_status: requiresDeposit ? ('Pending' as const) : ('Not Required' as const),
         cancellation_deadline,
@@ -353,7 +364,7 @@ export async function POST(request: NextRequest) {
           venueReplyToEmail: venue.reply_to_email ?? null,
           stripeConnectedAccountId: venue.stripe_connected_account_id,
           bookingId: evBooking.id,
-          guestName: name,
+          guestName: staffGuestDisplayName,
           guestEmail: guest.email ?? null,
           guestPhone: guest.phone ?? null,
           booking_date,
@@ -477,6 +488,9 @@ export async function POST(request: NextRequest) {
         source: bookingSource,
         created_by_staff_id: staff.id,
         guest_email: guest.email || null,
+        guest_first_name: guestFirst,
+        guest_last_name: guestLast,
+        guest_phone: phoneE164,
         deposit_amount_pence: requiresDeposit ? depositAmountPence : null,
         deposit_status: requiresDeposit ? ('Pending' as const) : ('Not Required' as const),
         cancellation_deadline: cancellation_deadline_class,
@@ -511,7 +525,7 @@ export async function POST(request: NextRequest) {
           venueReplyToEmail: venue.reply_to_email ?? null,
           stripeConnectedAccountId: venue.stripe_connected_account_id,
           bookingId: classBooking.id,
-          guestName: name,
+          guestName: staffGuestDisplayName,
           guestEmail: guest.email ?? null,
           guestPhone: guest.phone ?? null,
           booking_date,
@@ -677,6 +691,9 @@ export async function POST(request: NextRequest) {
         source: bookingSource,
         created_by_staff_id: staff.id,
         guest_email: guest.email || null,
+        guest_first_name: guestFirst,
+        guest_last_name: guestLast,
+        guest_phone: phoneE164,
         deposit_amount_pence: requiresDepositRes ? depositAmountPenceRes : null,
         deposit_status: requiresDepositRes ? ('Pending' as const) : ('Not Required' as const),
         resource_payment_requirement: payReqRes,
@@ -714,7 +731,7 @@ export async function POST(request: NextRequest) {
           venueReplyToEmail: venue.reply_to_email ?? null,
           stripeConnectedAccountId: venue.stripe_connected_account_id,
           bookingId: resBooking.id,
-          guestName: name,
+          guestName: staffGuestDisplayName,
           guestEmail: guest.email ?? null,
           guestPhone: guest.phone ?? null,
           booking_date,
@@ -880,6 +897,9 @@ export async function POST(request: NextRequest) {
         source: bookingSource,
         created_by_staff_id: staff.id,
         guest_email: guest.email || null,
+        guest_first_name: guestFirst,
+        guest_last_name: guestLast,
+        guest_phone: phoneE164,
         deposit_amount_pence: depositAmountPence,
         deposit_status: requiresDeposit ? ('Pending' as const) : ('Not Required' as const),
         cancellation_deadline: cancellationDeadlineAppt,
@@ -941,7 +961,7 @@ export async function POST(request: NextRequest) {
 
         const depositBookingPayload = {
           id: apptBooking.id,
-          guest_name: name,
+          guest_name: staffGuestDisplayName,
           guest_email: guest.email ?? null,
           guest_phone: guest.phone ?? null,
           booking_date,
@@ -996,7 +1016,7 @@ export async function POST(request: NextRequest) {
               const { email, sms } = await sendBookingConfirmationNotifications(
                 {
                   id: apptBooking.id,
-                  guest_name: name,
+                  guest_name: staffGuestDisplayName,
                   guest_email: guest.email ?? null,
                   guest_phone: guest.phone ?? null,
                   booking_date,
@@ -1139,6 +1159,9 @@ export async function POST(request: NextRequest) {
       source: bookingSource,
       created_by_staff_id: staff.id,
       guest_email: guest.email || null,
+      guest_first_name: guestFirst,
+      guest_last_name: guestLast,
+      guest_phone: phoneE164,
       deposit_amount_pence: depositAmountPence,
       deposit_status: requiresDeposit ? ('Pending' as const) : ('Not Required' as const),
       cancellation_deadline: cancellationDeadline(booking_date, booking_time),
@@ -1218,7 +1241,7 @@ export async function POST(request: NextRequest) {
 
       const tableDepositPayload = {
         id: booking.id,
-        guest_name: name,
+        guest_name: staffGuestDisplayName,
         guest_email: guest.email ?? null,
         guest_phone: guest.phone ?? null,
         booking_date,
@@ -1276,7 +1299,7 @@ export async function POST(request: NextRequest) {
             const { email, sms } = await sendBookingConfirmationNotifications(
               {
                 id: booking.id,
-                guest_name: name,
+                guest_name: staffGuestDisplayName,
                 guest_email: guest.email ?? null,
                 guest_phone: guest.phone ?? null,
                 booking_date,

@@ -33,7 +33,8 @@ function shapeGuestListRow(
 
   return {
     id: row.id,
-    name: row.name,
+    first_name: row.first_name,
+    last_name: row.last_name,
     email: row.email,
     phone: row.phone,
     tags: Array.isArray(row.tags) ? row.tags : [],
@@ -70,8 +71,8 @@ export async function GET(request: NextRequest) {
     const { search, tags, sort, filter, lifecycle, page, limit, include_custom_fields } = params;
 
     const guestListSelect = include_custom_fields
-      ? 'id, name, email, phone, tags, visit_count, no_show_count, last_visit_date, created_at, identifiability_tier, marketing_opt_out, marketing_consent, custom_fields'
-      : 'id, name, email, phone, tags, visit_count, no_show_count, last_visit_date, created_at, identifiability_tier, marketing_opt_out, marketing_consent';
+      ? 'id, first_name, last_name, email, phone, tags, visit_count, no_show_count, last_visit_date, created_at, identifiability_tier, marketing_opt_out, marketing_consent, custom_fields'
+      : 'id, first_name, last_name, email, phone, tags, visit_count, no_show_count, last_visit_date, created_at, identifiability_tier, marketing_opt_out, marketing_consent';
     const from = page * limit;
     const to = from + limit - 1;
 
@@ -100,7 +101,7 @@ export async function GET(request: NextRequest) {
 
       if (search) {
         const p = `%${search}%`;
-        query = query.or(`name.ilike.${p},email.ilike.${p},phone.ilike.${p}`);
+        query = query.or(`first_name.ilike.${p},last_name.ilike.${p},email.ilike.${p},phone.ilike.${p}`);
       }
 
       if (lifecycle === 'lapsed') {
@@ -120,9 +121,13 @@ export async function GET(request: NextRequest) {
     ): ReturnType<typeof buildBaseGuestQuery> => {
       switch (sortKey) {
         case 'name_asc':
-          return query.order('name', { ascending: true, nullsFirst: false });
+          return query
+            .order('last_name', { ascending: true, nullsFirst: false })
+            .order('first_name', { ascending: true, nullsFirst: false });
         case 'name_desc':
-          return query.order('name', { ascending: false, nullsFirst: false });
+          return query
+            .order('last_name', { ascending: false, nullsFirst: false })
+            .order('first_name', { ascending: false, nullsFirst: false });
         case 'last_visit_desc':
           return query.order('last_visit_date', { ascending: false, nullsFirst: true });
         case 'last_visit_asc':

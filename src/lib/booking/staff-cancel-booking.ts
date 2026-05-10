@@ -10,6 +10,7 @@ import { inferBookingRowModel } from '@/lib/booking/infer-booking-row-model';
 import { getCancellationNoticeHoursForBooking, parseExtendedBookingRules } from '@/lib/booking/venue-booking-rules';
 import type { BookingEmailData } from '@/lib/emails/types';
 import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
+import { formatGuestDisplayName } from '@/lib/guests/name';
 
 const CANCELLABLE = ['Pending', 'Booked', 'Confirmed', 'Seated'];
 
@@ -168,7 +169,7 @@ export async function cancelStaffBookingWithNotify(
     .single();
   const { data: guestRow } = await staffDb
     .from('guests')
-    .select('name, email, phone')
+    .select('first_name, last_name, email, phone')
     .eq('id', booking.guest_id)
     .single();
 
@@ -213,7 +214,7 @@ export async function cancelStaffBookingWithNotify(
   const bookingTime = typeof booking.booking_time === 'string' ? booking.booking_time.slice(0, 5) : '';
   const cancelBookingEmail: BookingEmailData = {
     id: bookingId,
-    guest_name: guestRow?.name ?? 'Guest',
+    guest_name: formatGuestDisplayName(guestRow?.first_name, guestRow?.last_name),
     guest_email: guestRow?.email ?? null,
     guest_phone: guestRow?.phone ?? null,
     booking_date: booking.booking_date as string,

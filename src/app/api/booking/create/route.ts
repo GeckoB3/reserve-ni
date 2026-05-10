@@ -62,13 +62,15 @@ import { isPublicOnlineBookingBlocked } from '@/lib/billing/subscription-entitle
 import { createRouteHandlerClient } from '@/lib/supabase/server';
 import { sumAvailableClassCreditsForClassType } from '@/lib/class-commerce/available-class-credits';
 import { consumeClassCreditsForBooking } from '@/lib/class-commerce/consume-class-credits';
+import { formatGuestDisplayName, normaliseGuestNamePart } from '@/lib/guests/name';
 
 const createBookingSchema = z.object({
   venue_id: z.string().uuid(),
   booking_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   booking_time: z.string().regex(/^([01]?[0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$/),
   party_size: z.number().int().min(1).max(50),
-  name: z.string().min(1).max(200),
+  first_name: z.string().min(1).max(100),
+  last_name: z.string().min(1).max(100),
   email: z.string().email().optional().or(z.literal('')),
   phone: z.string().min(1).max(24),
   dietary_notes: z.string().max(1000).optional(),
@@ -135,7 +137,8 @@ export async function POST(request: NextRequest) {
       booking_date,
       booking_time,
       party_size,
-      name,
+      first_name,
+      last_name,
       email,
       phone,
       dietary_notes,
@@ -337,11 +340,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const guestFirst = normaliseGuestNamePart(first_name);
+    const guestLast = normaliseGuestNamePart(last_name);
+
     const { guest } = await findOrCreateGuest(
       supabase,
       venue_id,
       {
-        name,
+        first_name: guestFirst,
+        last_name: guestLast,
         email: email || null,
         phone: phoneE164,
       },
@@ -372,6 +379,9 @@ export async function POST(request: NextRequest) {
       dietary_notes: dietary_notes || null,
       occasion: occasion || null,
       guest_email: email || null,
+      guest_first_name: guestFirst,
+      guest_last_name: guestLast,
+      guest_phone: phoneE164,
       deposit_amount_pence: depositAmountPence,
       deposit_status: requiresDeposit ? 'Pending' : 'Not Required',
       cancellation_deadline,
@@ -473,10 +483,11 @@ export async function POST(request: NextRequest) {
       if (guest.email || guest.phone) {
         after(async () => {
           try {
+            const displayName = formatGuestDisplayName(guest.first_name, guest.last_name);
             const { email, sms } = await sendBookingConfirmationNotifications(
               {
                 id: booking.id,
-                guest_name: name,
+                guest_name: displayName,
                 guest_email: guest.email ?? null,
                 guest_phone: guest.phone ?? null,
                 booking_date,
@@ -553,8 +564,16 @@ async function handleNonTableBooking(
   guestLinkOptions: { silentAuthSignup: boolean },
 ) {
   const {
-    venue_id, booking_date, booking_time, party_size, name, email,
-    dietary_notes, occasion, source,
+    venue_id,
+    booking_date,
+    booking_time,
+    party_size,
+    first_name,
+    last_name,
+    email,
+    dietary_notes,
+    occasion,
+    source,
     practitioner_id, appointment_service_id, service_variant_id,
     experience_event_id, ticket_lines,
     class_instance_id,
@@ -1016,11 +1035,15 @@ async function handleNonTableBooking(
     );
   }
 
+  const guestFirst = normaliseGuestNamePart(first_name);
+  const guestLast = normaliseGuestNamePart(last_name);
+
   const { guest } = await findOrCreateGuest(
     supabase,
     venue_id,
     {
-      name,
+      first_name: guestFirst,
+      last_name: guestLast,
       email: email || null,
       phone: phoneE164,
     },
@@ -1061,6 +1084,9 @@ async function handleNonTableBooking(
     dietary_notes: dietary_notes || null,
     occasion: occasion || null,
     guest_email: email || null,
+    guest_first_name: guestFirst,
+    guest_last_name: guestLast,
+    guest_phone: phoneE164,
     deposit_amount_pence: depositAmountPence,
     deposit_status: requiresDeposit ? 'Pending' : 'Not Required',
     cancellation_deadline,
@@ -1189,10 +1215,11 @@ async function handleNonTableBooking(
     if (guest.email || guest.phone) {
       after(async () => {
         try {
+          const displayName = formatGuestDisplayName(guest.first_name, guest.last_name);
           const { email, sms } = await sendBookingConfirmationNotifications(
             {
               id: booking.id,
-              guest_name: name,
+              guest_name: displayName,
               guest_email: guest.email ?? null,
               guest_phone: guest.phone ?? phoneE164,
               booking_date,

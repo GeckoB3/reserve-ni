@@ -13,6 +13,7 @@ import { fulfillClassCreditPurchaseFromPaymentIntent } from '@/lib/class-commerc
 import { fulfillCourseEnrollmentFromPaymentIntent } from '@/lib/class-commerce/fulfill-course-enrollment';
 import { RESERVE_NI_PI_PURPOSE } from '@/types/class-commerce';
 import { syncClassMembershipFromStripeSubscription } from '@/lib/class-commerce/sync-membership-from-stripe';
+import { formatGuestDisplayName } from '@/lib/guests/name';
 
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 if (!webhookSecret) {
@@ -143,7 +144,7 @@ export async function POST(request: NextRequest) {
         .single();
       const { data: guest } = await supabase
         .from('guests')
-        .select('name, email, phone')
+        .select('first_name, last_name, email, phone')
         .eq('id', booking.guest_id)
         .single();
 
@@ -173,9 +174,10 @@ export async function POST(request: NextRequest) {
             purpose: 'manage',
           });
           const recipientEmail = guest?.email ?? (b as { guest_email?: string | null }).guest_email ?? null;
+          const guestDisplay = formatGuestDisplayName(guest?.first_name, guest?.last_name);
           const bookingData = {
             id: bid,
-            guest_name: guest?.name ?? 'Guest',
+            guest_name: guestDisplay !== 'Guest' ? guestDisplay : (recipientEmail ?? 'Guest'),
             guest_email: recipientEmail ?? null,
             guest_phone: guest?.phone ?? null,
             booking_date: b.booking_date ?? '',

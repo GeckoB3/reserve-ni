@@ -12,6 +12,7 @@ import {
   isAccountLinkedPublicMode,
   mergeVenueAuthoritativeField,
 } from '@/lib/guests/guest-matching-rules';
+import { formatGuestDisplayName, normaliseGuestNamePart } from '@/lib/guests/name';
 
 function normaliseEmail(email: string): string {
   return email.trim().toLowerCase();
@@ -31,7 +32,8 @@ function computeGlobalGuestHash(email: string | null, phone: string | null): str
 }
 
 export interface GuestInput {
-  name: string | null;
+  first_name: string | null;
+  last_name: string | null;
   email: string | null;
   phone: string | null;
 }
@@ -47,22 +49,28 @@ export interface FindOrCreateGuestOptions {
 export interface GuestRecord {
   id: string;
   venue_id: string;
-  name: string | null;
+  first_name: string | null;
+  last_name: string | null;
   email: string | null;
   phone: string | null;
   visit_count: number;
   user_id?: string | null;
 }
 
+const guestSelect =
+  'id, venue_id, first_name, last_name, email, phone, visit_count, user_id';
+
 async function resolveAuthUserIdForGuest(
   admin: SupabaseClient,
   email: string,
-  name: string | null,
+  firstName: string | null,
+  lastName: string | null,
   silentAuthSignup: boolean,
 ): Promise<string | null> {
   if (!silentAuthSignup) return null;
+  const display = formatGuestDisplayName(firstName, lastName);
   try {
-    return await ensureAuthUserForEmail(admin, email, name);
+    return await ensureAuthUserForEmail(admin, email, display === 'Guest' ? null : display);
   } catch (err) {
     console.error('[findOrCreateGuest] silentAuthSignup failed; continuing without user_id', {
       message: err instanceof Error ? err.message : String(err),
@@ -87,25 +95,27 @@ export async function findOrCreateGuest(
   const silentAuthSignup = options?.silentAuthSignup === true;
   const email = input.email ? normaliseEmail(input.email) : null;
   const phone = input.phone ? normaliseGuestPhone(input.phone) : null;
-  const name = input.name?.trim() || null;
+  const firstName = normaliseGuestNamePart(input.first_name);
+  const lastName = normaliseGuestNamePart(input.last_name);
 
   const accountLinkedPublic = isAccountLinkedPublicMode(silentAuthSignup, email);
 
   let authUserId: string | null = null;
   if (email && silentAuthSignup) {
-    authUserId = await resolveAuthUserIdForGuest(supabase, email, name, true);
+    authUserId = await resolveAuthUserIdForGuest(supabase, email, firstName, lastName, true);
   }
 
   if (email) {
     const { data: byEmail } = await supabase
       .from('guests')
-      .select('id, venue_id, name, email, phone, visit_count, user_id')
+      .select(guestSelect)
       .eq('venue_id', venueId)
       .eq('email', email)
       .maybeSingle();
 
     if (byEmail) {
-      const nextName = mergeVenueAuthoritativeField(byEmail.name, name);
+      const nextFirst = mergeVenueAuthoritativeField(byEmail.first_name, firstName);
+      const nextLast = mergeVenueAuthoritativeField(byEmail.last_name, lastName);
       const nextPhone = mergeVenueAuthoritativeField(byEmail.phone, phone);
       let nextUserId = byEmail.user_id as string | null;
       if (authUserId && !nextUserId) {
@@ -120,7 +130,8 @@ export async function findOrCreateGuest(
       const { error: updErr } = await supabase
         .from('guests')
         .update({
-          name: nextName,
+          first_name: nextFirst,
+          last_name: nextLast,
           phone: nextPhone,
           user_id: nextUserId,
           updated_at: new Date().toISOString(),
@@ -131,7 +142,8 @@ export async function findOrCreateGuest(
         return {
           guest: {
             ...byEmail,
-            name: nextName,
+            first_name: nextFirst,
+            last_name: nextLast,
             phone: nextPhone,
             user_id: nextUserId,
           },
@@ -144,13 +156,14 @@ export async function findOrCreateGuest(
   if (!accountLinkedPublic && phone) {
     const { data: byPhone } = await supabase
       .from('guests')
-      .select('id, venue_id, name, email, phone, visit_count, user_id')
+      .select(guestSelect)
       .eq('venue_id', venueId)
       .eq('phone', phone)
       .maybeSingle();
 
     if (byPhone) {
-      const nextName = mergeVenueAuthoritativeField(byPhone.name, name);
+      const nextFirst = mergeVenueAuthoritativeField(byPhone.first_name, firstName);
+      const nextLast = mergeVenueAuthoritativeField(byPhone.last_name, lastName);
       const nextEmail = mergeVenueAuthoritativeField(byPhone.email, email);
       let nextUserId = byPhone.user_id as string | null;
       if (email && silentAuthSignup && authUserId) {
@@ -162,7 +175,8 @@ export async function findOrCreateGuest(
       const { error: updErr } = await supabase
         .from('guests')
         .update({
-          name: nextName,
+          first_name: nextFirst,
+          last_name: nextLast,
           email: nextEmail,
           user_id: nextUserId,
           updated_at: new Date().toISOString(),
@@ -173,7 +187,8 @@ export async function findOrCreateGuest(
         return {
           guest: {
             ...byPhone,
-            name: nextName,
+            first_name: nextFirst,
+            last_name: nextLast,
             email: nextEmail,
             user_id: nextUserId,
           },
@@ -189,7 +204,8 @@ export async function findOrCreateGuest(
     .from('guests')
     .insert({
       venue_id: venueId,
-      name,
+      first_name: firstName,
+      last_name: lastName,
       email: email || null,
       phone: phone || null,
       user_id: insertUserId ?? null,
@@ -197,7 +213,7 @@ export async function findOrCreateGuest(
       visit_count: 0,
       source: silentAuthSignup ? 'self_booked' : null,
     })
-    .select('id, venue_id, name, email, phone, visit_count, user_id')
+    .select(guestSelect)
     .single();
 
   if (insertErr) throw insertErr;

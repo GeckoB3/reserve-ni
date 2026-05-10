@@ -18,6 +18,7 @@ import { getDayOfWeek } from '@/lib/availability/engine';
 import type { EntityBookingWindow } from '@/lib/booking/entity-booking-window';
 import { entityBookingWindowFromRow, isGuestBookingDateAllowed } from '@/lib/booking/entity-booking-window';
 import type { AvailabilityBlock } from '@/types/availability';
+import { formatGuestDisplayName } from '@/lib/guests/name';
 
 export interface UnifiedAvailableSlot {
   time: string;
@@ -374,12 +375,11 @@ export async function getCalendarGrid(params: {
   const { supabase, venueId, calendarIds, startDate, endDate } = params;
   if (calendarIds.length === 0) return { calendars: [] };
 
-  const [{ data: cals }, { data: guests }] = await Promise.all([
-    supabase.from('unified_calendars').select('id, name, working_hours').eq('venue_id', venueId).in('id', calendarIds),
-    supabase.from('guests').select('id, name'),
-  ]);
-
-  const guestName = new Map((guests ?? []).map((g: { id: string; name: string }) => [g.id, g.name]));
+  const { data: cals } = await supabase
+    .from('unified_calendars')
+    .select('id, name, working_hours')
+    .eq('venue_id', venueId)
+    .in('id', calendarIds);
 
   const [{ data: bookingRows }, { data: blockRows }, { data: sessionRows }] = await Promise.all([
     supabase
@@ -408,6 +408,22 @@ export async function getCalendarGrid(params: {
       .lte('session_date', endDate)
       .eq('is_cancelled', false),
   ]);
+
+  const guestIdList = [
+    ...new Set(
+      (bookingRows ?? [])
+        .map((b) => (b as { guest_id?: string | null }).guest_id)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  ];
+  const { data: guestRows } =
+    guestIdList.length > 0
+      ? await supabase.from('guests').select('id, first_name, last_name').in('id', guestIdList)
+      : { data: [] as { id: string; first_name: string | null; last_name: string | null }[] };
+
+  const guestName = new Map(
+    (guestRows ?? []).map((g) => [g.id, formatGuestDisplayName(g.first_name, g.last_name)] as const),
+  );
 
   const serviceIds = new Set<string>();
   for (const b of bookingRows ?? []) {

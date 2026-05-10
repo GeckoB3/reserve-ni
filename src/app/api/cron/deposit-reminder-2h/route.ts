@@ -4,6 +4,7 @@ import { sendCommunication } from '@/lib/communications';
 import { createOrGetPaymentShortLink } from '@/lib/booking-short-links';
 import { tryGetPaymentTokenSecret } from '@/lib/payment-token';
 import { requireCronAuthorisation } from '@/lib/cron-auth';
+import { formatGuestDisplayName } from '@/lib/guests/name';
 
 /**
  * GET/POST /api/cron/deposit-reminder-2h
@@ -43,7 +44,11 @@ export async function POST(request: NextRequest) {
 
     for (const b of bookings ?? []) {
       const { data: venue } = await supabase.from('venues').select('name').eq('id', b.venue_id).single();
-      const { data: guest } = await supabase.from('guests').select('name, phone, email').eq('id', b.guest_id).single();
+      const { data: guest } = await supabase
+        .from('guests')
+        .select('first_name, last_name, phone, email')
+        .eq('id', b.guest_id)
+        .single();
       if (!guest?.phone && !guest?.email) continue;
 
       const timeStr = typeof b.booking_time === 'string' ? b.booking_time.slice(0, 5) : '00:00';
@@ -56,7 +61,7 @@ export async function POST(request: NextRequest) {
         booking_id: b.id,
         recipient: { phone: guest.phone ?? undefined, email: guest.email ?? undefined },
         payload: {
-          guest_name: guest.name ?? 'Guest',
+          guest_name: formatGuestDisplayName(guest.first_name, guest.last_name),
           venue_name: venue?.name ?? 'Venue',
           booking_date: b.booking_date,
           booking_time: timeStr,

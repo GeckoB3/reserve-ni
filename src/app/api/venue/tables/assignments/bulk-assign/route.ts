@@ -7,6 +7,7 @@ import { autoAssignTable } from '@/lib/table-availability';
 import { syncTableStatusesForBooking } from '@/lib/table-management/lifecycle';
 import { resolveTableAssignmentDurationBuffer } from '@/lib/table-management/booking-table-duration';
 import { isTableReservationBooking } from '@/lib/booking/infer-booking-row-model';
+import { formatGuestDisplayName } from '@/lib/guests/name';
 
 const bodySchema = z.object({
   dry_run: z.boolean().optional(),
@@ -43,8 +44,14 @@ type BookingRow = {
   service_item_id?: string | null;
   practitioner_id?: string | null;
   appointment_service_id?: string | null;
-  guest: { name: string } | { name: string }[] | null;
+  guest: { first_name: string | null; last_name: string | null } | { first_name: string | null; last_name: string | null }[] | null;
 };
+
+function guestDisplayFromRow(booking: BookingRow): string {
+  const g = booking.guest;
+  const row = Array.isArray(g) ? g[0] : g;
+  return formatGuestDisplayName(row?.first_name, row?.last_name);
+}
 
 /**
  * POST /api/venue/tables/assignments/bulk-assign
@@ -69,7 +76,7 @@ export async function POST(request: NextRequest) {
   const { data: rawBookings, error: bookingsError } = await staff.db
     .from('bookings')
     .select(
-      'id, booking_date, booking_time, estimated_end_time, party_size, status, service_id, experience_event_id, class_instance_id, resource_id, event_session_id, calendar_id, service_item_id, practitioner_id, appointment_service_id, guest:guests(name)',
+      'id, booking_date, booking_time, estimated_end_time, party_size, status, service_id, experience_event_id, class_instance_id, resource_id, event_session_id, calendar_id, service_item_id, practitioner_id, appointment_service_id, guest:guests(first_name, last_name)',
     )
     .eq('venue_id', staff.venue_id)
     .gte('booking_date', today)
@@ -117,7 +124,7 @@ export async function POST(request: NextRequest) {
       failed: unassignedBookings.length,
       failed_bookings: unassignedBookings.map((booking) => ({
         id: booking.id,
-        guest_name: Array.isArray(booking.guest) ? booking.guest[0]?.name ?? 'Guest' : booking.guest?.name ?? 'Guest',
+        guest_name: guestDisplayFromRow(booking),
         reason: 'Pending assignment',
       })),
     });
@@ -128,7 +135,7 @@ export async function POST(request: NextRequest) {
 
   for (const booking of unassignedBookings) {
     const bookingTime = booking.booking_time.slice(0, 5);
-    const guestName = Array.isArray(booking.guest) ? booking.guest[0]?.name ?? 'Guest' : booking.guest?.name ?? 'Guest';
+    const guestName = guestDisplayFromRow(booking);
     const { durationMinutes, bufferMinutes } = booking.service_id
       ? await resolveTableAssignmentDurationBuffer(
           staff.db,

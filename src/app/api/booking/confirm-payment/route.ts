@@ -8,6 +8,7 @@ import { isSelfServeBookingSource } from '@/lib/booking-source';
 import { enrichBookingEmailForComms } from '@/lib/emails/booking-email-enrichment';
 import { createOrGetBookingShortLink } from '@/lib/booking-short-links';
 import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
+import { formatGuestDisplayName } from '@/lib/guests/name';
 
 /**
  * POST /api/booking/confirm-payment
@@ -135,7 +136,7 @@ export async function POST(request: NextRequest) {
 
     const { data: guest } = await supabase
       .from('guests')
-      .select('name, email, phone')
+      .select('first_name, last_name, email, phone')
       .eq('id', booking.guest_id)
       .single();
 
@@ -165,9 +166,10 @@ export async function POST(request: NextRequest) {
         });
         const bookingTime =
           typeof bRow.booking_time === 'string' ? bRow.booking_time.slice(0, 5) : bRow.booking_time;
+        const guestDisplay = formatGuestDisplayName(guest?.first_name, guest?.last_name);
         const bookingData = {
           id: bRow.id,
-          guest_name: guest?.name ?? guestEmail ?? 'Guest',
+          guest_name: guestDisplay !== 'Guest' ? guestDisplay : (guestEmail ?? 'Guest'),
           guest_email: recipientEmail ?? null,
           guest_phone: guest?.phone ?? null,
           booking_date: bRow.booking_date,

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { sendCommunication } from '@/lib/communications';
 import { requireCronAuthorisation } from '@/lib/cron-auth';
+import { formatGuestDisplayName } from '@/lib/guests/name';
 
 /**
  * GET/POST /api/cron/dietary-digest
@@ -44,8 +45,12 @@ export async function POST(request: NextRequest) {
       const lines: string[] = [];
       for (const b of bookings) {
         const time = typeof b.booking_time === 'string' ? b.booking_time.slice(0, 5) : '?';
-        const { data: guest } = await supabase.from('guests').select('name').eq('id', b.guest_id).single();
-        const guestName = guest?.name ?? 'Guest';
+        const { data: guest } = await supabase
+          .from('guests')
+          .select('first_name, last_name')
+          .eq('id', b.guest_id)
+          .single();
+        const guestName = formatGuestDisplayName(guest?.first_name, guest?.last_name);
         lines.push(`${time} - ${guestName} (${b.party_size} covers): ${b.dietary_notes}`);
       }
 

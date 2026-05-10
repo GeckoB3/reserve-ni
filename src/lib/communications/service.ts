@@ -7,6 +7,7 @@ import { sendEmail } from '@/lib/emails/send-email';
 import { sendSmsWithSegments } from '@/lib/emails/send-sms';
 import { assertSmsSendWithinFreeAccessQuota, estimateSmsSegments, recordOutboundSms } from '@/lib/sms-usage';
 import type { BookingModel } from '@/types/booking-models';
+import { formatGuestDisplayName } from '@/lib/guests/name';
 
 interface LogContext {
   venue_id?: string;
@@ -149,7 +150,7 @@ async function buildGuestBookingContext(
   const guestRow = guestId
     ? await admin
         .from('guests')
-        .select('name, email, phone')
+        .select('first_name, last_name, email, phone')
         .eq('id', guestId)
         .maybeSingle()
     : null;
@@ -190,9 +191,15 @@ async function buildGuestBookingContext(
   return {
     booking: {
       id: ctx.booking_id ?? bookingData?.id ?? crypto.randomUUID(),
-      guest_name:
-        (guestRow?.data as { name?: string | null } | null)?.name ??
-        (typeof payload.guest_name === 'string' ? payload.guest_name : 'Guest'),
+      guest_name: (() => {
+        const gr = guestRow?.data as {
+          first_name?: string | null;
+          last_name?: string | null;
+        } | null;
+        const fromDb = formatGuestDisplayName(gr?.first_name, gr?.last_name);
+        const fromPayload = typeof payload.guest_name === 'string' ? payload.guest_name : null;
+        return fromDb !== 'Guest' ? fromDb : (fromPayload ?? 'Guest');
+      })(),
       guest_email:
         recipient.email ??
         (guestRow?.data as { email?: string | null } | null)?.email ??

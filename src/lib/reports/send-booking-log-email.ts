@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { sendEmail } from '@/lib/emails/send-email';
+import { formatGuestDisplayName } from '@/lib/guests/name';
 
 interface BookingLogVenue {
   id: string;
@@ -22,7 +23,8 @@ interface BookingLogBookingRow {
 
 interface GuestRow {
   id: string;
-  name: string | null;
+  first_name: string | null;
+  last_name: string | null;
   email: string | null;
   phone: string | null;
 }
@@ -97,7 +99,7 @@ function actorLabel(actorType: string | null, staff: StaffRow | null, fallback: 
 }
 
 function bookingCard(item: BookingLogItem, timezone: string, accent: string): string {
-  const guestName = item.guest?.name?.trim() || 'Guest';
+  const guestName = formatGuestDisplayName(item.guest?.first_name, item.guest?.last_name);
   const contact = [item.guest?.email, item.guest?.phone].filter(Boolean).join(' · ');
   return `
     <tr>
@@ -129,7 +131,7 @@ async function hydrateLookups(
 
   const [guestRes, staffRes] = await Promise.all([
     guestIds.length
-      ? supabase.from('guests').select('id, name, email, phone').in('id', guestIds)
+      ? supabase.from('guests').select('id, first_name, last_name, email, phone').in('id', guestIds)
       : Promise.resolve({ data: [] as GuestRow[], error: null }),
     staffIds.length
       ? supabase.from('staff').select('id, name, email').in('id', staffIds)
@@ -298,13 +300,13 @@ export async function sendBookingLogEmail(params: {
     '',
     `New bookings: ${createdItems.length}`,
     ...createdItems.map((item) => {
-      const guest = item.guest?.name?.trim() || 'Guest';
+      const guest = formatGuestDisplayName(item.guest?.first_name, item.guest?.last_name);
       return `- ${guest}, ${formatBookingWhen(item.booking, timezone)}, by ${item.actor}`;
     }),
     '',
     `Cancellations: ${cancelledItems.length}`,
     ...cancelledItems.map((item) => {
-      const guest = item.guest?.name?.trim() || 'Guest';
+      const guest = formatGuestDisplayName(item.guest?.first_name, item.guest?.last_name);
       return `- ${guest}, ${formatBookingWhen(item.booking, timezone)}, by ${item.actor}`;
     }),
   ].join('\n');

@@ -3,6 +3,7 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { stripe } from '@/lib/stripe';
 import { verifyPaymentLinkToken } from '@/lib/payment-token';
 import { checkRateLimit, getClientIp } from '@/lib/rate-limit';
+import { formatGuestDisplayName } from '@/lib/guests/name';
 
 /**
  * GET /api/booking/pay?t=token
@@ -45,7 +46,9 @@ export async function GET(request: NextRequest) {
     const supabase = getSupabaseAdminClient();
     const { data: booking } = await supabase
       .from('bookings')
-      .select('id, stripe_payment_intent_id, venue_id, status, booking_date, booking_time, party_size, deposit_amount_pence, guest_email, guest_name, guest_phone, cancellation_deadline, guest_id')
+      .select(
+        'id, stripe_payment_intent_id, venue_id, status, booking_date, booking_time, party_size, deposit_amount_pence, guest_email, guest_first_name, guest_last_name, guest_phone, cancellation_deadline, guest_id',
+      )
       .eq('id', bookingId)
       .single();
 
@@ -63,17 +66,25 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Venue payment not configured' }, { status: 500 });
     }
 
-    // Resolve guest name from guests table if not on booking directly
-    let guestName = booking.guest_name ?? '';
+    // Resolve guest name from guests table if not on booking snapshot
+    const b = booking as {
+      guest_first_name?: string | null;
+      guest_last_name?: string | null;
+      guest_email?: string | null;
+      guest_id?: string | null;
+    };
+    let guestName = formatGuestDisplayName(b.guest_first_name, b.guest_last_name);
     let guestEmail = booking.guest_email ?? '';
     if (booking.guest_id) {
       const { data: guest } = await supabase
         .from('guests')
-        .select('name, email')
+        .select('first_name, last_name, email')
         .eq('id', booking.guest_id)
         .single();
       if (guest) {
-        if (!guestName) guestName = guest.name ?? '';
+        if (!guestName || guestName === 'Guest') {
+          guestName = formatGuestDisplayName(guest.first_name, guest.last_name);
+        }
         if (!guestEmail) guestEmail = guest.email ?? '';
       }
     }

@@ -69,7 +69,8 @@ export function WalkInModal({
   const [partySize, setPartySize] = useState(2);
   const [partyPanelOpen, setPartyPanelOpen] = useState(false);
   const partyPanelRef = useRef<HTMLDivElement>(null);
-  const [name, setName] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [phone, setPhone] = useState('');
   const [dietaryNotes, setDietaryNotes] = useState('');
   const [occasion, setOccasion] = useState('');
@@ -368,13 +369,16 @@ export function WalkInModal({
 
       const walkinBody: Record<string, unknown> = {
         party_size: partySize,
-        name: name.trim() || 'Walk In',
         phone: walkinPhone || undefined,
         dietary_notes: dietaryNotes.trim() || undefined,
         occasion: occasion.trim() || undefined,
         booking_date: bookingDate,
         booking_time: bookingTime,
       };
+      const fn = firstName.trim();
+      const ln = lastName.trim();
+      if (fn) walkinBody.first_name = fn;
+      if (ln) walkinBody.last_name = ln;
       /** Omit unless staff overrode venue default — avoids posting a stale placeholder before suggest resolves. */
       if (coverDurationDirty) {
         walkinBody.duration_minutes = clampedCoverMins;
@@ -608,19 +612,36 @@ export function WalkInModal({
             </div>
           </div>
 
-          {/* Guest name */}
-          <div>
-            <label htmlFor="walkin-name" className="mb-1.5 block text-sm font-medium text-slate-700">
-              Guest name <span className="text-slate-400">(optional)</span>
-            </label>
-            <input
-              id="walkin-name"
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Walk-in guest"
-              className="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
-            />
+          {/* Guest name — first + surname */}
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label htmlFor="walkin-first-name" className="mb-1.5 block text-sm font-medium text-slate-700">
+                First name <span className="text-slate-400">(optional)</span>
+              </label>
+              <input
+                id="walkin-first-name"
+                type="text"
+                autoComplete="given-name"
+                value={firstName}
+                onChange={(e) => setFirstName(e.target.value)}
+                placeholder="Given name"
+                className="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+              />
+            </div>
+            <div>
+              <label htmlFor="walkin-last-name" className="mb-1.5 block text-sm font-medium text-slate-700">
+                Surname <span className="text-slate-400">(optional)</span>
+              </label>
+              <input
+                id="walkin-last-name"
+                type="text"
+                autoComplete="family-name"
+                value={lastName}
+                onChange={(e) => setLastName(e.target.value)}
+                placeholder="Family name"
+                className="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+              />
+            </div>
           </div>
 
           {/* Phone */}

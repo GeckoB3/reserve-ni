@@ -8,6 +8,7 @@ import {
   parseDateString,
   parseIntSafe,
   parseTimeString,
+  splitFullName,
   todayIsoLocal,
 } from '@/lib/import/normalize';
 
@@ -162,7 +163,8 @@ export async function runExtractBookingReferences(
     raw_notes: string | null;
     raw_client_email: string | null;
     raw_client_phone: string | null;
-    raw_client_name: string | null;
+    raw_guest_first_name: string | null;
+    raw_guest_last_name: string | null;
     raw_external_appointment_id: string | null;
     raw_external_booking_id: string | null;
     raw_external_client_id: string | null;
@@ -252,6 +254,9 @@ export async function runExtractBookingReferences(
 
       const isFuture = isFutureBookingDate(dateIso, today);
 
+      const clientBlob = targets.client_name?.trim();
+      const nameParts = clientBlob ? splitFullName(clientBlob) : { first: '', last: '' };
+
       staged.push({
         file_id: f.id,
         row_number: rowNum,
@@ -274,7 +279,8 @@ export async function runExtractBookingReferences(
         raw_notes: combineBookingNotes(targets),
         raw_client_email: targets.client_email?.trim() || null,
         raw_client_phone: targets.client_phone?.trim() || null,
-        raw_client_name: targets.client_name?.trim() || null,
+        raw_guest_first_name: nameParts.first?.trim() || null,
+        raw_guest_last_name: nameParts.last?.trim() || null,
         raw_external_appointment_id: extAppt ?? null,
         raw_external_booking_id: extBook ?? null,
         raw_external_client_id: extClient ?? null,
@@ -329,7 +335,8 @@ export async function runExtractBookingReferences(
     raw_notes: r.raw_notes,
     raw_client_email: r.raw_client_email,
     raw_client_phone: r.raw_client_phone,
-    raw_client_name: r.raw_client_name,
+    raw_guest_first_name: r.raw_guest_first_name,
+    raw_guest_last_name: r.raw_guest_last_name,
     raw_external_appointment_id: r.raw_external_appointment_id,
     raw_external_booking_id: r.raw_external_booking_id,
     raw_external_client_id: r.raw_external_client_id,

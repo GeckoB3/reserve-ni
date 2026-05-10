@@ -12,6 +12,7 @@ import {
 import { nowInVenueTz, dietarySummary } from '@/lib/day-sheet';
 import { resolveVenueMode } from '@/lib/venue-mode';
 import { getDefaultAreaIdForVenue, listActiveAreasForVenue } from '@/lib/areas/resolve-default-area';
+import { formatGuestDisplayName } from '@/lib/guests/name';
 
 interface DaySheetBookingRow {
   id: string;
@@ -193,13 +194,14 @@ export async function GET(request: NextRequest) {
     const { data: guestRows } = guestIds.length
       ? await staff.db
           .from('guests')
-          .select('id, name, email, phone, visit_count, no_show_count, last_visit_date, tags')
+          .select('id, first_name, last_name, email, phone, visit_count, no_show_count, last_visit_date, tags')
           .in('id', guestIds)
       : { data: [] };
     const guestMap = new Map(
       (guestRows ?? []).map((g: {
         id: string;
-        name: string | null;
+        first_name: string | null;
+        last_name: string | null;
         email: string | null;
         phone: string | null;
         visit_count: number | null;
@@ -227,7 +229,7 @@ export async function GET(request: NextRequest) {
         special_requests: row.special_requests,
         internal_notes: row.internal_notes,
         occasion: row.occasion,
-        guest_name: guest?.name?.trim() || 'Walk-in',
+        guest_name: formatGuestDisplayName(guest?.first_name, guest?.last_name, 'walk-in'),
         guest_phone: guest?.phone ?? null,
         guest_email: guest?.email ?? null,
         guest_id: row.guest_id,

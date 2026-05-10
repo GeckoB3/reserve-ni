@@ -8,10 +8,11 @@ import { getVenueCommunicationPolicies } from '@/lib/communications/policies';
 import { sendPolicyMessage } from '@/lib/communications/outbound';
 import { isCdeBookingRow } from '@/lib/booking/cde-booking';
 import type { CronGuestInfo as GuestInfo, CronBookingRow as BookingRow } from '@/lib/cron/comms-types';
+import { formatGuestDisplayName } from '@/lib/guests/name';
 
 const TOLERANCE_MS = 15 * 60 * 1000;
 const BOOKING_SELECT =
-  'id, venue_id, guest_id, guest_email, booking_date, booking_time, party_size, special_requests, dietary_notes, deposit_amount_pence, deposit_status, cancellation_deadline, status, experience_event_id, class_instance_id, resource_id, suppress_import_comms, guest:guests(name, email, phone)';
+  'id, venue_id, guest_id, guest_email, booking_date, booking_time, party_size, special_requests, dietary_notes, deposit_amount_pence, deposit_status, cancellation_deadline, status, experience_event_id, class_instance_id, resource_id, suppress_import_comms, guest:guests(first_name, last_name, email, phone)';
 
 export interface UnifiedCommsResults {
   unified_reminder_1: number;
@@ -76,7 +77,7 @@ function buildBookingData(
 ): BookingEmailData {
   return {
     id: row.id,
-    guest_name: row.guest?.name ?? 'Guest',
+    guest_name: formatGuestDisplayName(row.guest?.first_name, row.guest?.last_name),
     guest_email: row.guest_email ?? row.guest?.email ?? null,
     guest_phone: row.guest?.phone ?? null,
     booking_date: row.booking_date,

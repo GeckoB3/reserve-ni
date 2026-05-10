@@ -7,6 +7,7 @@ import { stripe } from '@/lib/stripe';
 import { sendDepositRequestNotifications } from '@/lib/communications/send-templated';
 import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
 import { createOrGetPaymentShortLink } from '@/lib/booking-short-links';
+import { formatGuestDisplayName } from '@/lib/guests/name';
 
 const schema = z.object({
   action: z.enum(['send_payment_link', 'waive', 'record_cash', 'refund']),
@@ -70,7 +71,11 @@ export async function POST(
     return NextResponse.json({ success: true });
   }
 
-  const { data: guest } = await admin.from('guests').select('name, email, phone').eq('id', booking.guest_id).single();
+  const { data: guest } = await admin
+    .from('guests')
+    .select('first_name, last_name, email, phone')
+    .eq('id', booking.guest_id)
+    .single();
   const { data: venue } = await admin
     .from('venues')
     .select('name, address, email, reply_to_email')
@@ -93,7 +98,7 @@ export async function POST(
   const results = await sendDepositRequestNotifications(
     {
       id,
-      guest_name: guest.name ?? 'Guest',
+      guest_name: formatGuestDisplayName(guest.first_name, guest.last_name),
       guest_email: guest.email ?? null,
       guest_phone: guest.phone ?? null,
       booking_date: booking.booking_date as string,

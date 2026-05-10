@@ -7,7 +7,8 @@ export interface AccountGuestSafeRow {
   venue_id: string;
   email: string | null;
   phone: string | null;
-  name: string | null;
+  first_name: string | null;
+  last_name: string | null;
   marketing_consent: boolean;
   marketing_consent_at: string | null;
   marketing_opt_out: boolean;
@@ -99,7 +100,7 @@ export async function loadAccountSafeGuests(
   const { data, error } = await supabase
     .from('guests_account_safe')
     .select(
-      'id, venue_id, email, phone, name, marketing_consent, marketing_consent_at, marketing_opt_out, first_booked_at, last_booked_at, total_bookings_count, total_spent_minor',
+      'id, venue_id, email, phone, first_name, last_name, marketing_consent, marketing_consent_at, marketing_opt_out, first_booked_at, last_booked_at, total_bookings_count, total_spent_minor',
     )
     .order('last_booked_at', { ascending: false, nullsFirst: false });
 

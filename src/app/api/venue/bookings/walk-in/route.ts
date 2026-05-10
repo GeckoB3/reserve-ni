@@ -11,10 +11,45 @@ import { fetchEngineInput } from '@/lib/availability';
 import { getDayOfWeek, resolveDuration, selectServiceForWalkInTime, timeToMinutes } from '@/lib/availability/engine';
 import { z } from 'zod';
 import { normalizeToE164 } from '@/lib/phone/e164';
+import { normaliseGuestNamePart } from '@/lib/guests/name';
+import { findOrCreateGuest } from '@/lib/guests';
+import type { GuestRecord } from '@/lib/guests';
+
+async function incrementGuestVisitAfterWalkIn(
+  admin: ReturnType<typeof getSupabaseAdminClient>,
+  guestId: string,
+  visitDate: string,
+): Promise<void> {
+  const { data: gv } = await admin.from('guests').select('visit_count').eq('id', guestId).maybeSingle();
+  await admin
+    .from('guests')
+    .update({
+      visit_count: (gv?.visit_count ?? 0) + 1,
+      last_visit_date: visitDate,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', guestId);
+}
+
+async function resolveWalkInGuest(
+  admin: ReturnType<typeof getSupabaseAdminClient>,
+  venueId: string,
+  input: { first_name: string | null; last_name: string | null; email: string | null; phone: string | null },
+): Promise<{ ok: true; guest: GuestRecord; created: boolean } | { ok: false; message: string }> {
+  try {
+    const result = await findOrCreateGuest(admin, venueId, input);
+    return { ok: true, guest: result.guest, created: result.created };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('[walk-in] findOrCreateGuest failed:', err);
+    return { ok: false, message };
+  }
+}
 
 const walkInSchema = z.object({
   party_size: z.number().int().min(1).max(50),
-  name: z.string().max(200).optional(),
+  first_name: z.string().max(120).optional(),
+  last_name: z.string().max(120).optional(),
   phone: z.string().max(24).optional(),
   dietary_notes: z.string().max(500).optional(),
   occasion: z.string().max(200).optional(),
@@ -269,7 +304,8 @@ export async function POST(request: NextRequest) {
 
     const {
       party_size,
-      name,
+      first_name: rawFirst,
+      last_name: rawLast,
       phone,
       email: rawEmail,
       dietary_notes,
@@ -280,6 +316,9 @@ export async function POST(request: NextRequest) {
       booking_date,
       booking_time,
     } = parsed.data;
+
+    const firstName = normaliseGuestNamePart(rawFirst);
+    const lastName = normaliseGuestNamePart(rawLast);
 
     let phoneE164: string | null = null;
     if (phone?.trim()) {
@@ -345,22 +384,19 @@ export async function POST(request: NextRequest) {
       const emailNorm = rawEmail?.trim() ? rawEmail.trim().toLowerCase() : null;
       const estimatedEndIso = estimatedEndIsoFromDuration(today, walkInTime, durationMins);
 
-      const { data: apptGuest, error: apptGuestErr } = await admin
-        .from('guests')
-        .insert({
-          venue_id: staff.venue_id,
-          name: name?.trim() || 'Walk In',
-          email: emailNorm,
-          phone: phoneE164,
-          visit_count: 1,
-        })
-        .select('id')
-        .single();
-
-      if (apptGuestErr) {
-        console.error('Walk-in guest insert failed:', apptGuestErr);
-        return NextResponse.json({ error: 'Failed to create guest' }, { status: 500 });
+      const guestResolved = await resolveWalkInGuest(admin, staff.venue_id, {
+        first_name: firstName,
+        last_name: lastName,
+        email: emailNorm,
+        phone: phoneE164,
+      });
+      if (!guestResolved.ok) {
+        return NextResponse.json(
+          { error: 'Failed to create guest', details: guestResolved.message },
+          { status: 500 },
+        );
       }
+      const { guest: apptGuest, created: apptGuestCreated } = guestResolved;
 
       const { data: apptBooking, error: apptBookErr } = await admin
         .from('bookings')
@@ -382,14 +418,22 @@ export async function POST(request: NextRequest) {
           appointment_service_id,
           estimated_end_time: estimatedEndIso,
           staff_attendance_confirmed_at: staffAttendanceAt,
+          guest_first_name: firstName,
+          guest_last_name: lastName,
+          guest_phone: phoneE164,
         })
         .select('id, booking_date, booking_time, booking_end_time, party_size, status, source')
         .single();
 
       if (apptBookErr) {
         console.error('Walk-in appointment insert failed:', apptBookErr);
+        if (apptGuestCreated) {
+          await admin.from('guests').delete().eq('id', apptGuest.id).eq('venue_id', staff.venue_id);
+        }
         return NextResponse.json({ error: 'Failed to create booking' }, { status: 500 });
       }
+
+      await incrementGuestVisitAfterWalkIn(admin, apptGuest.id, today);
 
       return NextResponse.json(apptBooking, { status: 201 });
     }
@@ -537,28 +581,25 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const { data: guest, error: guestErr } = await admin
-      .from('guests')
-      .insert({
-        venue_id: staff.venue_id,
-        name: name?.trim() || 'Walk In',
-        email: null,
-        phone: phoneE164,
-        visit_count: 1,
-      })
-      .select('id')
-      .single();
-
-    if (guestErr) {
-      console.error('Walk-in guest insert failed:', guestErr);
-      return NextResponse.json({ error: 'Failed to create guest' }, { status: 500 });
+    const tableGuestResolved = await resolveWalkInGuest(admin, staff.venue_id, {
+      first_name: firstName,
+      last_name: lastName,
+      email: null,
+      phone: phoneE164,
+    });
+    if (!tableGuestResolved.ok) {
+      return NextResponse.json(
+        { error: 'Failed to create guest', details: tableGuestResolved.message },
+        { status: 500 },
+      );
     }
+    const { guest: walkInGuest, created: tableGuestCreated } = tableGuestResolved;
 
     const { data: booking, error: bookErr } = await admin
       .from('bookings')
       .insert({
         venue_id: staff.venue_id,
-        guest_id: guest.id,
+        guest_id: walkInGuest.id,
         booking_date: today,
         booking_time: bookingTime,
         party_size,
@@ -573,12 +614,18 @@ export async function POST(request: NextRequest) {
         dietary_notes: dietary_notes?.trim() || null,
         occasion: occasion?.trim() || null,
         staff_attendance_confirmed_at: staffAttendanceAt,
+        guest_first_name: firstName,
+        guest_last_name: lastName,
+        guest_phone: phoneE164,
       })
       .select('id, booking_date, booking_time, party_size, status, source')
       .single();
 
     if (bookErr) {
       console.error('Walk-in booking insert failed:', bookErr);
+      if (tableGuestCreated) {
+        await admin.from('guests').delete().eq('id', walkInGuest.id).eq('venue_id', staff.venue_id);
+      }
       return NextResponse.json({ error: 'Failed to create booking' }, { status: 500 });
     }
 
@@ -597,7 +644,9 @@ export async function POST(request: NextRequest) {
       } catch (error) {
         console.error('Temporary walk-in table creation failed:', error);
         await admin.from('bookings').delete().eq('id', booking.id).eq('venue_id', staff.venue_id);
-        await admin.from('guests').delete().eq('id', guest.id).eq('venue_id', staff.venue_id);
+        if (tableGuestCreated) {
+          await admin.from('guests').delete().eq('id', walkInGuest.id).eq('venue_id', staff.venue_id);
+        }
         return NextResponse.json(
           { error: error instanceof Error ? error.message : 'Failed to create temporary table' },
           { status: 500 },
@@ -609,6 +658,8 @@ export async function POST(request: NextRequest) {
       await replaceBookingAssignments(admin, booking.id, assignedTableIds, staff.id);
       await syncTableStatusesForBooking(admin, booking.id, assignedTableIds, 'Seated', staff.id);
     }
+
+    await incrementGuestVisitAfterWalkIn(admin, walkInGuest.id, today);
 
     return NextResponse.json(booking, { status: 201 });
   } catch (err) {

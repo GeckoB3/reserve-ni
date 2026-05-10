@@ -260,7 +260,6 @@ export async function runImportExecute(
 
       const email = normaliseEmail(targets.email ?? null);
       const ph = normalisePhoneUk(targets.phone ?? null);
-      const name = `${fn} ${ln}`.trim();
 
       const tagsRaw = targets.tags?.split(/[,;]/).map((t) => t.trim()).filter(Boolean) ?? [];
       const tags = normaliseGuestTagsInput(tagsRaw);
@@ -329,7 +328,7 @@ export async function runImportExecute(
           (
             await admin
               .from('guests')
-              .select('id, name, email, phone, visit_count, tags, marketing_opt_out, custom_fields, last_visit_date')
+              .select('id, first_name, last_name, email, phone, visit_count, tags, marketing_opt_out, custom_fields, last_visit_date')
               .eq('venue_id', venueId)
               .eq('email', email)
               .maybeSingle()
@@ -341,7 +340,7 @@ export async function runImportExecute(
           (
             await admin
               .from('guests')
-              .select('id, name, email, phone, visit_count, tags, marketing_opt_out, custom_fields, last_visit_date')
+              .select('id, first_name, last_name, email, phone, visit_count, tags, marketing_opt_out, custom_fields, last_visit_date')
               .eq('venue_id', venueId)
               .eq('phone', ph.e164)
               .maybeSingle()
@@ -359,7 +358,7 @@ export async function runImportExecute(
         if (gid) {
           const { data: g } = await admin
             .from('guests')
-            .select('id, name, email, phone, visit_count, tags, marketing_opt_out, custom_fields, last_visit_date')
+            .select('id, first_name, last_name, email, phone, visit_count, tags, marketing_opt_out, custom_fields, last_visit_date')
             .eq('venue_id', venueId)
             .eq('id', gid)
             .maybeSingle();
@@ -388,7 +387,8 @@ export async function runImportExecute(
         await admin
           .from('guests')
           .update({
-            name,
+            first_name: fn,
+            last_name: ln,
             email: email ?? (prev.email as string | null),
             phone: ph.e164 ?? (prev.phone as string | null),
             tags: tags.length ? tags : (prev.tags as string[] | undefined),
@@ -436,7 +436,8 @@ export async function runImportExecute(
         .from('guests')
         .insert({
           venue_id: venueId,
-          name,
+          first_name: fn,
+          last_name: ln,
           email,
           phone: ph.e164,
           global_guest_hash: hashGuest(email, ph.e164),
@@ -554,7 +555,8 @@ export async function runImportExecute(
   async function findGuestForBooking(
     email: string | null,
     phone: string | null,
-    clientName: string | null,
+    rawFirst: string | null,
+    rawLast: string | null,
     externalClientId: string | null,
   ) {
     if (refProvider && externalClientId?.trim()) {
@@ -579,13 +581,35 @@ export async function runImportExecute(
         .maybeSingle();
       if (data) return data.id as string;
     }
-    if (clientName?.trim()) {
+    const fn = rawFirst?.trim() ? rawFirst.trim() : null;
+    const ln = rawLast?.trim() ? rawLast.trim() : null;
+    if (fn && ln) {
       const { data } = await admin
         .from('guests')
         .select('id')
         .eq('venue_id', venueId)
-        .ilike('name', clientName.trim())
-        .limit(1)
+        .eq('first_name', fn)
+        .eq('last_name', ln)
+        .maybeSingle();
+      if (data) return data.id as string;
+    }
+    if (fn && !ln) {
+      const { data } = await admin
+        .from('guests')
+        .select('id')
+        .eq('venue_id', venueId)
+        .eq('first_name', fn)
+        .is('last_name', null)
+        .maybeSingle();
+      if (data) return data.id as string;
+    }
+    if (!fn && ln) {
+      const { data } = await admin
+        .from('guests')
+        .select('id')
+        .eq('venue_id', venueId)
+        .is('first_name', null)
+        .eq('last_name', ln)
         .maybeSingle();
       if (data) return data.id as string;
     }
@@ -613,7 +637,8 @@ export async function runImportExecute(
         party_size: number | null;
         raw_client_email: string | null;
         raw_client_phone: string | null;
-        raw_client_name: string | null;
+        raw_guest_first_name: string | null;
+        raw_guest_last_name: string | null;
         raw_external_appointment_id: string | null;
         raw_external_booking_id: string | null;
         raw_external_client_id: string | null;
@@ -660,7 +685,8 @@ export async function runImportExecute(
       const guestId = await findGuestForBooking(
         em,
         ph.e164,
-        row.raw_client_name ?? null,
+        row.raw_guest_first_name ?? null,
+        row.raw_guest_last_name ?? null,
         row.raw_external_client_id ?? null,
       );
       if (!guestId) {
@@ -740,6 +766,9 @@ export async function runImportExecute(
         deposit_status: depositFields.deposit_status,
         deposit_amount_pence: depositFields.deposit_amount_pence,
         guest_email: em,
+        guest_first_name: row.raw_guest_first_name?.trim() || null,
+        guest_last_name: row.raw_guest_last_name?.trim() || null,
+        guest_phone: ph.e164,
         special_requests: specialRequests,
         booking_model: bookingModel as BookingModel,
       };
@@ -896,10 +925,14 @@ export async function runImportExecute(
         }
       }
 
+      const legacyClientName = targets.client_name?.trim();
+      const legacyNameParts = legacyClientName ? splitFullName(legacyClientName) : { first: '', last: '' };
+
       const guestId = await findGuestForBooking(
         em,
         ph.e164,
-        targets.client_name ?? null,
+        legacyNameParts.first || null,
+        legacyNameParts.last || null,
         targets.client_external_id ?? null,
       );
       if (!guestId) {
@@ -1001,6 +1034,9 @@ export async function runImportExecute(
         deposit_status: depositFields.deposit_status,
         deposit_amount_pence: depositFields.deposit_amount_pence,
         guest_email: em,
+        guest_first_name: legacyNameParts.first?.trim() || null,
+        guest_last_name: legacyNameParts.last?.trim() || null,
+        guest_phone: ph.e164,
         special_requests: specialRequests,
         booking_model: bookingModel as BookingModel,
       };

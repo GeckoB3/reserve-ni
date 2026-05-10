@@ -12,7 +12,7 @@ export function bookingDetailToEditSnapshot(d: {
   booking_time: string;
   party_size: number;
   area_id?: string | null;
-  guest: { name?: string | null; phone?: string | null; email?: string | null } | null;
+  guest: { first_name?: string | null; last_name?: string | null; phone?: string | null; email?: string | null } | null;
   dietary_notes?: string | null;
   special_requests?: string | null;
   internal_notes?: string | null;
@@ -26,7 +26,8 @@ export function bookingDetailToEditSnapshot(d: {
     booking_time: d.booking_time,
     party_size: d.party_size,
     area_id: d.area_id ?? null,
-    guest_name: d.guest?.name ?? '',
+    guest_first_name: d.guest?.first_name ?? '',
+    guest_last_name: d.guest?.last_name ?? '',
     guest_phone: d.guest?.phone ?? null,
     guest_email: d.guest?.email ?? null,
     dietary_notes: d.dietary_notes ?? null,
@@ -49,6 +50,8 @@ export function expandedRowToEditSnapshot(
     party_size: number;
     area_id?: string | null;
     guest_name: string;
+    guest_first_name?: string | null;
+    guest_last_name?: string | null;
     guest_phone: string | null;
     guest_email: string | null;
     dietary_notes: string | null;
@@ -61,7 +64,7 @@ export function expandedRowToEditSnapshot(
     special_requests: string | null;
     internal_notes: string | null;
     table_assignments?: Array<{ id: string; name: string }>;
-    guest: { name: string | null; phone: string | null; email: string | null } | null;
+    guest: { first_name: string | null; last_name: string | null; phone: string | null; email: string | null } | null;
   } | null,
 ): UnifiedBookingEditSnapshot {
   return bookingDetailToEditSnapshot({
@@ -71,12 +74,14 @@ export function expandedRowToEditSnapshot(
     area_id: booking.area_id,
     guest: detail?.guest
       ? {
-          name: detail.guest.name,
+          first_name: detail.guest.first_name,
+          last_name: detail.guest.last_name,
           phone: detail.guest.phone,
           email: detail.guest.email,
         }
       : {
-          name: booking.guest_name,
+          first_name: booking.guest_first_name ?? null,
+          last_name: booking.guest_last_name ?? null,
           phone: booking.guest_phone,
           email: booking.guest_email,
         },

@@ -12,7 +12,8 @@ import type { CustomClientFieldDefinition } from '@/types/contacts';
 
 const patchSchema = z
   .object({
-    name: z.string().min(1).max(200).optional(),
+    first_name: z.string().max(100).optional(),
+    last_name: z.string().max(100).optional(),
     email: z.string().email().max(255).optional().or(z.literal('')),
     phone: z.string().max(24).optional().or(z.literal('')),
     tags: z.array(z.string()).optional(),
@@ -23,7 +24,8 @@ const patchSchema = z
   })
   .refine(
     (d) =>
-      d.name !== undefined ||
+      d.first_name !== undefined ||
+      d.last_name !== undefined ||
       d.email !== undefined ||
       d.phone !== undefined ||
       d.tags !== undefined ||
@@ -76,7 +78,7 @@ export async function GET(
     const { data: guest, error: gErr } = await staff.db
       .from('guests')
       .select(
-        'id, venue_id, name, email, phone, tags, visit_count, no_show_count, last_visit_date, customer_profile_notes, created_at, updated_at, marketing_opt_out, marketing_consent, marketing_consent_at, custom_fields',
+        'id, venue_id, first_name, last_name, email, phone, tags, visit_count, no_show_count, last_visit_date, customer_profile_notes, created_at, updated_at, marketing_opt_out, marketing_consent, marketing_consent_at, custom_fields',
       )
       .eq('id', guestId)
       .eq('venue_id', staff.venue_id)
@@ -350,7 +352,8 @@ export async function GET(
     return NextResponse.json({
       guest: {
         id: guest.id,
-        name: guest.name,
+        first_name: (guest as { first_name?: string | null }).first_name ?? null,
+        last_name: (guest as { last_name?: string | null }).last_name ?? null,
         email: guest.email,
         phone: guest.phone,
         tags,
@@ -428,8 +431,13 @@ export async function PATCH(
 
     const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
 
-    if (parsed.data.name !== undefined) {
-      update.name = parsed.data.name.trim();
+    if (parsed.data.first_name !== undefined) {
+      const t = parsed.data.first_name.trim();
+      update.first_name = t === '' ? null : t;
+    }
+    if (parsed.data.last_name !== undefined) {
+      const t = parsed.data.last_name.trim();
+      update.last_name = t === '' ? null : t;
     }
     if (parsed.data.email !== undefined) {
       const e = parsed.data.email.trim();
@@ -514,7 +522,7 @@ export async function PATCH(
       .eq('id', guestId)
       .eq('venue_id', staff.venue_id)
       .select(
-        'id, name, email, phone, tags, visit_count, no_show_count, last_visit_date, customer_profile_notes, created_at, updated_at, marketing_opt_out, marketing_consent, marketing_consent_at, custom_fields',
+        'id, first_name, last_name, email, phone, tags, visit_count, no_show_count, last_visit_date, customer_profile_notes, created_at, updated_at, marketing_opt_out, marketing_consent, marketing_consent_at, custom_fields',
       )
       .single();
 

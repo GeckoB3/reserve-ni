@@ -34,6 +34,7 @@ import {
   bookingExpandAccordionSummaryClass,
   bookingExpandActionsBarClass,
 } from '@/app/dashboard/bookings/booking-expand-accordion-classes';
+import { formatGuestDisplayName } from '@/lib/guests/name';
 
 export interface BookingRow {
   id: string;
@@ -49,6 +50,8 @@ export interface BookingRow {
   dietary_notes: string | null;
   occasion: string | null;
   guest_name: string;
+  guest_first_name?: string | null;
+  guest_last_name?: string | null;
   guest_email: string | null;
   guest_phone: string | null;
   guest_id?: string;
@@ -76,7 +79,8 @@ export interface BookingDetailLite {
   table_assignments?: Array<{ id: string; name: string }>;
   guest: {
     id: string;
-    name: string | null;
+    first_name: string | null;
+    last_name: string | null;
     email: string | null;
     phone: string | null;
     visit_count: number;
@@ -196,7 +200,9 @@ export function ExpandedBookingContent({
     );
   }
 
-  const guestName = detail?.guest?.name ?? booking.guest_name;
+  const guestName = detail?.guest
+    ? formatGuestDisplayName(detail.guest.first_name, detail.guest.last_name)
+    : booking.guest_name;
   const guestPhone = detail?.guest?.phone ?? booking.guest_phone;
   const guestEmail = detail?.guest?.email ?? booking.guest_email;
   const contactsGuestId = detail?.guest?.id ?? booking.guest_id ?? null;

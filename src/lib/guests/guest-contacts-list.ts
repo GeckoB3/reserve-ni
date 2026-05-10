@@ -116,7 +116,8 @@ export function addDaysCalendarDate(calendarDate: string, deltaDays: number): st
 
 export interface GuestRowBase {
   id: string;
-  name: string | null;
+  first_name: string | null;
+  last_name: string | null;
   email: string | null;
   phone: string | null;
   tags?: string[];

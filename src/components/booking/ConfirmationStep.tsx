@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { buildIcsContent } from '@/lib/ics';
 import type { GuestDetails, VenuePublic } from './types';
+import { formatGuestDisplayName } from '@/lib/guests/name';
 
 const WEEKDAYS_LONG = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const MONTHS_LONG = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -68,7 +69,11 @@ export function ConfirmationStep({ venue, date, slot, partySize, guest, requires
           <DetailRow icon={<CalendarIcon />} label="Date" value={dateStr} />
           <DetailRow icon={<ClockIcon />} label="Time" value={slot.start_time.slice(0, 5)} />
           <DetailRow icon={<UsersIcon />} label="Guests" value={`${partySize} ${partySize === 1 ? 'guest' : 'guests'}`} />
-          <DetailRow icon={<UserIcon />} label="Name" value={guest.name} />
+          <DetailRow
+            icon={<UserIcon />}
+            label="Name"
+            value={formatGuestDisplayName(guest.first_name, guest.last_name)}
+          />
           {guest.email && <DetailRow icon={<MailIcon />} label="Email" value={guest.email} />}
           <DetailRow icon={<PhoneIcon />} label="Phone" value={guest.phone} />
         </div>

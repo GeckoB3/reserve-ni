@@ -93,7 +93,7 @@ function minutesBetweenStartAndEnd(startHHmm: string, endHHmm: string): number {
     const [h, m] = s.slice(0, 5).split(':').map((x) => Number.parseInt(x, 10));
     return (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0);
   };
-  let start = toMin(startHHmm);
+  const start = toMin(startHHmm);
   let end = toMin(endHHmm);
   if (end <= start) end += 24 * 60;
   return end - start;

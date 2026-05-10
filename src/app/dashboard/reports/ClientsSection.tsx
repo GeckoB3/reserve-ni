@@ -11,6 +11,7 @@ import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { StatTile } from '@/components/ui/dashboard/StatTile';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { DashboardListSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
+import { formatGuestDisplayName } from '@/lib/guests/name';
 
 export interface ClientSummary {
   identified_clients_total: number;
@@ -70,7 +71,8 @@ export function ClientsSection({
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<GuestDetailResponse | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
-  const [editName, setEditName] = useState('');
+  const [editFirstName, setEditFirstName] = useState('');
+  const [editLastName, setEditLastName] = useState('');
   const [editEmail, setEditEmail] = useState('');
   const [editPhone, setEditPhone] = useState('');
   const [editSaving, setEditSaving] = useState(false);
@@ -143,7 +145,8 @@ export function ClientsSection({
         throw new Error(typeof data.error === 'string' ? data.error : 'Failed to load guest');
       }
       setDetail(data);
-      setEditName(data.guest.name ?? '');
+      setEditFirstName(data.guest.first_name ?? '');
+      setEditLastName(data.guest.last_name ?? '');
       setEditEmail(data.guest.email ?? '');
       setEditPhone(data.guest.phone ?? '');
     } catch (e) {
@@ -168,11 +171,6 @@ export function ClientsSection({
 
   const onSaveGuestDetails = useCallback(async () => {
     if (!detail) return;
-    const name = editName.trim();
-    if (!name) {
-      setEditError('Name is required.');
-      return;
-    }
     setEditSaving(true);
     setEditError(null);
     try {
@@ -180,7 +178,8 @@ export function ClientsSection({
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name,
+          first_name: editFirstName.trim(),
+          last_name: editLastName.trim(),
           email: editEmail.trim(),
           phone: editPhone.trim(),
         }),
@@ -197,7 +196,7 @@ export function ClientsSection({
     } finally {
       setEditSaving(false);
     }
-  }, [detail, editName, editEmail, editPhone, loadDetail, loadList, onReportsRefresh]);
+  }, [detail, editFirstName, editLastName, editEmail, editPhone, loadDetail, loadList, onReportsRefresh]);
 
   const exportGuestHistory = useCallback(() => {
     if (!detail?.booking_history.length) return;
@@ -262,7 +261,7 @@ export function ClientsSection({
     if (filter === 'anonymous' || g.identifiability_tier === 'anonymous') {
       return 'Anonymous';
     }
-    return g.name?.trim() || 'Unnamed';
+    return formatGuestDisplayName(g.first_name, g.last_name);
   };
 
   return (
@@ -479,10 +478,16 @@ export function ClientsSection({
                                 <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
                                   <h3 className="text-sm font-semibold text-slate-800">Contact</h3>
                                   <div className="space-y-2">
-                                    <label className="block text-xs font-medium text-slate-500">Name</label>
+                                    <label className="block text-xs font-medium text-slate-500">First name</label>
                                     <input
-                                      value={editName}
-                                      onChange={(e) => setEditName(e.target.value)}
+                                      value={editFirstName}
+                                      onChange={(e) => setEditFirstName(e.target.value)}
+                                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                                    />
+                                    <label className="block text-xs font-medium text-slate-500">Surname</label>
+                                    <input
+                                      value={editLastName}
+                                      onChange={(e) => setEditLastName(e.target.value)}
                                       className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
                                     />
                                     <label className="block text-xs font-medium text-slate-500">Email</label>

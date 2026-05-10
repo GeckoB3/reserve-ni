@@ -43,6 +43,7 @@ import { resolveBookingScopedCalendarId } from '@/lib/booking/staff-booking-cale
 import { tableGroupKeyFromIds } from '@/lib/table-management/combination-rules';
 import type { BookingModel } from '@/types/booking-models';
 import { listActiveAreasForVenue } from '@/lib/areas/resolve-default-area';
+import { formatGuestDisplayName, normaliseGuestNamePart } from '@/lib/guests/name';
 
 const statusSchema = z.enum(BOOKING_MUTABLE_STATUSES);
 const actualDepartedTimeSchema = z.string().datetime();
@@ -119,7 +120,7 @@ export async function GET(
 
     const { data: guest } = await staff.db
       .from('guests')
-      .select('id, name, email, phone, visit_count, last_visit_date, tags, customer_profile_notes')
+      .select('id, first_name, last_name, email, phone, visit_count, last_visit_date, tags, customer_profile_notes')
       .eq('id', booking.guest_id)
       .single();
 
@@ -552,7 +553,11 @@ export async function PATCH(
           ),
         });
 
-        const { data: guestRow } = await staff.db.from('guests').select('name, email, phone').eq('id', booking.guest_id).single();
+        const { data: guestRow } = await staff.db
+          .from('guests')
+          .select('first_name, last_name, email, phone')
+          .eq('id', booking.guest_id)
+          .single();
         const { data: venueRow } = await staff.db
           .from('venues')
           .select('name, address, phone, email, reply_to_email')
@@ -574,7 +579,7 @@ export async function PATCH(
           const { sendCancellationNotification } = await import('@/lib/communications/send-templated');
           const cancelBookingEmail: import('@/lib/emails/types').BookingEmailData = {
             id,
-            guest_name: guestRow.name ?? 'Guest',
+            guest_name: formatGuestDisplayName(guestRow.first_name, guestRow.last_name),
             guest_email: guestRow.email ?? null,
             guest_phone: guestRow.phone ?? null,
             booking_date: booking.booking_date,
@@ -611,7 +616,7 @@ export async function PATCH(
 
         const { data: guestNoShow } = await staff.db
           .from('guests')
-          .select('name, email')
+          .select('first_name, last_name, email')
           .eq('id', booking.guest_id)
           .maybeSingle();
         const { data: venueNoShow } = await admin.from('venues').select('name').eq('id', staff.venue_id).maybeSingle();
@@ -626,7 +631,7 @@ export async function PATCH(
                 'no_show_notification',
                 { email: guestNoShow.email! },
                 {
-                  guest_name: guestNoShow.name ?? 'Guest',
+                  guest_name: formatGuestDisplayName(guestNoShow.first_name, guestNoShow.last_name),
                   venue_name: venueNoShow.name!,
                   booking_date: booking.booking_date,
                   booking_time: bookingTimeNs,
@@ -689,13 +694,17 @@ export async function PATCH(
         // old overloaded enum.)
         if (booking.status === 'Pending' && newStatus === 'Booked') {
           const { sendBookingConfirmationNotifications } = await import('@/lib/communications/send-templated');
-          const { data: guestRow } = await staff.db.from('guests').select('name, email, phone').eq('id', booking.guest_id).single();
+          const { data: guestRow } = await staff.db
+          .from('guests')
+          .select('first_name, last_name, email, phone')
+          .eq('id', booking.guest_id)
+          .single();
           const { data: venueRow } = await staff.db.from('venues').select('name, address').eq('id', staff.venue_id).single();
           if (guestRow?.email && venueRow?.name) {
             const bookingTime = typeof booking.booking_time === 'string' ? booking.booking_time.slice(0, 5) : '';
             const emailData = {
               id,
-              guest_name: guestRow.name ?? 'Guest',
+              guest_name: formatGuestDisplayName(guestRow.first_name, guestRow.last_name),
               guest_email: guestRow.email,
               guest_phone: guestRow.phone ?? null,
               booking_date: booking.booking_date,
@@ -817,7 +826,8 @@ export async function PATCH(
       body.internal_notes !== undefined ||
       body.dietary_notes !== undefined ||
       body.occasion !== undefined ||
-      body.guest_name !== undefined ||
+      body.guest_first_name !== undefined ||
+      body.guest_last_name !== undefined ||
       body.guest_phone !== undefined ||
       body.guest_email !== undefined
     ) {
@@ -849,12 +859,22 @@ export async function PATCH(
           .eq('venue_id', staff.venue_id);
       }
 
-      if (body.guest_name !== undefined || body.guest_phone !== undefined || body.guest_email !== undefined) {
+      if (
+        body.guest_first_name !== undefined ||
+        body.guest_last_name !== undefined ||
+        body.guest_phone !== undefined ||
+        body.guest_email !== undefined
+      ) {
         const guestUpdatePayload: Record<string, unknown> = {
           updated_at: new Date().toISOString(),
         };
-        if (body.guest_name !== undefined) {
-          guestUpdatePayload.name = typeof body.guest_name === 'string' && body.guest_name.trim() ? body.guest_name.trim() : null;
+        if (body.guest_first_name !== undefined) {
+          guestUpdatePayload.first_name =
+            typeof body.guest_first_name === 'string' ? normaliseGuestNamePart(body.guest_first_name) : null;
+        }
+        if (body.guest_last_name !== undefined) {
+          guestUpdatePayload.last_name =
+            typeof body.guest_last_name === 'string' ? normaliseGuestNamePart(body.guest_last_name) : null;
         }
         if (body.guest_phone !== undefined) {
           const raw = typeof body.guest_phone === 'string' ? body.guest_phone.trim() : '';
@@ -872,6 +892,21 @@ export async function PATCH(
           guestUpdatePayload.email = typeof body.guest_email === 'string' && body.guest_email.trim() ? body.guest_email.trim() : null;
         }
         await staff.db.from('guests').update(guestUpdatePayload).eq('id', booking.guest_id);
+
+        if (body.guest_first_name !== undefined || body.guest_last_name !== undefined) {
+          const bookingSnap: Record<string, unknown> = {
+            updated_at: new Date().toISOString(),
+          };
+          if (body.guest_first_name !== undefined) {
+            bookingSnap.guest_first_name =
+              typeof body.guest_first_name === 'string' ? normaliseGuestNamePart(body.guest_first_name) : null;
+          }
+          if (body.guest_last_name !== undefined) {
+            bookingSnap.guest_last_name =
+              typeof body.guest_last_name === 'string' ? normaliseGuestNamePart(body.guest_last_name) : null;
+          }
+          await staff.db.from('bookings').update(bookingSnap).eq('id', id).eq('venue_id', staff.venue_id);
+        }
       }
 
       const updated = await staff.db.from('bookings').select('*').eq('id', id).single();
@@ -1310,7 +1345,11 @@ export async function PATCH(
         }
       }
 
-      const { data: guestRow } = await staff.db.from('guests').select('name, email, phone').eq('id', booking.guest_id).single();
+          const { data: guestRow } = await staff.db
+            .from('guests')
+            .select('first_name, last_name, email, phone')
+            .eq('id', booking.guest_id)
+            .single();
       const { data: venueRow } = await staff.db
         .from('venues')
         .select('name, address, phone, email, reply_to_email')
@@ -1326,7 +1365,7 @@ export async function PATCH(
         });
         const bookingEmail: import('@/lib/emails/types').BookingEmailData = {
           id,
-          guest_name: guestRow.name ?? 'Guest',
+          guest_name: formatGuestDisplayName(guestRow.first_name, guestRow.last_name),
           guest_email: guestRow.email ?? null,
           guest_phone: guestRow.phone ?? null,
           booking_date: newDate,

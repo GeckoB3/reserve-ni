@@ -93,7 +93,8 @@ export interface AvailabilityResponse {
 }
 
 export interface GuestDetails {
-  name: string;
+  first_name: string;
+  last_name: string;
   email: string;
   phone: string;
   dietary_notes?: string;

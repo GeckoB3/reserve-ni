@@ -96,7 +96,10 @@ export async function PATCH(request: NextRequest) {
         admin,
         staff.venue_id,
         {
-          name: existingEntry.guest_name,
+          first_name:
+            typeof existingEntry.guest_first_name === 'string' ? existingEntry.guest_first_name : null,
+          last_name:
+            typeof existingEntry.guest_last_name === 'string' ? existingEntry.guest_last_name : null,
           email: emailNorm,
           phone: existingEntry.guest_phone,
         },
@@ -116,6 +119,10 @@ export async function PATCH(request: NextRequest) {
           deposit_status: 'Not Required',
           service_id: existingEntry.service_id ?? null,
           dietary_notes: existingEntry.notes ?? null,
+          guest_first_name: guest.first_name,
+          guest_last_name: guest.last_name,
+          guest_phone: typeof existingEntry.guest_phone === 'string' ? existingEntry.guest_phone : null,
+          guest_email: emailNorm,
         })
         .select('id, status')
         .single();

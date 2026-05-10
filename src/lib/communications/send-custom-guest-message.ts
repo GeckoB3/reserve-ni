@@ -7,6 +7,7 @@ import {
   sendCustomBookingMessage,
   type SendCustomBookingMessageResult,
 } from '@/lib/communications/send-custom-booking-message';
+import { formatGuestDisplayName } from '@/lib/guests/name';
 import type { GuestMessageChannel } from '@/lib/booking/guest-message-channel';
 
 export type SendCustomGuestMessageInput = {
@@ -30,7 +31,7 @@ export async function sendCustomGuestMessage(
 
   const { data: guestRow, error: guestError } = await admin
     .from('guests')
-    .select('id, venue_id, name, email, phone')
+    .select('id, venue_id, first_name, last_name, email, phone')
     .eq('id', input.guestId)
     .eq('venue_id', input.venueId)
     .maybeSingle();
@@ -46,7 +47,8 @@ export async function sendCustomGuestMessage(
   const guest = guestRow as {
     id: string;
     venue_id: string;
-    name: string | null;
+    first_name: string | null;
+    last_name: string | null;
     email: string | null;
     phone: string | null;
   };
@@ -106,7 +108,7 @@ export async function sendCustomGuestMessage(
 
   const minimalBooking: BookingEmailData = {
     id: guest.id,
-    guest_name: guest.name?.trim() || 'Guest',
+    guest_name: formatGuestDisplayName(guest.first_name, guest.last_name),
     guest_email: guestEmail,
     guest_phone: guestPhone,
     booking_date: new Date().toISOString().slice(0, 10),

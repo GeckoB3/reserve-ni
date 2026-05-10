@@ -13,6 +13,7 @@ import type { BookingModel } from '@/types/booking-models';
 import { timeToMinutes, minutesToTime } from '@/lib/availability';
 import { BOOKING_ACTIVE_STATUSES, BOOKING_TIMELINE_GRID_STATUSES } from '@/lib/table-management/constants';
 import { inferBookingRowModel, isTableReservationBooking } from '@/lib/booking/infer-booking-row-model';
+import { formatGuestDisplayName } from '@/lib/guests/name';
 import {
   detectAdjacentTables,
   findValidCombinations,
@@ -341,7 +342,7 @@ export async function getTableAvailabilityGrid(
   let bookingsQuery = supabase
     .from('bookings')
     .select(
-      'id, booking_time, estimated_end_time, party_size, status, deposit_status, deposit_amount_pence, guest_attendance_confirmed_at, staff_attendance_confirmed_at, actual_departed_time, dietary_notes, occasion, internal_notes, experience_event_id, class_instance_id, resource_id, event_session_id, calendar_id, service_item_id, practitioner_id, appointment_service_id, guest:guests!inner(name)',
+      'id, booking_time, estimated_end_time, party_size, status, deposit_status, deposit_amount_pence, guest_attendance_confirmed_at, staff_attendance_confirmed_at, actual_departed_time, dietary_notes, occasion, internal_notes, experience_event_id, class_instance_id, resource_id, event_session_id, calendar_id, service_item_id, practitioner_id, appointment_service_id, guest:guests!inner(first_name, last_name)',
     )
     .eq('venue_id', venueId)
     .eq('booking_date', date)
@@ -389,7 +390,7 @@ export async function getTableAvailabilityGrid(
     service_item_id?: string | null;
     practitioner_id?: string | null;
     appointment_service_id?: string | null;
-    guest: { name: string } | { name: string }[];
+    guest: { first_name: string | null; last_name: string | null } | { first_name: string | null; last_name: string | null }[];
   }>;
   const bookingIds = rawBookings.map((b) => b.id);
 
@@ -419,7 +420,8 @@ export async function getTableAvailabilityGrid(
   }
 
   const bookings: BookingWithTime[] = rawBookings.map((b) => {
-    const guestName = Array.isArray(b.guest) ? b.guest[0]?.name ?? '' : b.guest?.name ?? '';
+    const g = Array.isArray(b.guest) ? b.guest[0] : b.guest;
+    const guestName = formatGuestDisplayName(g?.first_name, g?.last_name, 'walk-in');
     return {
       id: b.id,
       booking_time: b.booking_time,

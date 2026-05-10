@@ -2,7 +2,8 @@ import type { BookingModel } from '@/types/booking-models';
 
 export interface GuestListRow {
   id: string;
-  name: string | null;
+  first_name: string | null;
+  last_name: string | null;
   email: string | null;
   phone: string | null;
   tags: string[];
@@ -34,7 +35,8 @@ export interface CommunicationRow {
 
 export interface GuestDetailGuest {
   id: string;
-  name: string | null;
+  first_name: string | null;
+  last_name: string | null;
   email: string | null;
   phone: string | null;
   tags: string[];

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import { formatGuestDisplayName } from '@/lib/guests/name';
 
 /**
  * GET /api/venue/class-instances/[id]/attendees - roster for this class instance.
@@ -42,7 +43,7 @@ export async function GET(
     const { data: rows, error } = await admin
       .from('bookings')
       .select(
-        'id,status,party_size,deposit_amount_pence,deposit_status,booking_date,booking_time,checked_in_at,guest:guests(name,email,phone)',
+        'id,status,party_size,deposit_amount_pence,deposit_status,booking_date,booking_time,checked_in_at,guest:guests(first_name,last_name,email,phone)',
       )
       .eq('venue_id', staff.venue_id)
       .eq('class_instance_id', instanceId)
@@ -54,7 +55,12 @@ export async function GET(
     }
 
     const attendees = (rows ?? []).map((r: Record<string, unknown>) => {
-      const g = r.guest as { name?: string | null; email?: string | null; phone?: string | null } | null;
+      const g = r.guest as {
+        first_name?: string | null;
+        last_name?: string | null;
+        email?: string | null;
+        phone?: string | null;
+      } | null;
       return {
         booking_id: r.id,
         status: r.status,
@@ -64,7 +70,7 @@ export async function GET(
         booking_date: r.booking_date,
         booking_time: r.booking_time,
         checked_in_at: r.checked_in_at,
-        guest_name: g?.name ?? null,
+        guest_name: formatGuestDisplayName(g?.first_name, g?.last_name),
         guest_email: g?.email ?? null,
         guest_phone: g?.phone ?? null,
       };

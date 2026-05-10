@@ -25,6 +25,7 @@ import { inferBookingRowModel, bookingModelShortLabel } from '@/lib/booking/infe
 import { BOOKING_MODEL_ORDER } from '@/lib/booking/enabled-models';
 import { isAttendanceConfirmed } from '@/lib/booking/booking-staff-indicators';
 import type { VenueStaff } from '@/lib/venue-auth';
+import { formatGuestDisplayName } from '@/lib/guests/name';
 
 const WEEKDAYS_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -624,12 +625,10 @@ export async function buildDashboardHomePayload(
   const guestIds = [...new Set(todayBookings.slice(0, 10).map((b) => b.guest_id).filter(Boolean))] as string[];
   const guestNameById = new Map<string, string>();
   if (guestIds.length > 0) {
-    const { data: guests } = await admin.from('guests').select('id, name').in('id', guestIds);
+    const { data: guests } = await admin.from('guests').select('id, first_name, last_name').in('id', guestIds);
     for (const g of guests ?? []) {
-      guestNameById.set(
-        (g as { id: string; name: string | null }).id,
-        (g as { name: string | null }).name?.trim() || 'Guest',
-      );
+      const row = g as { id: string; first_name: string | null; last_name: string | null };
+      guestNameById.set(row.id, formatGuestDisplayName(row.first_name, row.last_name));
     }
   }
 

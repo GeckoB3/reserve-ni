@@ -67,7 +67,8 @@ export interface UnifiedBookingEditSnapshot {
   booking_time: string;
   party_size: number;
   area_id: string | null;
-  guest_name: string;
+  guest_first_name: string;
+  guest_last_name: string;
   guest_phone: string | null;
   guest_email: string | null;
   dietary_notes: string | null;
@@ -163,7 +164,8 @@ export function UnifiedBookingForm({
    */
   const [slotFetchNonce, setSlotFetchNonce] = useState(0);
 
-  const [name, setName] = useState(() => editSnapshot?.guest_name ?? '');
+  const [firstName, setFirstName] = useState(() => editSnapshot?.guest_first_name ?? '');
+  const [lastName, setLastName] = useState(() => editSnapshot?.guest_last_name ?? '');
   const [phone, setPhone] = useState(() => editSnapshot?.guest_phone ?? '');
   const [email, setEmail] = useState(() => editSnapshot?.guest_email ?? '');
   const [dietaryNotes, setDietaryNotes] = useState(() => editSnapshot?.dietary_notes ?? '');
@@ -214,7 +216,7 @@ export function UnifiedBookingForm({
   });
   const panelRef = useRef<HTMLDivElement>(null);
 
-  const nameRef = useRef<HTMLInputElement>(null);
+  const firstNameRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   /** Party size for the “next available day” scan only (do not re-scan when party changes mid-session). */
@@ -427,7 +429,7 @@ export function UnifiedBookingForm({
   // Focus guest name when form opens (create flow only; modify modal opens mid-workflow)
   useEffect(() => {
     if (isEdit) return;
-    const timer = setTimeout(() => nameRef.current?.focus(), 80);
+    const timer = setTimeout(() => firstNameRef.current?.focus(), 80);
     return () => clearTimeout(timer);
   }, [isEdit]);
 
@@ -714,7 +716,7 @@ export function UnifiedBookingForm({
   }, [prefetchedTables, diningAreas.length, tableAssignmentAreaId]);
 
   const phoneE164 = normalizeToE164(phone, phoneDefaultCountry);
-  const canSubmit = Boolean(date && selectedTime && name.trim() && phoneE164 && !saving);
+  const canSubmit = Boolean(date && selectedTime && phoneE164 && !saving);
 
   const timeOptions = useMemo(() => {
     if (!slots.length) return [] as string[];
@@ -768,7 +770,8 @@ export function UnifiedBookingForm({
     setSlotFetchNonce((n) => n + 1);
     setSelectedTime(initialTime ?? '');
     setSelectedSlotKey(null);
-    setName('');
+    setFirstName('');
+    setLastName('');
     setPhone('');
     setEmail('');
     setDietaryNotes('');
@@ -800,8 +803,8 @@ export function UnifiedBookingForm({
     setError(null);
 
     const resolvedPhone = normalizeToE164(phone, phoneDefaultCountry);
-    if (!date || !selectedTime || !name.trim() || !resolvedPhone) {
-      setError('Date, time, guest name, and a valid phone number are required.');
+    if (!date || !selectedTime || !resolvedPhone) {
+      setError('Date, time, and a valid phone number are required.');
       return;
     }
 
@@ -863,8 +866,11 @@ export function UnifiedBookingForm({
         }
 
         const detailsPayload: Record<string, unknown> = {};
-        if (name.trim() !== (orig.guest_name ?? '').trim()) {
-          detailsPayload.guest_name = name.trim();
+        if (firstName.trim() !== (orig.guest_first_name ?? '').trim()) {
+          detailsPayload.guest_first_name = firstName.trim();
+        }
+        if (lastName.trim() !== (orig.guest_last_name ?? '').trim()) {
+          detailsPayload.guest_last_name = lastName.trim();
         }
         const origPhone = orig.guest_phone ?? '';
         if (resolvedPhone !== origPhone) {
@@ -959,7 +965,8 @@ export function UnifiedBookingForm({
           booking_date: date,
           booking_time: selectedTime,
           party_size: partySize,
-          name: name.trim(),
+          first_name: firstName.trim(),
+          last_name: lastName.trim(),
           phone: resolvedPhone,
           email: email.trim() || undefined,
           dietary_notes: dietaryNotes.trim() || undefined,
@@ -1422,24 +1429,36 @@ export function UnifiedBookingForm({
 
       {/* Guest Details */}
       <div className="space-y-3 sm:space-y-3.5">
-        <div>
-          <label htmlFor="ubf-name" className="mb-1 block text-xs font-medium text-slate-700 sm:text-sm">
-            Guest name{' '}
-            <span className="text-red-600" aria-hidden="true">
-              *
-            </span>
-            <span className="sr-only">(required)</span>
-          </label>
-          <input
-            ref={nameRef}
-            id="ubf-name"
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Full name"
-            className="min-h-[44px] w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-base transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 sm:rounded-xl sm:px-3.5 sm:py-2.5"
-            required
-          />
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div>
+            <label htmlFor="ubf-first-name" className="mb-1 block text-xs font-medium text-slate-700 sm:text-sm">
+              First name <span className="text-slate-400">(optional)</span>
+            </label>
+            <input
+              ref={firstNameRef}
+              id="ubf-first-name"
+              type="text"
+              autoComplete="given-name"
+              value={firstName}
+              onChange={(e) => setFirstName(e.target.value)}
+              placeholder="First name"
+              className="min-h-[44px] w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-base transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 sm:rounded-xl sm:px-3.5 sm:py-2.5"
+            />
+          </div>
+          <div>
+            <label htmlFor="ubf-last-name" className="mb-1 block text-xs font-medium text-slate-700 sm:text-sm">
+              Surname <span className="text-slate-400">(optional)</span>
+            </label>
+            <input
+              id="ubf-last-name"
+              type="text"
+              autoComplete="family-name"
+              value={lastName}
+              onChange={(e) => setLastName(e.target.value)}
+              placeholder="Surname"
+              className="min-h-[44px] w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-base transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 sm:rounded-xl sm:px-3.5 sm:py-2.5"
+            />
+          </div>
         </div>
 
         <div>

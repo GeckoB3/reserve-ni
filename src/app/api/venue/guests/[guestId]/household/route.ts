@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { insertContactAuditEvent } from '@/lib/guests/contact-audit';
+import { formatGuestDisplayName } from '@/lib/guests/name';
 
 const linkSchema = z.object({
   other_guest_id: z.string().uuid(),
@@ -64,9 +65,18 @@ export async function GET(
       .in('household_id', householdIds);
 
     const guestIds = [...new Set((allMembers ?? []).map((m) => (m as { guest_id: string }).guest_id))];
-    const { data: names } = await staff.db.from('guests').select('id, name').eq('venue_id', staff.venue_id).in('id', guestIds);
+    const { data: names } = await staff.db
+      .from('guests')
+      .select('id, first_name, last_name')
+      .eq('venue_id', staff.venue_id)
+      .in('id', guestIds);
 
-    const nameById = new Map((names ?? []).map((n) => [(n as { id: string }).id, (n as { name: string | null }).name]));
+    const nameById = new Map(
+      (names ?? []).map((n) => {
+        const row = n as { id: string; first_name: string | null; last_name: string | null };
+        return [row.id, formatGuestDisplayName(row.first_name, row.last_name)] as const;
+      }),
+    );
 
     const hhList = (households ?? []).map((h) => {
       const hid = (h as { id: string }).id;

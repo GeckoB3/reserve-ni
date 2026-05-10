@@ -4,6 +4,7 @@ import { stripe } from '@/lib/stripe';
 import { insertFreeClassSessionBooking } from '@/lib/booking/insert-free-class-session-booking';
 import { insertPendingPaidClassSessionBooking } from '@/lib/booking/insert-pending-paid-class-session-booking';
 import { findOrCreateGuest } from '@/lib/guests';
+import { splitLegacyGuestName } from '@/lib/guests/name';
 import { quoteClassCart } from '@/lib/class-commerce/quote-class-cart';
 import { persistClassCartCheckoutTransaction } from '@/lib/class-commerce/persist-class-checkout';
 import { consumeClassCreditsForBooking } from '@/lib/class-commerce/consume-class-credits';
@@ -59,11 +60,13 @@ export async function orchestrateClassCartCheckout(
   const venueRow = venue as Record<string, unknown>;
   const stripeAccountId = venueRow.stripe_connected_account_id as string | null | undefined;
 
+  const { first, last } = splitLegacyGuestName(displayName);
   const { guest } = await findOrCreateGuest(
     admin,
     venueId,
     {
-      name: displayName,
+      first_name: first || null,
+      last_name: last || null,
       email: emailLower,
       phone: null,
     },

@@ -22,6 +22,7 @@ import { ContactMarketingSection } from '@/components/dashboard/contacts/Contact
 import { ContactTimelineSection } from '@/components/dashboard/contacts/ContactTimelineSection';
 import { ContactHouseholdSection } from '@/components/dashboard/contacts/ContactHouseholdSection';
 import { ContactGdprSection } from '@/components/dashboard/contacts/ContactGdprSection';
+import { formatGuestDisplayName } from '@/lib/guests/name';
 import {
   bookingExpandAccordionBodyClass,
   bookingExpandAccordionDetailsClass,
@@ -56,8 +57,10 @@ export function ContactDetailPanel({
   detail,
   detailLoading,
   editError,
-  editName,
-  setEditName,
+  editFirstName,
+  setEditFirstName,
+  editLastName,
+  setEditLastName,
   editEmail,
   setEditEmail,
   editPhone,
@@ -81,8 +84,10 @@ export function ContactDetailPanel({
   detail: GuestDetailResponse | null;
   detailLoading: boolean;
   editError: string | null;
-  editName: string;
-  setEditName: (v: string) => void;
+  editFirstName: string;
+  setEditFirstName: (v: string) => void;
+  editLastName: string;
+  setEditLastName: (v: string) => void;
   editEmail: string;
   setEditEmail: (v: string) => void;
   editPhone: string;
@@ -134,7 +139,8 @@ export function ContactDetailPanel({
   }
 
   const g = detail.guest;
-  const displayName = g.name?.trim() || 'Unnamed';
+  const isAnonRow = listRow.identifiability_tier === 'anonymous';
+  const displayName = isAnonRow ? 'Anonymous' : formatGuestDisplayName(g.first_name, g.last_name);
   const email = g.email?.trim() || null;
   const phone = g.phone?.trim() || null;
   const tags = g.tags ?? [];
@@ -345,15 +351,24 @@ export function ContactDetailPanel({
           <SubBlock title="Name & contact details">
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               <div>
-                <label htmlFor={`${id}-name`} className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Name</label>
+                <label htmlFor={`${id}-first`} className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">First name</label>
                 <input
-                  id={`${id}-name`}
-                  value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
+                  id={`${id}-first`}
+                  value={editFirstName}
+                  onChange={(e) => setEditFirstName(e.target.value)}
                   className="mt-0.5 w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm"
                 />
               </div>
               <div>
+                <label htmlFor={`${id}-last`} className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Surname</label>
+                <input
+                  id={`${id}-last`}
+                  value={editLastName}
+                  onChange={(e) => setEditLastName(e.target.value)}
+                  className="mt-0.5 w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm"
+                />
+              </div>
+              <div className="sm:col-span-2">
                 <label htmlFor={`${id}-email`} className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Email</label>
                 <input
                   id={`${id}-email`}

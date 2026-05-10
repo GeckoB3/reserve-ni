@@ -9,6 +9,7 @@ import { inferBookingRowModel } from '@/lib/booking/infer-booking-row-model';
 import { timeToMinutes, minutesToTime } from '@/lib/availability';
 import type { BookingModel } from '@/types/booking-models';
 import type { ScheduleBlockDTO, ScheduleBlockKind } from '@/types/schedule-blocks';
+import { formatGuestDisplayName } from '@/lib/guests/name';
 
 function hhmm(t: string | null | undefined): string {
   if (!t) return '09:00';
@@ -128,9 +129,14 @@ export async function GET(request: NextRequest) {
     });
     const guestIds = [...new Set(rows.map((r) => r.guest_id).filter(Boolean))] as string[];
     const { data: guestsRows } = guestIds.length
-      ? await staff.db.from('guests').select('id, name').in('id', guestIds)
+      ? await staff.db.from('guests').select('id, first_name, last_name').in('id', guestIds)
       : { data: [] };
-    const guestName = new Map((guestsRows ?? []).map((g: { id: string; name: string | null }) => [g.id, g.name ?? 'Guest']));
+    const guestName = new Map(
+      (guestsRows ?? []).map((g: { id: string; first_name: string | null; last_name: string | null }) => [
+        g.id,
+        formatGuestDisplayName(g.first_name, g.last_name),
+      ]),
+    );
 
     const eventIds = [...new Set(rows.map((r) => r.experience_event_id).filter(Boolean))] as string[];
     const { data: expEvents } = eventIds.length

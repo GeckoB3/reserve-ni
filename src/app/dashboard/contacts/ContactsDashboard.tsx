@@ -28,6 +28,7 @@ import { MergeContactsModal } from '@/components/dashboard/contacts/MergeContact
 import { BulkGuestMessageModal } from '@/components/booking/BulkGuestMessageModal';
 import type { GuestMessageChannel } from '@/lib/booking/guest-message-channel';
 import { useToast } from '@/components/ui/Toast';
+import { formatGuestDisplayName } from '@/lib/guests/name';
 
 export type { GuestListRow } from '@/types/contacts';
 
@@ -273,7 +274,8 @@ export function ContactsDashboard({
   const [expandedGuestId, setExpandedGuestId] = useState<string | null>(null);
   const [detail, setDetail] = useState<GuestDetailResponse | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
-  const [editName, setEditName] = useState('');
+  const [editFirstName, setEditFirstName] = useState('');
+  const [editLastName, setEditLastName] = useState('');
   const [editEmail, setEditEmail] = useState('');
   const [editPhone, setEditPhone] = useState('');
   const [editSaving, setEditSaving] = useState(false);
@@ -421,7 +423,13 @@ export function ContactsDashboard({
           .filter((o) => !o.sent && o.issues)
           .slice(0, 5)
           .map((o) => {
-            const name = guests.find((g) => g.id === o.guestId)?.name?.trim();
+            const row = guests.find((rowGuest) => rowGuest.id === o.guestId);
+            const name =
+              row && row.identifiability_tier !== 'anonymous'
+                ? formatGuestDisplayName(row.first_name, row.last_name)
+                : row
+                  ? 'Anonymous'
+                  : '';
             return `${name || clientWord}: ${o.issues}`;
           });
         if (okCount === selectedIds.length) {
@@ -456,7 +464,8 @@ export function ContactsDashboard({
         throw new Error(typeof data.error === 'string' ? data.error : 'Failed to load guest');
       }
       setDetail(data);
-      setEditName(data.guest.name ?? '');
+      setEditFirstName(data.guest.first_name ?? '');
+      setEditLastName(data.guest.last_name ?? '');
       setEditEmail(data.guest.email ?? '');
       setEditPhone(data.guest.phone ?? '');
     } catch (e) {
@@ -496,11 +505,6 @@ export function ContactsDashboard({
 
   const onSaveGuestDetails = useCallback(async () => {
     if (!detail) return;
-    const name = editName.trim();
-    if (!name) {
-      setEditError('Name is required.');
-      return;
-    }
     setEditSaving(true);
     setEditError(null);
     try {
@@ -508,7 +512,8 @@ export function ContactsDashboard({
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name,
+          first_name: editFirstName.trim(),
+          last_name: editLastName.trim(),
           email: editEmail.trim(),
           phone: editPhone.trim(),
         }),
@@ -524,7 +529,7 @@ export function ContactsDashboard({
     } finally {
       setEditSaving(false);
     }
-  }, [detail, editName, editEmail, editPhone, loadDetail, loadList]);
+  }, [detail, editFirstName, editLastName, editEmail, editPhone, loadDetail, loadList]);
 
   const exportFilteredCsv = useCallback(async () => {
     setExporting(true);
@@ -557,7 +562,8 @@ export function ContactsDashboard({
         if (chunk.length < 50) break;
       }
       const headers = [
-        'Name',
+        'First name',
+        'Surname',
         'Email',
         'Phone',
         'Tags',
@@ -582,7 +588,8 @@ export function ContactsDashboard({
           return typeof v === 'object' ? JSON.stringify(v) : String(v);
         });
         return [
-          g.name ?? '',
+          g.first_name ?? '',
+          g.last_name ?? '',
           g.email ?? '',
           g.phone ?? '',
           tags,
@@ -643,7 +650,7 @@ export function ContactsDashboard({
     if (filter === 'anonymous' || g.identifiability_tier === 'anonymous') {
       return 'Anonymous';
     }
-    return g.name?.trim() || 'Unnamed';
+    return formatGuestDisplayName(g.first_name, g.last_name);
   };
 
   const emptyTitle =
@@ -1036,8 +1043,10 @@ export function ContactsDashboard({
                               detail={detail?.guest.id === g.id ? detail : null}
                               detailLoading={detailLoading && expandedGuestId === g.id}
                               editError={editError}
-                              editName={editName}
-                              setEditName={setEditName}
+                              editFirstName={editFirstName}
+                              setEditFirstName={setEditFirstName}
+                              editLastName={editLastName}
+                              setEditLastName={setEditLastName}
                               editEmail={editEmail}
                               setEditEmail={setEditEmail}
                               editPhone={editPhone}

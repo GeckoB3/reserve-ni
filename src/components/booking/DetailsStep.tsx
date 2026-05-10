@@ -28,7 +28,8 @@ function formatDate(dateStr: string): string {
 function buildDetailsSchemaWithTerms(phoneCc: CountryCode) {
   return z
     .object({
-      name: z.string().min(1, 'Name is required').max(200),
+      first_name: z.string().min(1, 'First name is required').max(100),
+      last_name: z.string().min(1, 'Surname is required').max(100),
       email: z.string().min(1, 'Email is required').email('Valid email required'),
       phone: z
         .string()
@@ -50,7 +51,8 @@ function buildDetailsSchemaWithTerms(phoneCc: CountryCode) {
 /** Staff dashboard: name + phone required; email optional when provided. No guest terms checkbox. */
 function buildDetailsSchemaStaff(phoneCc: CountryCode) {
   return z.object({
-    name: z.string().min(1, 'Name is required').max(200),
+    first_name: z.string().max(100),
+    last_name: z.string().max(100),
     email: z.union([z.literal(''), z.string().email('Valid email required')]),
     phone: z
       .string()
@@ -67,7 +69,8 @@ function buildDetailsSchemaStaff(phoneCc: CountryCode) {
 /** Walk-in staff: no required contact fields; name defaults to "Walk In" on submit when blank. */
 function buildDetailsSchemaStaffWalkIn(phoneCc: CountryCode) {
   return z.object({
-    name: z.string().max(200),
+    first_name: z.string().max(100),
+    last_name: z.string().max(100),
     email: z.union([z.literal(''), z.string().email('Valid email required')]),
     phone: z
       .string()
@@ -149,7 +152,8 @@ export function DetailsStep({
   >({
     resolver: zodResolver(activeSchema),
     defaultValues: {
-      name: '',
+      first_name: '',
+      last_name: '',
       email: '',
       phone: '',
       dietary_notes: '',
@@ -287,9 +291,11 @@ export function DetailsStep({
         onSubmit={handleSubmit((d) => {
           const phoneRaw = 'phone' in d ? d.phone : '';
           const e164 = phoneRaw.trim() ? normalizeToE164(phoneRaw, phoneDefaultCountry) : null;
-          const nameRaw = 'name' in d ? String(d.name ?? '') : '';
+          const fnRaw = 'first_name' in d ? String(d.first_name ?? '').trim() : '';
+          const lnRaw = 'last_name' in d ? String(d.last_name ?? '').trim() : '';
           onSubmit({
-            name: isStaffWalkIn ? (nameRaw.trim() || 'Walk In') : nameRaw,
+            first_name: fnRaw,
+            last_name: lnRaw,
             email: d.email || '',
             phone: e164 ?? (phoneRaw.trim() ? phoneRaw : ''),
             dietary_notes: useAppointmentFields
@@ -300,15 +306,34 @@ export function DetailsStep({
         })}
         className="space-y-4"
       >
-        <FormField label="Name" required={audience !== 'staff_walk_in'} error={errors.name?.message}>
-          <input
-            {...register('name')}
-            className="min-h-[44px] w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-            placeholder={isStaffWalkIn ? 'Walk In' : 'Your full name'}
-          />
-        </FormField>
-        {isStaffWalkIn && (
-          <p className="-mt-2 text-xs text-slate-500">Leave blank to save as &quot;Walk In&quot;.</p>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <FormField
+            label="First name"
+            required={audience === 'public'}
+            error={errors.first_name?.message}
+          >
+            <input
+              {...register('first_name')}
+              autoComplete="given-name"
+              className="min-h-[44px] w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+              placeholder="First name"
+            />
+          </FormField>
+          <FormField label="Surname" required={audience === 'public'} error={errors.last_name?.message}>
+            <input
+              {...register('last_name')}
+              autoComplete="family-name"
+              className="min-h-[44px] w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+              placeholder="Surname"
+            />
+          </FormField>
+        </div>
+        {(isStaff || isStaffWalkIn) && (
+          <p className="-mt-2 text-xs text-slate-500">
+            {isStaffWalkIn
+              ? 'Optional — leave blank for walk-in without a named guest.'
+              : 'Optional — add if you want them on the booking.'}
+          </p>
         )}
 
         <FormField label="Email" required={audience === 'public'} error={errors.email?.message}>

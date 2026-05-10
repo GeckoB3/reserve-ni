@@ -33,6 +33,7 @@ import { loadServiceEntityBookingWindow } from '@/lib/booking/entity-booking-win
 import { resolveCancellationNoticeHoursForCreate } from '@/lib/booking/resolve-cancellation-notice-hours';
 import { isPublicOnlineBookingBlocked } from '@/lib/billing/subscription-entitlement';
 import { nextResponseIfVenueRequiresAccountLoginForBooking } from '@/lib/booking/require-account-login-for-public-booking';
+import { formatGuestDisplayName, normaliseGuestNamePart } from '@/lib/guests/name';
 
 const personEntrySchema = z.object({
   person_label: z.string().min(1).max(100),
@@ -46,7 +47,8 @@ const personEntrySchema = z.object({
 
 const createGroupSchema = z.object({
   venue_id: z.string().uuid(),
-  name: z.string().min(1).max(200),
+  first_name: z.string().min(1).max(100),
+  last_name: z.string().min(1).max(100),
   email: z.union([z.literal(''), z.string().email()]).optional(),
   phone: z.string().max(24).optional(),
   source: z.enum(['online', 'phone', 'walk-in', 'widget', 'booking_page']),
@@ -70,7 +72,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { venue_id, name, email, phone, source, people, dietary_notes } = parsed.data;
+    const { venue_id, first_name, last_name, email, phone, source, people, dietary_notes } = parsed.data;
     const authClient = await createClient();
     const {
       data: { user },
@@ -323,11 +325,14 @@ export async function POST(request: NextRequest) {
     }
 
     const emailNorm = customerEmail;
+    const guestFirst = normaliseGuestNamePart(first_name);
+    const guestLast = normaliseGuestNamePart(last_name);
     const { guest } = await findOrCreateGuest(
       supabase,
       venue_id,
       {
-        name,
+        first_name: guestFirst,
+        last_name: guestLast,
         email: emailNorm,
         phone: phoneE164,
       },
@@ -375,6 +380,9 @@ export async function POST(request: NextRequest) {
         source,
         guest_email: guest.email,
         dietary_notes: dietary_notes?.trim() || null,
+        guest_first_name: guestFirst,
+        guest_last_name: guestLast,
+        guest_phone: phoneE164,
         deposit_amount_pence: person.deposit_pence > 0 ? person.deposit_pence : null,
         deposit_status: person.deposit_pence > 0 ? 'Pending' : 'Not Required',
         cancellation_deadline: deadline,
@@ -469,7 +477,7 @@ export async function POST(request: NextRequest) {
           await sendBookingConfirmationNotifications(
             {
               id: primaryBookingId,
-              guest_name: name,
+              guest_name: formatGuestDisplayName(guest.first_name, guest.last_name),
               guest_email: guest.email ?? null,
               guest_phone: guest.phone ?? null,
               booking_date: firstPerson.booking_date,

@@ -3,6 +3,7 @@ import type { BookingEmailData, VenueEmailData } from '@/lib/emails/types';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
 import { sendPolicyMessage } from './outbound';
+import { formatGuestDisplayName } from '@/lib/guests/name';
 import type { GuestMessageChannel } from '@/lib/booking/guest-message-channel';
 
 export type CustomMessageChannel = 'email' | 'sms';
@@ -110,10 +111,10 @@ export async function sendCustomBookingMessage(
   const { data: guestRow } = booking.guest_id
     ? await admin
         .from('guests')
-        .select('name, email, phone')
+        .select('first_name, last_name, email, phone')
         .eq('id', booking.guest_id)
         .maybeSingle()
-    : { data: null as { name: string | null; email: string | null; phone: string | null } | null };
+    : { data: null as { first_name: string | null; last_name: string | null; email: string | null; phone: string | null } | null };
 
   const { data: venueRow, error: venueError } = await admin
     .from('venues')
@@ -156,7 +157,7 @@ export async function sendCustomBookingMessage(
 
   const bookingEmailData: BookingEmailData = {
     id: booking.id,
-    guest_name: guestRow?.name?.trim() || 'Guest',
+    guest_name: formatGuestDisplayName(guestRow?.first_name, guestRow?.last_name),
     guest_email: guestEmail,
     guest_phone: guestPhone,
     booking_date: booking.booking_date,

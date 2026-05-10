@@ -64,7 +64,8 @@ export function ResourceSlotBookingForm({
   const [date, setDate] = useState(preselectedDate ?? '');
   const [startTime, setStartTime] = useState(preselectedTime ?? '');
   const [durationMinutes, setDurationMinutes] = useState(60);
-  const [guestName, setGuestName] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [guestEmail, setGuestEmail] = useState('');
   const [guestPhone, setGuestPhone] = useState('');
   const [partySize, setPartySize] = useState(1);
@@ -107,7 +108,8 @@ export function ResourceSlotBookingForm({
   // Reset form when closed
   useEffect(() => {
     if (!open) {
-      setGuestName('');
+      setFirstName('');
+      setLastName('');
       setGuestEmail('');
       setGuestPhone('');
       setPartySize(1);
@@ -153,7 +155,7 @@ export function ResourceSlotBookingForm({
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
-      if (!resource || !date || !startTime || !guestName.trim()) return;
+      if (!resource || !date || !startTime || !firstName.trim() || !lastName.trim()) return;
 
       setSubmitting(true);
       setError(null);
@@ -167,7 +169,8 @@ export function ResourceSlotBookingForm({
             booking_time: startTime.length === 5 ? startTime + ':00' : startTime,
             booking_end_time: endTime.length === 5 ? endTime + ':00' : endTime,
             resource_id: resource.id,
-            guest_name: guestName.trim(),
+            first_name: firstName.trim(),
+            last_name: lastName.trim(),
             guest_email: guestEmail.trim() || undefined,
             guest_phone: guestPhone.trim() || undefined,
             party_size: partySize,
@@ -185,7 +188,7 @@ export function ResourceSlotBookingForm({
         setSubmitting(false);
       }
     },
-    [resource, date, startTime, endTime, guestName, guestEmail, guestPhone, partySize, venueId, onCreated],
+    [resource, date, startTime, endTime, firstName, lastName, guestEmail, guestPhone, partySize, venueId, onCreated],
   );
 
   if (!open) return null;
@@ -287,16 +290,29 @@ export function ResourceSlotBookingForm({
               </div>
 
               {/* Guest name */}
-              <div>
-                <label className="mb-1 block text-xs font-medium text-slate-700">Guest name</label>
-                <input
-                  type="text"
-                  value={guestName}
-                  onChange={(e) => setGuestName(e.target.value)}
-                  required
-                  placeholder="e.g. John Smith"
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-                />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-slate-700">First name</label>
+                  <input
+                    type="text"
+                    value={firstName}
+                    onChange={(e) => setFirstName(e.target.value)}
+                    required
+                    autoComplete="given-name"
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-slate-700">Surname</label>
+                  <input
+                    type="text"
+                    value={lastName}
+                    onChange={(e) => setLastName(e.target.value)}
+                    required
+                    autoComplete="family-name"
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                  />
+                </div>
               </div>
 
               {/* Email & phone */}
@@ -349,7 +365,7 @@ export function ResourceSlotBookingForm({
                 </button>
                 <button
                   type="submit"
-                  disabled={submitting || !guestName.trim() || !date || !startTime}
+                  disabled={submitting || !firstName.trim() || !lastName.trim() || !date || !startTime}
                   className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
                 >
                   {submitting ? 'Booking\u2026' : 'Create booking'}

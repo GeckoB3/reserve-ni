@@ -11,6 +11,7 @@ import { runUnifiedSchedulingComms, runSecondaryModelScheduledComms } from '@/li
 import { getVenueCommunicationPolicies } from '@/lib/communications/policies';
 import { sendPolicyMessage } from '@/lib/communications/outbound';
 import type { CronGuestInfo as GuestInfo, CronBookingRow as BookingRow } from '@/lib/cron/comms-types';
+import { formatGuestDisplayName } from '@/lib/guests/name';
 
 export async function GET(request: NextRequest) {
   const denied = requireCronAuthorisation(request);
@@ -94,7 +95,7 @@ function bookingLocalMs(bookingDate: string, bookingTime: string): number {
 }
 
 const BOOKING_SELECT =
-  'id, venue_id, guest_id, guest_email, booking_date, booking_time, party_size, special_requests, dietary_notes, deposit_amount_pence, deposit_status, cancellation_deadline, status, experience_event_id, class_instance_id, resource_id, guest:guests(name, email, phone)';
+  'id, venue_id, guest_id, guest_email, booking_date, booking_time, party_size, special_requests, dietary_notes, deposit_amount_pence, deposit_status, cancellation_deadline, status, experience_event_id, class_instance_id, resource_id, guest:guests(first_name, last_name, email, phone)';
 
 function normalizeBookings(rows: unknown[]): BookingRow[] {
   return rows.map((entry) => {
@@ -113,7 +114,7 @@ function normalizeBookings(rows: unknown[]): BookingRow[] {
 function buildBookingData(row: BookingRow): BookingEmailData {
   return {
     id: row.id,
-    guest_name: row.guest?.name ?? 'Guest',
+    guest_name: formatGuestDisplayName(row.guest?.first_name, row.guest?.last_name),
     guest_email: row.guest_email ?? row.guest?.email ?? null,
     guest_phone: row.guest?.phone ?? null,
     booking_date: row.booking_date,
