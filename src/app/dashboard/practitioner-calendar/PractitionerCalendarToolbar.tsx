@@ -27,6 +27,12 @@ export interface PractitionerCalendarToolbarProps {
   summaryContent: ReactNode;
   /** yyyy-mm-dd for “today” — must match SSR (venue-local from server) to avoid hydration mismatches. */
   todayIso?: string;
+  /** Undo last drag-reschedule or duration change on the grid (calendar page). */
+  scheduleUndo?: {
+    available: boolean;
+    pending: boolean;
+    onUndo: () => void;
+  };
 }
 
 const WEEKDAYS_LONG = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -91,6 +97,7 @@ export function PractitionerCalendarToolbar({
   controlsLabel = 'Filter',
   summaryContent,
   todayIso,
+  scheduleUndo,
 }: PractitionerCalendarToolbarProps) {
   const periodLabel = formatCalendarPeriodLabel(viewMode, date, weekStart, monthAnchor);
   const viewModePanelId = useId();
@@ -259,6 +266,27 @@ export function PractitionerCalendarToolbar({
       controlsLabel={controlsLabel}
       compact
       toolbarLeadingTools={viewModeSwitcher}
+      toolbarTools={
+        scheduleUndo ? (
+          <button
+            type="button"
+            disabled={!scheduleUndo.available || scheduleUndo.pending}
+            onClick={scheduleUndo.onUndo}
+            className="inline-flex h-8 shrink-0 items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50 hover:text-slate-900 disabled:opacity-50 sm:text-xs"
+            aria-label="Undo last appointment time or duration change"
+            title={
+              scheduleUndo.available
+                ? 'Undo last time or duration change'
+                : 'No schedule change to undo'
+            }
+          >
+            <svg className="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 15 3 9m0 0 6-6M3 9h12a6 6 0 0 1 0 12h-3" />
+            </svg>
+            <span className="hidden sm:inline">Undo</span>
+          </button>
+        ) : undefined
+      }
     />
   );
 }

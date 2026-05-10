@@ -125,6 +125,7 @@ interface BookingDetail {
   service_variant_name?: string | null;
   guest_attendance_confirmed_at?: string | null;
   staff_attendance_confirmed_at?: string | null;
+  client_arrived_at?: string | null;
 }
 
 function timeToMinutes(value: string): number {
@@ -815,9 +816,10 @@ export function BookingDetailPanel({
       area_name: d.area_name,
       guest_attendance_confirmed_at: d.guest_attendance_confirmed_at,
       staff_attendance_confirmed_at: d.staff_attendance_confirmed_at,
+      client_arrived_at: d.client_arrived_at ?? null,
       inferred_booking_model: d.inferred_booking_model,
-    cde_context: d.cde_context,
-    service_variant_name: d.service_variant_name,
+      cde_context: d.cde_context,
+      service_variant_name: d.service_variant_name,
     };
     const detailForExpanded = {
       id: d.id,

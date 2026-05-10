@@ -89,6 +89,7 @@ interface BookingRow {
   service_item_id?: string | null;
   guest_attendance_confirmed_at?: string | null;
   staff_attendance_confirmed_at?: string | null;
+  client_arrived_at?: string | null;
   area_id?: string | null;
   area_name?: string | null;
   /** Persisted model; drives {@link inferBookingRowModel} with FK fallbacks. */

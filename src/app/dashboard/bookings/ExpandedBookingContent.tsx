@@ -37,9 +37,15 @@ import {
 } from '@/app/dashboard/bookings/booking-expand-accordion-classes';
 import { formatGuestDisplayName } from '@/lib/guests/name';
 import {
+  canShowCancelStaffAttendanceConfirmationAction,
+  canShowConfirmBookingAttendanceAction,
   showAttendanceConfirmedSupplementPill,
   showDepositPendingPill,
 } from '@/lib/booking/booking-staff-indicators';
+import {
+  BOOKING_ATTENDANCE_CONFIRM_SOLID_BUTTON,
+  BOOKING_ATTENDANCE_CONFIRM_SPINNER,
+} from '@/lib/table-management/booking-status-visual';
 
 export interface BookingRow {
   id: string;
@@ -75,6 +81,8 @@ export interface BookingRow {
   service_name?: string | null;
   guest_attendance_confirmed_at?: string | null;
   staff_attendance_confirmed_at?: string | null;
+  /** Practitioner calendar / day-sheet "Arrived" indicator; PATCH via `client_arrived`. */
+  client_arrived_at?: string | null;
   inferred_booking_model?: BookingModel;
 }
 
@@ -236,6 +244,29 @@ export function ExpandedBookingContent({
   const confirmationSentAt = detail?.communications.find(
     (comm) => comm.message_type === 'booking_confirmation_email' || comm.message_type === 'booking_confirmation_sms',
   )?.created_at;
+  const patchBookingQuick = async (body: Record<string, unknown>, loadingKey: string) => {
+    setInlineActionLoading(loadingKey);
+    setInlineActionError(null);
+    try {
+      const res = await fetch(`/api/venue/bookings/${booking.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const payload = (await res.json().catch(() => ({}))) as { error?: string };
+        setInlineActionError(payload.error ?? 'Update failed');
+        return;
+      }
+      setInlineActionError(null);
+      onDetailUpdated();
+    } catch {
+      setInlineActionError('Update failed');
+    } finally {
+      setInlineActionLoading(null);
+    }
+  };
+
   const runDepositAction = async (action: 'send_payment_link' | 'waive' | 'record_cash' | 'refund') => {
     setInlineActionLoading(`deposit:${action}`);
     setInlineActionError(null);
@@ -305,6 +336,13 @@ export function ExpandedBookingContent({
     if (actions.some((existing) => existing.target === action.target)) return actions;
     return [...actions, action];
   }, []);
+
+  const staffIndicatorRow = { ...booking, status: booking.status };
+  const showStaffAttendanceConfirm = canShowConfirmBookingAttendanceAction(staffIndicatorRow);
+  const showStaffAttendanceCancel = canShowCancelStaffAttendanceConfirmationAction(staffIndicatorRow);
+  const arrived = Boolean(booking.client_arrived_at);
+  const showArrivedClear =
+    booking.status === 'Pending' || booking.status === 'Booked' || booking.status === 'Confirmed';
 
   const handleStatusClick = (status: BookingStatus, label: string) => {
     if (isDestructiveBookingStatus(status) || isRevertTransition(booking.status as BookingStatus, status)) {
@@ -490,6 +528,74 @@ export function ExpandedBookingContent({
                 {forwardPrimaryLabel(action.target, action.label)}
               </button>
             ))}
+
+            {showStaffAttendanceConfirm ? (
+              <button
+                type="button"
+                disabled={inlineActionLoading !== null}
+                onClick={() => void patchBookingQuick({ staff_attendance_confirmed: true }, 'staff-attendance')}
+                className={`inline-flex min-h-7 shrink-0 items-center justify-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-semibold shadow-sm transition-colors focus:outline-none focus:ring-2 disabled:opacity-60 sm:text-[11px] ${BOOKING_ATTENDANCE_CONFIRM_SOLID_BUTTON}`}
+              >
+                {inlineActionLoading === 'staff-attendance' ? (
+                  <span
+                    className={`h-3 w-3 shrink-0 animate-spin rounded-full border-2 ${BOOKING_ATTENDANCE_CONFIRM_SPINNER}`}
+                    aria-hidden
+                  />
+                ) : null}
+                Confirm Booking
+              </button>
+            ) : null}
+
+            {showStaffAttendanceCancel ? (
+              <button
+                type="button"
+                disabled={inlineActionLoading !== null}
+                onClick={() => void patchBookingQuick({ staff_attendance_confirmed: false }, 'staff-attendance-cancel')}
+                className="inline-flex min-h-7 shrink-0 items-center gap-1 rounded-md border border-slate-300 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 disabled:opacity-60 sm:text-[11px]"
+              >
+                {inlineActionLoading === 'staff-attendance-cancel' ? (
+                  <span
+                    className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-slate-400/30 border-t-slate-600"
+                    aria-hidden
+                  />
+                ) : null}
+                Cancel confirmation
+              </button>
+            ) : null}
+
+            {showArrivedClear ? (
+              !arrived ? (
+                <button
+                  type="button"
+                  disabled={inlineActionLoading !== null}
+                  onClick={() => void patchBookingQuick({ client_arrived: true }, 'client-arrived')}
+                  className="inline-flex min-h-7 shrink-0 items-center gap-1 rounded-md border-2 border-[#F59E0B] bg-[#F59E0B]/20 px-2 py-0.5 text-[10px] font-semibold text-amber-950 shadow-sm transition-colors hover:bg-[#F59E0B]/30 disabled:opacity-60 sm:text-[11px]"
+                >
+                  {inlineActionLoading === 'client-arrived' ? (
+                    <span
+                      className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-amber-600/30 border-t-amber-800"
+                      aria-hidden
+                    />
+                  ) : null}
+                  Arrived
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  disabled={inlineActionLoading !== null}
+                  onClick={() => void patchBookingQuick({ client_arrived: false }, 'client-arrived-clear')}
+                  className="inline-flex min-h-7 shrink-0 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-medium text-slate-600 shadow-sm transition-colors hover:bg-slate-50 disabled:opacity-60 sm:text-[11px]"
+                >
+                  {inlineActionLoading === 'client-arrived-clear' ? (
+                    <span
+                      className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-slate-400/30 border-t-slate-600"
+                      aria-hidden
+                    />
+                  ) : null}
+                  Clear
+                </button>
+              )
+            ) : null}
 
             {onRequestChangeTable && (
               <button

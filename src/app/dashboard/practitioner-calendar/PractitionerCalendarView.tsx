@@ -42,7 +42,7 @@ import { EventInstanceDetailSheet } from '@/components/practitioner-calendar/Eve
 import { useToast } from '@/components/ui/Toast';
 import { DashboardCalendarSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
 import { getCalendarGridBounds } from '@/lib/venue-calendar-bounds';
-import { canMarkNoShowForSlot, type BookingStatus } from '@/lib/table-management/booking-status';
+import type { BookingStatus } from '@/lib/table-management/booking-status';
 import { BOOKING_ATTENDANCE_CONFIRM_SOLID_BUTTON } from '@/lib/table-management/booking-status-visual';
 import type { OpeningHours } from '@/types/availability';
 import type { BookingModel } from '@/types/booking-models';
@@ -65,7 +65,6 @@ import {
 import { formatWorkingHoursLineForDate } from '@/lib/calendar/format-working-hours-for-date';
 import { formatEventUptakeLine } from '@/lib/calendar/event-block-label';
 import {
-  canShowCancelStaffAttendanceConfirmationAction,
   canShowConfirmBookingAttendanceAction,
   isAttendanceConfirmed,
   showAttendanceConfirmedSupplementPill,
@@ -222,6 +221,14 @@ function resolveBookingColumnId(b: Booking, resourceParentById: Map<string, stri
   if (rid && resourceParentById.has(rid)) return resourceParentById.get(rid)!;
   if (b.calendar_id && resourceParentById.has(b.calendar_id)) return resourceParentById.get(b.calendar_id)!;
   return b.practitioner_id ?? b.calendar_id ?? null;
+}
+
+/** Normalise HH:mm or HH:mm:ss for booking PATCH bodies. */
+function bookingTimeToStore(raw: string): string {
+  const t = typeof raw === 'string' ? raw.trim() : '';
+  if (t.length === 5 && /^\d{2}:\d{2}$/.test(t)) return `${t}:00`;
+  if (t.length >= 8) return t;
+  return `${t.slice(0, 5)}:00`;
 }
 
 function columnIdForBlock(bl: CalendarBlock): string | null {
@@ -843,24 +850,18 @@ const BOOKING_RIGHT_COL_PAD_Y = 6;
 const BOOKING_RIGHT_GAP_PX = 2;
 
 /** Counts must mirror `collectBookingRightColumnActionNodes` render order. */
-function countBookingRightColumnActions(b: Booking, graceMinutes: number): number {
+function countBookingRightColumnActions(b: Booking): number {
   if (b.status === 'Cancelled' || b.status === 'No-Show') return 0;
 
   let n = 0;
   if (canShowConfirmBookingAttendanceAction(b)) n++;
-  if (canShowCancelStaffAttendanceConfirmationAction(b)) n++;
 
   if (b.status === 'Completed') return n + 1;
-
-  const canNoShow =
-    (b.status === 'Confirmed' || b.status === 'Booked') &&
-    canMarkNoShowForSlot(b.booking_date, b.booking_time, graceMinutes);
 
   if (b.status === 'Pending' || b.status === 'Booked' || b.status === 'Confirmed') n++;
   if (b.status === 'Pending') n++;
   if (b.status === 'Booked' || b.status === 'Confirmed') {
     n++;
-    if (canNoShow) n++;
   }
   if (b.status === 'Seated') n += 2;
 
@@ -1060,7 +1061,6 @@ function BookingGuestActionsRowMeasured({
 function collectBookingRightColumnActionNodes({
   b,
   busy,
-  graceMinutes,
   onStatus,
   onArrived,
   onStaffAttendance,
@@ -1068,10 +1068,10 @@ function collectBookingRightColumnActionNodes({
   fontSizePx,
   compact,
   narrow = false,
+  omitAttendanceConfirm = false,
 }: {
   b: Booking;
   busy: boolean;
-  graceMinutes: number;
   onStatus: (id: string, next: BookingStatus) => void;
   onArrived: (id: string, arrived: boolean) => void;
   onStaffAttendance: (id: string, confirmed: boolean) => void;
@@ -1079,16 +1079,18 @@ function collectBookingRightColumnActionNodes({
   fontSizePx: number;
   compact: boolean;
   narrow?: boolean;
+  /**
+   * When the bar is too short for a comfortable single column and a second action column
+   * is not available, hide staff "Confirm Booking" first so two actions remain visible.
+   */
+  omitAttendanceConfirm?: boolean;
 }): ReactElement[] {
   if (b.status === 'Cancelled' || b.status === 'No-Show') return [];
 
   const arrived = Boolean(b.client_arrived_at);
-  const canNoShow =
-    (b.status === 'Confirmed' || b.status === 'Booked') &&
-    canMarkNoShowForSlot(b.booking_date, b.booking_time, graceMinutes);
 
-  const showAttendanceConfirm = canShowConfirmBookingAttendanceAction(b);
-  const showAttendanceCancel = canShowCancelStaffAttendanceConfirmationAction(b);
+  const showAttendanceConfirm =
+    canShowConfirmBookingAttendanceAction(b) && !omitAttendanceConfirm;
 
   const textStyle = compact
     ? ({ fontSize: `${fontSizePx}px`, lineHeight: 1.15 } as const)
@@ -1108,21 +1110,6 @@ function collectBookingRightColumnActionNodes({
         title="Confirm booking attendance"
       >
         {narrow ? 'Confirm' : 'Confirm Booking'}
-      </button>,
-    );
-  }
-  if (showAttendanceCancel) {
-    out.push(
-      <button
-        key="attendance-cancel"
-        type="button"
-        disabled={busy}
-        style={textStyle}
-        onClick={() => onStaffAttendance(b.id, false)}
-        className={`${baseClass} rounded-lg border border-slate-200 bg-white font-medium text-slate-600 shadow-sm transition hover:bg-slate-50 disabled:opacity-50`}
-        title="Cancel staff attendance confirmation"
-      >
-        {narrow ? 'Undo confirm' : 'Cancel confirmation'}
       </button>,
     );
   }
@@ -1225,20 +1212,6 @@ function collectBookingRightColumnActionNodes({
         </button>,
       );
     }
-    if ((b.status === 'Booked' || b.status === 'Confirmed') && canNoShow) {
-      out.push(
-        <button
-          key="no-show"
-          type="button"
-          disabled={busy}
-          style={textStyle}
-          onClick={() => onStatus(b.id, 'No-Show')}
-          className={`${baseClass} rounded-lg text-slate-500 transition hover:bg-red-50 hover:text-red-600 disabled:opacity-50`}
-        >
-          No show
-        </button>,
-      );
-    }
   }
 
   return out;
@@ -1248,7 +1221,6 @@ function collectBookingRightColumnActionNodes({
 function CalendarBookingRightColumn({
   b,
   busy,
-  graceMinutes,
   blockHeightPx,
   onStatus,
   onArrived,
@@ -1261,7 +1233,6 @@ function CalendarBookingRightColumn({
 }: {
   b: Booking;
   busy: boolean;
-  graceMinutes: number;
   blockHeightPx: number;
   onStatus: (id: string, next: BookingStatus) => void;
   onArrived: (id: string, arrived: boolean) => void;
@@ -1276,12 +1247,38 @@ function CalendarBookingRightColumn({
   /** Space reserved below floating actions, e.g. the duration resize handle. */
   bottomReservePx?: number;
 }) {
-  const actionCount = countBookingRightColumnActions(b, graceMinutes);
-  const layout = bookingRightColumnLayout(blockHeightPx, actionCount, {
+  const maxColsBudget =
+    allowMultiColumnActions && !narrow
+      ? maxActionColumnsForGuestRow(shellRowWidthPx)
+      : 1;
+  const stuckSingleColumn = maxColsBudget < 2;
+
+  const fullActionCount = countBookingRightColumnActions(b);
+  let layout = bookingRightColumnLayout(blockHeightPx, fullActionCount, {
     narrow,
     allowMultiColumn: allowMultiColumnActions,
     shellRowWidthPx,
   });
+
+  const shouldOmitAttendanceConfirm =
+    stuckSingleColumn &&
+    layout.columnCount === 1 &&
+    layout.compact &&
+    fullActionCount >= 3 &&
+    canShowConfirmBookingAttendanceAction(b);
+
+  const layoutActionCount = shouldOmitAttendanceConfirm
+    ? fullActionCount - 1
+    : fullActionCount;
+
+  if (shouldOmitAttendanceConfirm) {
+    layout = bookingRightColumnLayout(blockHeightPx, layoutActionCount, {
+      narrow,
+      allowMultiColumn: allowMultiColumnActions,
+      shellRowWidthPx,
+    });
+  }
+
   const compact = narrow || layout.compact;
   const fontSizePx = narrow ? Math.min(9, layout.fontSizePx) : layout.fontSizePx;
   const baseClass = narrow
@@ -1313,7 +1310,6 @@ function CalendarBookingRightColumn({
   const actionNodes = collectBookingRightColumnActionNodes({
     b,
     busy,
-    graceMinutes,
     onStatus,
     onArrived,
     onStaffAttendance,
@@ -1321,6 +1317,7 @@ function CalendarBookingRightColumn({
     fontSizePx,
     compact,
     narrow,
+    omitAttendanceConfirm: shouldOmitAttendanceConfirm,
   });
 
   const useGrid = !narrow && layout.columnCount > 1 && actionNodes.length > 0;
@@ -1708,7 +1705,12 @@ export function PractitionerCalendarView({
   const justResizedBookingIdRef = useRef<string | null>(null);
   const [flashIds, setFlashIds] = useState<Set<string>>(() => new Set());
   const [quickActionId, setQuickActionId] = useState<string | null>(null);
-  const [noShowGraceMinutes, setNoShowGraceMinutes] = useState(15);
+  /** Single-step undo for drag-move and duration resize on the day/week grid. */
+  const [lastScheduleEditUndo, setLastScheduleEditUndo] = useState<{
+    kind: 'move' | 'resize';
+    prev: Booking;
+  } | null>(null);
+  const [scheduleUndoPending, setScheduleUndoPending] = useState(false);
   const [scheduleBlocks, setScheduleBlocks] = useState<ScheduleBlockDTO[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const timelineRootRef = useRef<HTMLDivElement>(null);
@@ -1992,13 +1994,10 @@ export function PractitionerCalendarView({
           const v = (await venueRes.json()) as {
             opening_hours?: OpeningHours;
             timezone?: string | null;
-            no_show_grace_minutes?: number;
           };
           if (v.opening_hours) setOpeningHours(v.opening_hours);
           const tz = v.timezone;
           if (typeof tz === 'string' && tz.trim() !== '') setVenueTimezone(tz.trim());
-          const g = v.no_show_grace_minutes;
-          if (typeof g === 'number' && g >= 10 && g <= 60) setNoShowGraceMinutes(g);
         }
 
         if (loadVenueResources) {
@@ -2456,6 +2455,7 @@ export function PractitionerCalendarView({
         setBookings((rows) => rows.map((b) => (b.id === prev.id ? prev : b)));
         return;
       }
+      setLastScheduleEditUndo({ kind: 'move', prev });
       void fetchData({ silent: true });
     } catch {
       addToast('Could not move appointment', 'error');
@@ -2485,6 +2485,7 @@ export function PractitionerCalendarView({
           setBookings((rows) => rows.map((b) => (b.id === prev.id ? prev : b)));
           return;
         }
+        setLastScheduleEditUndo({ kind: 'resize', prev });
         void fetchData({ silent: true });
       } catch {
         addToast('Could not update duration', 'error');
@@ -2493,6 +2494,76 @@ export function PractitionerCalendarView({
     },
     [addToast, fetchData],
   );
+
+  const undoLastScheduleEdit = useCallback(async () => {
+    if (!lastScheduleEditUndo || scheduleUndoPending) return;
+    const { kind, prev } = lastScheduleEditUndo;
+    const colId = resolveBookingColumnId(prev, resourceParentById);
+    if (!colId) {
+      addToast('Cannot undo: calendar column is no longer available', 'error');
+      return;
+    }
+
+    const bookingId = prev.id;
+    const startHm = prev.booking_time.slice(0, 5);
+    const bookingEndForStore =
+      prev.booking_end_time && prev.booking_end_time.trim() !== ''
+        ? bookingTimeToStore(prev.booking_end_time)
+        : `${minutesToTime(timeToMinutes(startHm) + bookingDurationMinutes(prev, serviceMap))}:00`;
+
+    setScheduleUndoPending(true);
+    setBookings((rows) => rows.map((b) => (b.id === bookingId ? { ...prev } : b)));
+
+    try {
+      if (kind === 'resize') {
+        const res = await fetch(`/api/venue/bookings/${bookingId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ booking_end_time: bookingEndForStore, allow_manual_overlap: true }),
+        });
+        if (!res.ok) {
+          const j = await res.json().catch(() => ({}));
+          addToast((j as { error?: string }).error ?? 'Could not undo', 'error');
+          void fetchData({ silent: true });
+          return;
+        }
+      } else {
+        const timeForStore = bookingTimeToStore(prev.booking_time);
+        const res = await fetch(`/api/venue/bookings/${bookingId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            booking_date: prev.booking_date,
+            booking_time: timeForStore,
+            practitioner_id: colId,
+            booking_end_time: bookingEndForStore,
+            allow_manual_overlap: true,
+          }),
+        });
+        if (!res.ok) {
+          const j = await res.json().catch(() => ({}));
+          addToast((j as { error?: string }).error ?? 'Could not undo', 'error');
+          void fetchData({ silent: true });
+          return;
+        }
+      }
+      setLastScheduleEditUndo(null);
+      addToast('Change undone', 'success');
+      void fetchData({ silent: true });
+    } catch {
+      addToast('Could not undo', 'error');
+      void fetchData({ silent: true });
+    } finally {
+      setScheduleUndoPending(false);
+    }
+  }, [
+    addToast,
+    fetchData,
+    lastScheduleEditUndo,
+    resourceParentById,
+    scheduleUndoPending,
+    serviceMap,
+  ]);
 
   async function quickPatchBooking(bookingId: string, body: Record<string, unknown>) {
     setQuickActionId(bookingId);
@@ -3044,6 +3115,11 @@ export function PractitionerCalendarView({
           controlsPanel={calendarFilterPanel}
           controlsLabel={calendarControlsLabel}
           summaryContent={calendarSummaryContent}
+          scheduleUndo={{
+            available: Boolean(lastScheduleEditUndo),
+            pending: scheduleUndoPending,
+            onUndo: () => void undoLastScheduleEdit(),
+          }}
         />
       </div>
 
@@ -3739,7 +3815,6 @@ export function PractitionerCalendarView({
                                               0,
                                               height + resizeExtra - (canDrag ? BOOKING_RESERVE_ABOVE_RESIZE_PX : 0),
                                             )}
-                                            graceMinutes={noShowGraceMinutes}
                                             onStatus={(id, s) => void quickPatchBooking(id, { status: s })}
                                             onArrived={(id, v) => void quickPatchBooking(id, { client_arrived: v })}
                                             onStaffAttendance={patchStaffAttendance}
@@ -3913,7 +3988,6 @@ export function PractitionerCalendarView({
                                         b={first}
                                         busy={qBusy}
                                         blockHeightPx={height}
-                                        graceMinutes={noShowGraceMinutes}
                                         onStatus={(id, s) => void quickPatchBooking(id, { status: s })}
                                         onArrived={(id, v) => void quickPatchBooking(id, { client_arrived: v })}
                                         onStaffAttendance={patchStaffAttendance}
