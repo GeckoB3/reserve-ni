@@ -7,6 +7,7 @@ import type { BookingModel, VenueTerminology } from '@/types/booking-models';
 import { DEFAULT_TERMINOLOGY } from '@/types/booking-models';
 import { isAppointmentDashboardExperience } from '@/lib/booking/unified-scheduling';
 import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
+import { venueUsesUnifiedAppointmentServiceData } from '@/lib/booking/uses-unified-appointment-data';
 import { ToastProvider } from '@/components/ui/Toast';
 
 function mergeVenueTerminology(model: BookingModel, raw: unknown): VenueTerminology {
@@ -64,6 +65,7 @@ export default async function ContactsPage() {
     bookingModel,
     enabledModels,
   );
+  const usesUnifiedServices = await venueUsesUnifiedAppointmentServiceData(admin, venueId);
 
   return (
     <ToastProvider>
@@ -75,6 +77,7 @@ export default async function ContactsPage() {
             terminology={terminology}
             appointmentDashboardExperience={appointmentDashboardExperience}
             isAdmin={staff.role === 'admin'}
+            usesUnifiedServices={usesUnifiedServices}
           />
         </div>
       </div>

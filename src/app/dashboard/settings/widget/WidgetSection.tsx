@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import QRCode from 'qrcode';
-import { PUBLIC_BOOK_TAB_SLUGS } from '@/lib/booking/public-book-tabs';
 import { EMBED_IFRAME_DEFAULT_HEIGHT_PX } from '@/lib/embed/widget-frame';
 
 interface WidgetSectionProps {
@@ -124,16 +123,6 @@ export function WidgetSection({ venueName, venueSlug, baseUrl }: WidgetSectionPr
                 : ''}
           </p>
         </div>
-        <p className="mt-4 text-sm text-neutral-600">
-          <span className="font-medium text-neutral-800">Open a specific tab (embed matches /book)</span> - append{' '}
-          <code className="rounded bg-neutral-100 px-1 py-0.5 text-xs">?tab=</code> with the same slug as the full-page
-          booking URL. Canonical values: {PUBLIC_BOOK_TAB_SLUGS.join(', ')}. Combine with accent using{' '}
-          <code className="rounded bg-neutral-100 px-1 py-0.5 text-xs">&amp;</code> (e.g.{' '}
-          <code className="break-all rounded bg-neutral-100 px-1 py-0.5 text-xs">
-            /embed/{venueSlug}?accent=4F46E5&amp;tab=events
-          </code>
-          ).
-        </p>
       </section>
 
       <section className="rounded-lg border border-neutral-200 bg-white p-6">

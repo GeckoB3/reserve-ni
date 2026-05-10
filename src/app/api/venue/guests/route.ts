@@ -3,12 +3,15 @@ import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
 import {
   aggregateBookingSignalsForGuests,
+  applyGuestsDirectorySegment,
   calendarDateInTimeZone,
+  fetchContactsLatestBookingMatchGuestIds,
   fetchUpcomingGuestIdsOrdered,
   getVenueTimeZone,
   monthStartCalendarDateInTimeZone,
   parseGuestListQuery,
   addDaysCalendarDate,
+  resolveContactsSegmentDates,
   fetchGuestIdsForSpendSort,
   type GuestRowBase,
 } from '@/lib/guests/guest-contacts-list';
@@ -57,7 +60,8 @@ function shapeGuestListRow(
 
 /**
  * GET /api/venue/guests - paginated guest list (venue staff).
- * Query: search, tags, sort, filter (all|identified|anonymous), status (all|upcoming|lapsed|new_this_month|vip), page, limit.
+ * Query: search, tags, sort, filter (all|identified|anonymous), segment, date_from, date_to,
+ * marketing, last_staff_id, last_service_kind, last_service_id, legacy `status`, page, limit.
  */
 export async function GET(request: NextRequest) {
   try {
@@ -68,7 +72,7 @@ export async function GET(request: NextRequest) {
     }
 
     const params = parseGuestListQuery(request.nextUrl.searchParams);
-    const { search, tags, sort, filter, lifecycle, page, limit, include_custom_fields } = params;
+    const { search, tags, sort, filter, segment, page, limit, include_custom_fields } = params;
 
     const guestListSelect = include_custom_fields
       ? 'id, first_name, last_name, email, phone, tags, visit_count, no_show_count, last_visit_date, created_at, identifiability_tier, marketing_opt_out, marketing_consent, custom_fields'
@@ -79,7 +83,14 @@ export async function GET(request: NextRequest) {
     const tz = await getVenueTimeZone(staff.db, staff.venue_id);
     const today = calendarDateInTimeZone(new Date(), tz);
     const monthStart = monthStartCalendarDateInTimeZone(new Date(), tz);
-    const lapsedCut = addDaysCalendarDate(today, -90);
+    const bounds = resolveContactsSegmentDates(
+      params.segment,
+      params.date_from,
+      params.date_to,
+      today,
+      monthStart,
+      params.legacy_status,
+    );
 
     const buildBaseGuestQuery = () => {
       let query = staff.db
@@ -102,14 +113,6 @@ export async function GET(request: NextRequest) {
       if (search) {
         const p = `%${search}%`;
         query = query.or(`first_name.ilike.${p},last_name.ilike.${p},email.ilike.${p},phone.ilike.${p}`);
-      }
-
-      if (lifecycle === 'lapsed') {
-        query = query.not('last_visit_date', 'is', null).lte('last_visit_date', lapsedCut);
-      } else if (lifecycle === 'new_this_month') {
-        query = query.gte('created_at', `${monthStart}T00:00:00`);
-      } else if (lifecycle === 'vip') {
-        query = query.contains('tags', ['vip']);
       }
 
       return query;
@@ -210,8 +213,10 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    if (lifecycle === 'upcoming') {
-      const orderedRaw = await fetchUpcomingGuestIdsOrdered(staff.db, staff.venue_id, today);
+    if (segment === 'upcoming') {
+      const fromD = bounds.from ?? today;
+      const toD = bounds.to ?? addDaysCalendarDate(today, 365);
+      const orderedRaw = await fetchUpcomingGuestIdsOrdered(staff.db, staff.venue_id, fromD, toD);
       const orderedIds = orderedRaw.slice(0, 500);
       if (orderedIds.length === 0) {
         return NextResponse.json({
@@ -242,7 +247,7 @@ export async function GET(request: NextRequest) {
       }
       if (search) {
         const p = `%${search}%`;
-        q = q.or(`name.ilike.${p},email.ilike.${p},phone.ilike.${p}`);
+        q = q.or(`first_name.ilike.${p},last_name.ilike.${p},email.ilike.${p},phone.ilike.${p}`);
       }
 
       const { data: matchRows, error: mErr } = await q;
@@ -257,11 +262,11 @@ export async function GET(request: NextRequest) {
       );
       const total = sorted.length;
       const slice = sorted.slice(from, to + 1);
-      const ids = slice.map((r) => r.id);
+      const listIds = slice.map((r) => r.id);
       const { totalBookings, cancelled, upcoming, paidDepositPence, nextBookingDate, nextBookingTime } = await aggregateBookingSignalsForGuests(
         staff.db,
         staff.venue_id,
-        ids,
+        listIds,
         today,
       );
       const guests = slice.map((row) =>
@@ -277,7 +282,60 @@ export async function GET(request: NextRequest) {
       });
     }
 
+    if (params.segment === 'last_staff' && !params.last_staff_id) {
+      return NextResponse.json({
+        guests: [],
+        total: 0,
+        page,
+        limit,
+        total_count: 0,
+        meta: { segment_needs_staff: true },
+      });
+    }
+    if (
+      params.segment === 'last_service' &&
+      (!params.last_service_kind || !params.last_service_id)
+    ) {
+      return NextResponse.json({
+        guests: [],
+        total: 0,
+        page,
+        limit,
+        total_count: 0,
+        meta: { segment_needs_service: true },
+      });
+    }
+
     let query = buildBaseGuestQuery();
+
+    if (params.segment === 'last_staff' && params.last_staff_id) {
+      const segIds = await fetchContactsLatestBookingMatchGuestIds(staff.db, staff.venue_id, {
+        staffColumnId: params.last_staff_id,
+        appointmentServiceId: null,
+        serviceItemId: null,
+        bookingDateFrom: bounds.from,
+        bookingDateTo: bounds.to,
+      });
+      if (segIds.length === 0) {
+        return NextResponse.json({ guests: [], total: 0, page, limit, total_count: 0 });
+      }
+      query = query.in('id', segIds);
+    } else if (params.segment === 'last_service' && params.last_service_kind && params.last_service_id) {
+      const segIds = await fetchContactsLatestBookingMatchGuestIds(staff.db, staff.venue_id, {
+        staffColumnId: null,
+        appointmentServiceId:
+          params.last_service_kind === 'appointment_service' ? params.last_service_id : null,
+        serviceItemId: params.last_service_kind === 'service_item' ? params.last_service_id : null,
+        bookingDateFrom: bounds.from,
+        bookingDateTo: bounds.to,
+      });
+      if (segIds.length === 0) {
+        return NextResponse.json({ guests: [], total: 0, page, limit, total_count: 0 });
+      }
+      query = query.in('id', segIds);
+    }
+
+    query = applyGuestsDirectorySegment(query, params, today, monthStart);
     query = applySort(query, sort);
     query = query.order('id', { ascending: true });
     query = query.range(from, to);

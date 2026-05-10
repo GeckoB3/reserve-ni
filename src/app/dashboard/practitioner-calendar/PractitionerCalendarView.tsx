@@ -837,9 +837,10 @@ function BookingBlockInfoStack({
   );
 }
 
-/** Bottom strip for duration resize; content above ends flush at the top edge of this strip (no extra gap). */
+/** Bottom strip for duration resize (hit target height). */
 const BOOKING_RESIZE_HANDLE_HEIGHT_PX = 18;
-const BOOKING_RESERVE_ABOVE_RESIZE_PX = BOOKING_RESIZE_HANDLE_HEIGHT_PX;
+/** Space kept between interactive booking chrome and resize gestures (paint + cushion so actions never butt the slider). */
+const BOOKING_RESERVE_ABOVE_RESIZE_PX = BOOKING_RESIZE_HANDLE_HEIGHT_PX + 2;
 
 /** Left strip for drag-to-reschedule; ~25% narrower than former w-6 / w-3. */
 const BOOKING_DRAG_HANDLE_WIDTH_DEFAULT_PX = 18;
@@ -870,6 +871,8 @@ function countBookingRightColumnActions(b: Booking): number {
 
 /** Per-row height when actions would be cramped in a single column; allow multi-column grid when it improves row height. */
 const BOOKING_ACTION_ROW_COMFORT_MIN_PX = 30;
+/** Overlap lanes stack every action vertically in one narrow strip — delay compact/smaller typography slightly vs the padded wide strip. */
+const BOOKING_OVERLAP_FLOAT_COMFORT_MIN_PX = 24;
 
 /** Match action column unit for width budgeting (never squeeze guest name below this strip). */
 const BOOKING_ACTION_COL_WIDTH_REM = 5.5;
@@ -922,8 +925,10 @@ function perActionRowHeightPx(
   blockHeightPx: number,
   actionCount: number,
   columns: number,
+  /** Wide action strip reserves `BOOKING_RIGHT_COL_PAD_Y` at top (`pt-1.5`); floating overlap strip does not. */
+  reserveRightColumnTopPad: boolean,
 ): number {
-  const pad = BOOKING_RIGHT_COL_PAD_Y;
+  const pad = reserveRightColumnTopPad ? BOOKING_RIGHT_COL_PAD_Y : 0;
   const gap = BOOKING_RIGHT_GAP_PX;
   const rows = Math.ceil(actionCount / columns);
   const gapTotal = Math.max(0, rows - 1) * gap;
@@ -945,6 +950,8 @@ function bookingRightColumnLayout(
     narrow: boolean;
     allowMultiColumn: boolean;
     shellRowWidthPx: number | null | undefined;
+    /** Mirrors top padding on the wide right column (`pt-1.5`); omit for floating overlap strips that use full height. */
+    reserveRightColumnTopPad?: boolean;
   },
 ): BookingRightColumnLayoutResult {
   const emptyBase =
@@ -954,13 +961,23 @@ function bookingRightColumnLayout(
     return { compact: false, columnCount: 1, fontSizePx: 10, baseClass: emptyBase };
   }
 
+  const reserveRightColumnTopPad = options.reserveRightColumnTopPad ?? true;
+  const comfortRowMinPx = reserveRightColumnTopPad
+    ? BOOKING_ACTION_ROW_COMFORT_MIN_PX
+    : BOOKING_OVERLAP_FLOAT_COMFORT_MIN_PX;
+
   const maxCols =
     options.allowMultiColumn && !options.narrow
       ? maxActionColumnsForGuestRow(options.shellRowWidthPx)
       : 1;
 
-  const perSingle = perActionRowHeightPx(blockHeightPx, actionCount, 1);
-  const crampedSingle = perSingle < BOOKING_ACTION_ROW_COMFORT_MIN_PX;
+  const perSingle = perActionRowHeightPx(
+    blockHeightPx,
+    actionCount,
+    1,
+    reserveRightColumnTopPad,
+  );
+  const crampedSingle = perSingle < comfortRowMinPx;
 
   let chosenCols: 1 | 2 | 3 = 1;
   let chosenPerRow = perSingle;
@@ -977,7 +994,7 @@ function bookingRightColumnLayout(
 
     for (const c of [3, 2] as const) {
       if (c > maxCols) continue;
-      const pr = perActionRowHeightPx(blockHeightPx, actionCount, c);
+      const pr = perActionRowHeightPx(blockHeightPx, actionCount, c, reserveRightColumnTopPad);
       if (pr <= perSingle) continue;
       if (pr > bestPerRow || (Math.abs(pr - bestPerRow) < 0.01 && c < bestCols)) {
         bestPerRow = pr;
@@ -988,7 +1005,7 @@ function bookingRightColumnLayout(
     chosenPerRow = bestPerRow;
   }
 
-  const compact = chosenPerRow < BOOKING_ACTION_ROW_COMFORT_MIN_PX;
+  const compact = chosenPerRow < comfortRowMinPx;
   const fontSizePx = Math.round(Math.max(7, Math.min(10, chosenPerRow * 0.38)));
 
   if (chosenCols === 1) {
@@ -1253,11 +1270,14 @@ function CalendarBookingRightColumn({
       : 1;
   const stuckSingleColumn = maxColsBudget < 2;
 
+  const reserveRightColumnTopPad = !(narrow && floating);
+
   const fullActionCount = countBookingRightColumnActions(b);
   let layout = bookingRightColumnLayout(blockHeightPx, fullActionCount, {
     narrow,
     allowMultiColumn: allowMultiColumnActions,
     shellRowWidthPx,
+    reserveRightColumnTopPad,
   });
 
   const shouldOmitAttendanceConfirm =
@@ -1276,14 +1296,15 @@ function CalendarBookingRightColumn({
       narrow,
       allowMultiColumn: allowMultiColumnActions,
       shellRowWidthPx,
+      reserveRightColumnTopPad,
     });
   }
 
-  const compact = narrow || layout.compact;
-  const fontSizePx = narrow ? Math.min(9, layout.fontSizePx) : layout.fontSizePx;
-  const baseClass = narrow
-    ? 'inline-flex w-full min-w-0 min-h-[1.75rem] shrink-0 items-center justify-center whitespace-normal break-words px-1 py-0.5 text-center text-[9px] leading-tight [overflow-wrap:anywhere]'
-    : layout.baseClass;
+  /** Do not OR in `narrow`: that forced compact typography/padding whenever lanes overlapped, so buttons shrunk below wide-lane sizing for the same `blockHeightPx`. */
+  const compact = layout.compact;
+  const fontSizePx = layout.fontSizePx;
+  /** Overlap lanes use `narrow` for layout only; action sizing follows `bookingRightColumnLayout` like wide lanes (`min-h-0` only). */
+  const baseClass = layout.baseClass;
 
   const widthClass = narrow
     ? floating
@@ -1296,16 +1317,27 @@ function CalendarBookingRightColumn({
         : 'w-[5.5rem] min-w-[5.5rem] max-w-[5.5rem] pt-1.5 pb-0 pl-1 pr-0.5';
   const narrowWidthPx = narrowBookingActionsWidthPx(shellRowWidthPx);
   const widthStyle =
-    narrow && narrowWidthPx != null
-      ? { width: narrowWidthPx, ...(floating ? { bottom: bottomReservePx } : {}) }
-      : floating
-        ? { bottom: bottomReservePx }
-        : undefined;
+    narrow && floating
+      ? {
+          top: 0,
+          bottom: bottomReservePx,
+          ...(narrowWidthPx != null ? { width: narrowWidthPx } : {}),
+        }
+      : narrow && narrowWidthPx != null
+        ? { width: narrowWidthPx }
+        : floating
+          ? { bottom: bottomReservePx }
+          : undefined;
 
-  const heightClass = narrow ? 'h-auto max-h-full' : 'h-full';
+  const heightClass =
+    narrow && floating ? 'min-h-0' : narrow ? 'h-auto max-h-full' : 'h-full';
 
   const justifyActions =
-    layout.columnCount > 1 || (!layout.compact && !narrow) ? 'justify-end' : '';
+    narrow && floating
+      ? 'justify-start'
+      : layout.columnCount > 1 || !layout.compact
+        ? 'justify-end'
+        : '';
 
   const actionNodes = collectBookingRightColumnActionNodes({
     b,
@@ -1331,12 +1363,14 @@ function CalendarBookingRightColumn({
         narrow && floating
           ? 'pointer-events-auto absolute right-1 z-20'
           : ''
-      } flex ${heightClass} min-h-0 shrink-0 flex-col ${narrow ? 'self-end' : 'self-stretch'} overflow-hidden ${widthClass}`}
+      } flex ${heightClass} min-h-0 shrink-0 flex-col ${
+        narrow && floating ? '' : narrow ? 'self-end' : 'self-stretch'
+      } overflow-hidden ${widthClass}`}
       style={widthStyle}
       onPointerDown={(e) => e.stopPropagation()}
     >
       <div
-        className={`flex min-h-0 w-full ${narrow ? 'flex-none' : 'flex-1'} flex-col gap-0.5 ${justifyActions}`}
+        className={`flex min-h-0 w-full ${narrow && !floating ? 'flex-none' : 'flex-1'} flex-col gap-0.5 ${justifyActions}`}
       >
         {useGrid && positions ? (
           <div

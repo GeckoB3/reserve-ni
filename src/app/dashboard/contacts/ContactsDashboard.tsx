@@ -14,7 +14,8 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { buildCsvFromRows, downloadCsvString } from '@/lib/appointments-csv';
 import type { VenueTerminology } from '@/types/booking-models';
 import type { CustomClientFieldDefinition, GuestDetailResponse, GuestListRow } from '@/types/contacts';
-import { CONTACTS_LIFECYCLE_OPTIONS, CONTACTS_SORT_OPTIONS } from '@/lib/guests/contacts-constants';
+import { CONTACTS_SEGMENT_OPTIONS, CONTACTS_SORT_OPTIONS } from '@/lib/guests/contacts-constants';
+import type { ContactsMarketingFilter, ContactsSegment, LastServiceKind } from '@/lib/guests/guest-contacts-list';
 import { formatNextBookingSummary, formatRelativeVisitDate } from '@/lib/guests/contact-formatting';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
@@ -176,6 +177,7 @@ function ContactsToolbarOptionPopover({
   isDirty,
   panelId,
   triggerAriaLabel,
+  maxWidthPx = 320,
   children,
 }: {
   toolbarPanelAnchorRef: RefObject<HTMLDivElement | null>;
@@ -188,6 +190,7 @@ function ContactsToolbarOptionPopover({
   isDirty: boolean;
   panelId: string;
   triggerAriaLabel: string;
+  maxWidthPx?: number;
   children: ReactNode;
 }) {
   const emphasize = open || isDirty;
@@ -221,7 +224,7 @@ function ContactsToolbarOptionPopover({
         horizontalCenter
         gapPx={4}
         align="start"
-        maxWidthPx={320}
+        maxWidthPx={maxWidthPx}
         id={panelId}
         onDismiss={onDismiss}
         aria-label={panelHeading}
@@ -240,12 +243,14 @@ export function ContactsDashboard({
   terminology,
   appointmentDashboardExperience,
   isAdmin,
+  usesUnifiedServices,
 }: {
   venueId: string;
   currency: string;
   terminology: VenueTerminology;
   appointmentDashboardExperience: boolean;
   isAdmin: boolean;
+  usesUnifiedServices: boolean;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -262,7 +267,14 @@ export function ContactsDashboard({
   const [sort, setSort] = useState('last_visit_desc');
   const [page, setPage] = useState(0);
   const [filter, setFilter] = useState<'identified' | 'all' | 'anonymous'>('identified');
-  const [lifecycle, setLifecycle] = useState<string>('all');
+  const [segment, setSegment] = useState<ContactsSegment>('all');
+  const [dateFrom, setDateFrom] = useState<string | null>(null);
+  const [dateTo, setDateTo] = useState<string | null>(null);
+  const [marketing, setMarketing] = useState<ContactsMarketingFilter>('subscribed');
+  const [lastStaffId, setLastStaffId] = useState<string | null>(null);
+  const [lastServiceId, setLastServiceId] = useState<string | null>(null);
+  const [rosterStaff, setRosterStaff] = useState<Array<{ id: string; name: string }>>([]);
+  const [venueServices, setVenueServices] = useState<Array<{ id: string; name: string }>>([]);
   const [tagFilter, setTagFilter] = useState<string[]>([]);
   const [venueTags, setVenueTags] = useState<string[]>([]);
   const [guests, setGuests] = useState<GuestListRow[]>([]);
@@ -286,9 +298,8 @@ export function ContactsDashboard({
   const [bulkContactMessageOpen, setBulkContactMessageOpen] = useState(false);
   const [bulkContactMessageSending, setBulkContactMessageSending] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
-  const [filterPopoverKind, setFilterPopoverKind] = useState<'none' | 'show' | 'status' | 'sort'>('none');
-  const showFilterTriggerRef = useRef<HTMLButtonElement>(null);
-  const statusFilterTriggerRef = useRef<HTMLButtonElement>(null);
+  const [filterPopoverKind, setFilterPopoverKind] = useState<'none' | 'filter' | 'sort'>('none');
+  const filterTriggerRef = useRef<HTMLButtonElement>(null);
   const sortFilterTriggerRef = useRef<HTMLButtonElement>(null);
   const contactsToolbarPanelsId = useId();
 
@@ -312,9 +323,46 @@ export function ContactsDashboard({
     void loadVenueTags();
   }, [loadVenueTags]);
 
+  const loadContactsFilterSources = useCallback(async () => {
+    try {
+      const [prRes, svcRes] = await Promise.all([
+        fetch('/api/venue/practitioners?roster=1&active_only=1'),
+        fetch('/api/venue/appointment-services'),
+      ]);
+      if (prRes.ok) {
+        const d = (await prRes.json()) as { practitioners?: Array<{ id: string; name?: string | null }> };
+        const rows = Array.isArray(d.practitioners) ? d.practitioners : [];
+        setRosterStaff(
+          rows.map((p) => ({
+            id: p.id,
+            name: typeof p.name === 'string' && p.name.trim() !== '' ? p.name.trim() : 'Staff',
+          })),
+        );
+      }
+      if (svcRes.ok) {
+        const d = (await svcRes.json()) as { services?: Array<{ id: string; name?: string | null }> };
+        const rows = Array.isArray(d.services) ? d.services : [];
+        setVenueServices(
+          rows.map((s) => ({
+            id: s.id,
+            name: typeof s.name === 'string' && s.name.trim() !== '' ? s.name.trim() : 'Service',
+          })),
+        );
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadContactsFilterSources();
+  }, [loadContactsFilterSources]);
+
+  const lastServiceKind: LastServiceKind = usesUnifiedServices ? 'service_item' : 'appointment_service';
+
   useEffect(() => {
     setSelectedIds([]);
-  }, [page, debouncedSearch, filter, lifecycle, tagFilter]);
+  }, [page, debouncedSearch, filter, segment, tagFilter, dateFrom, dateTo, marketing, lastStaffId, lastServiceId]);
 
   const toggleSelected = useCallback((id: string) => {
     setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
@@ -339,10 +387,18 @@ export function ContactsDashboard({
         page: String(page),
         limit: String(limit),
         filter,
-        status: lifecycle,
+        segment,
       });
       if (debouncedSearch) params.set('search', debouncedSearch);
       if (tagFilter.length) params.set('tags', tagFilter.join(','));
+      if (dateFrom) params.set('date_from', dateFrom);
+      if (dateTo) params.set('date_to', dateTo);
+      if (segment === 'marketing') params.set('marketing', marketing);
+      if (segment === 'last_staff' && lastStaffId) params.set('last_staff_id', lastStaffId);
+      if (segment === 'last_service' && lastServiceId) {
+        params.set('last_service_kind', lastServiceKind);
+        params.set('last_service_id', lastServiceId);
+      }
       const res = await fetch(`/api/venue/guests?${params}`);
       const data = (await res.json()) as {
         guests?: GuestListRow[];
@@ -360,7 +416,21 @@ export function ContactsDashboard({
     } finally {
       setLoading(false);
     }
-  }, [sort, page, limit, debouncedSearch, tagFilter, filter, lifecycle]);
+  }, [
+    sort,
+    page,
+    limit,
+    debouncedSearch,
+    tagFilter,
+    filter,
+    segment,
+    dateFrom,
+    dateTo,
+    marketing,
+    lastStaffId,
+    lastServiceId,
+    lastServiceKind,
+  ]);
 
   useEffect(() => {
     void loadList();
@@ -547,11 +617,19 @@ export function ContactsDashboard({
           page: String(p),
           limit: '50',
           filter,
-          status: lifecycle,
+          segment,
           include_custom_fields: '1',
         });
         if (debouncedSearch) params.set('search', debouncedSearch);
         if (tagFilter.length) params.set('tags', tagFilter.join(','));
+        if (dateFrom) params.set('date_from', dateFrom);
+        if (dateTo) params.set('date_to', dateTo);
+        if (segment === 'marketing') params.set('marketing', marketing);
+        if (segment === 'last_staff' && lastStaffId) params.set('last_staff_id', lastStaffId);
+        if (segment === 'last_service' && lastServiceId) {
+          params.set('last_service_kind', lastServiceKind);
+          params.set('last_service_id', lastServiceId);
+        }
         const res = await fetch(`/api/venue/guests?${params}`);
         const data = (await res.json()) as { guests?: GuestListRow[]; error?: string };
         if (!res.ok) {
@@ -611,7 +689,20 @@ export function ContactsDashboard({
     } finally {
       setExporting(false);
     }
-  }, [sort, filter, lifecycle, debouncedSearch, tagFilter, currency]);
+  }, [
+    sort,
+    filter,
+    segment,
+    dateFrom,
+    dateTo,
+    marketing,
+    lastStaffId,
+    lastServiceId,
+    lastServiceKind,
+    debouncedSearch,
+    tagFilter,
+    currency,
+  ]);
 
   const onEraseGuest = useCallback(
     async (guestId: string) => {
@@ -644,7 +735,14 @@ export function ContactsDashboard({
   );
 
   const totalPages = Math.max(1, Math.ceil(totalCount / limit));
-  const hasActiveFilters = Boolean(debouncedSearch || tagFilter.length || lifecycle !== 'all' || filter !== 'identified');
+  const hasActiveFilters = Boolean(
+    debouncedSearch ||
+      tagFilter.length ||
+      segment !== 'all' ||
+      filter !== 'identified' ||
+      dateFrom ||
+      dateTo,
+  );
 
   const displayName = (g: GuestListRow): string => {
     if (filter === 'anonymous' || g.identifiability_tier === 'anonymous') {
@@ -677,10 +775,10 @@ export function ContactsDashboard({
           <span className="text-slate-400">/</span>
           <span className="tabular-nums">{totalPages}</span>
         </span>
-        {lifecycle !== 'all' ? (
+        {segment !== 'all' ? (
           <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-slate-200/90 bg-slate-50 px-1.5 py-0.5 font-medium text-slate-800">
-            <span className="font-normal text-slate-500">Status</span>
-            <span>{CONTACTS_LIFECYCLE_OPTIONS.find((o) => o.value === lifecycle)?.label ?? lifecycle}</span>
+            <span className="font-normal text-slate-500">Filter</span>
+            <span>{CONTACTS_SEGMENT_OPTIONS.find((o) => o.value === segment)?.label ?? segment}</span>
           </span>
         ) : null}
         {filter !== 'identified' ? (
@@ -707,7 +805,7 @@ export function ContactsDashboard({
         ) : null}
       </div>
     ),
-    [totalCount, page, totalPages, lifecycle, filter, debouncedSearch, tagFilter.length],
+    [totalCount, page, totalPages, segment, filter, debouncedSearch, tagFilter.length],
   );
 
   const selectRowClass = (selected: boolean) =>
@@ -720,70 +818,310 @@ export function ContactsDashboard({
       <>
         <ContactsToolbarOptionPopover
           toolbarPanelAnchorRef={toolbarPanelAnchorRef}
-          triggerRef={showFilterTriggerRef}
-          triggerText={CONTACT_SHOW_OPTIONS.find((o) => o.value === filter)?.label ?? 'Show'}
-          panelHeading="Show"
-          open={filterPopoverKind === 'show'}
+          triggerRef={filterTriggerRef}
+          triggerText="Filter"
+          panelHeading="Filter contacts"
+          open={filterPopoverKind === 'filter'}
           onDismiss={() => setFilterPopoverKind('none')}
           onTriggerClick={() =>
-            setFilterPopoverKind((k) => (k === 'show' ? 'none' : 'show'))
+            setFilterPopoverKind((k) => (k === 'filter' ? 'none' : 'filter'))
           }
-          isDirty={filter !== 'identified'}
-          panelId={`${contactsToolbarPanelsId}-show`}
-          triggerAriaLabel="Show — CRM list scope"
+          isDirty={
+            filter !== 'identified' ||
+            segment !== 'all' ||
+            Boolean(dateFrom) ||
+            Boolean(dateTo)
+          }
+          panelId={`${contactsToolbarPanelsId}-filter`}
+          triggerAriaLabel="Filter contacts directory"
+          maxWidthPx={400}
         >
-          <div role="radiogroup" aria-label="List scope">
-            {CONTACT_SHOW_OPTIONS.map((o) => (
-              <button
-                key={o.value}
-                type="button"
-                role="radio"
-                aria-checked={filter === o.value}
-                onClick={() => {
-                  setFilter(o.value);
-                  setPage(0);
-                  setFilterPopoverKind('none');
-                }}
-                className={`flex w-full items-center rounded-lg px-2.5 py-2 text-left text-sm font-semibold ${selectRowClass(filter === o.value)}`}
-              >
-                {o.label}
-              </button>
-            ))}
-          </div>
-        </ContactsToolbarOptionPopover>
-        <ContactsToolbarOptionPopover
-          toolbarPanelAnchorRef={toolbarPanelAnchorRef}
-          triggerRef={statusFilterTriggerRef}
-          triggerText={
-            CONTACTS_LIFECYCLE_OPTIONS.find((o) => o.value === lifecycle)?.label ?? 'Status'
-          }
-          panelHeading="Status"
-          open={filterPopoverKind === 'status'}
-          onDismiss={() => setFilterPopoverKind('none')}
-          onTriggerClick={() =>
-            setFilterPopoverKind((k) => (k === 'status' ? 'none' : 'status'))
-          }
-          isDirty={lifecycle !== 'all'}
-          panelId={`${contactsToolbarPanelsId}-status`}
-          triggerAriaLabel="Status — lifecycle filter"
-        >
-          <div role="radiogroup" aria-label="Contact lifecycle">
-            {CONTACTS_LIFECYCLE_OPTIONS.map((o) => (
-              <button
-                key={o.value}
-                type="button"
-                role="radio"
-                aria-checked={lifecycle === o.value}
-                onClick={() => {
-                  setLifecycle(o.value);
-                  setPage(0);
-                  setFilterPopoverKind('none');
-                }}
-                className={`flex w-full items-center rounded-lg px-2.5 py-2 text-left text-sm font-semibold ${selectRowClass(lifecycle === o.value)}`}
-              >
-                {o.label}
-              </button>
-            ))}
+          <div className="max-h-[70vh] space-y-3 overflow-y-auto px-0.5 pb-1">
+            <div>
+              <p className="mb-1 px-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                Directory scope
+              </p>
+              <div role="radiogroup" aria-label="List scope" className="space-y-0.5">
+                {CONTACT_SHOW_OPTIONS.map((o) => (
+                  <button
+                    key={o.value}
+                    type="button"
+                    role="radio"
+                    aria-checked={filter === o.value}
+                    onClick={() => {
+                      setFilter(o.value);
+                      setPage(0);
+                    }}
+                    className={`flex w-full items-center rounded-lg px-2.5 py-2 text-left text-sm font-semibold ${selectRowClass(filter === o.value)}`}
+                  >
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="border-t border-slate-100 pt-2">
+              <p className="mb-1 px-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                Rule
+              </p>
+              <div role="radiogroup" aria-label="Contact filter" className="space-y-0.5">
+                {CONTACTS_SEGMENT_OPTIONS.map((o) => (
+                  <button
+                    key={o.value}
+                    type="button"
+                    role="radio"
+                    aria-checked={segment === o.value}
+                    onClick={() => {
+                      const next = o.value as ContactsSegment;
+                      setSegment(next);
+                      setPage(0);
+                      if (next !== 'last_staff') setLastStaffId(null);
+                      if (next !== 'last_service') setLastServiceId(null);
+                      if (next === 'all' || next === 'vip') {
+                        setDateFrom(null);
+                        setDateTo(null);
+                      }
+                    }}
+                    className={`flex w-full flex-col items-stretch rounded-lg px-2.5 py-2 text-left text-sm font-semibold ${selectRowClass(segment === o.value)}`}
+                  >
+                    <span>{o.label}</span>
+                    {o.description ? (
+                      <span className="mt-0.5 text-[11px] font-normal leading-snug text-slate-500">
+                        {o.description}
+                      </span>
+                    ) : null}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {segment === 'new' || segment === 'upcoming' || segment === 'visit' ? (
+              <div className="border-t border-slate-100 pt-2">
+                <p className="mb-1.5 px-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                  Date range
+                </p>
+                <div className="grid grid-cols-2 gap-2 px-2">
+                  <label className="block text-xs font-medium text-slate-700">
+                    <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                      From
+                    </span>
+                    <input
+                      type="date"
+                      value={dateFrom ?? ''}
+                      onChange={(e) => {
+                        setDateFrom(e.target.value ? e.target.value : null);
+                        setPage(0);
+                      }}
+                      className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
+                    />
+                  </label>
+                  <label className="block text-xs font-medium text-slate-700">
+                    <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                      To
+                    </span>
+                    <input
+                      type="date"
+                      value={dateTo ?? ''}
+                      onChange={(e) => {
+                        setDateTo(e.target.value ? e.target.value : null);
+                        setPage(0);
+                      }}
+                      className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
+                    />
+                  </label>
+                </div>
+                <p className="mt-1.5 px-2 text-[11px] leading-snug text-slate-500">
+                  {segment === 'new'
+                    ? 'Leave blank to use this calendar month through today.'
+                    : segment === 'upcoming'
+                      ? 'Leave blank to use today through one year ahead.'
+                      : 'Match last visit date. Leave both blank to include all contacts (no visit filter).'}
+                </p>
+              </div>
+            ) : null}
+
+            {segment === 'marketing' ? (
+              <div className="border-t border-slate-100 pt-2">
+                <p className="mb-1 px-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                  Consent
+                </p>
+                <div role="radiogroup" aria-label="Marketing consent" className="space-y-0.5 px-0.5">
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={marketing === 'subscribed'}
+                    onClick={() => {
+                      setMarketing('subscribed');
+                      setPage(0);
+                    }}
+                    className={`flex w-full items-center rounded-lg px-2.5 py-2 text-left text-sm font-semibold ${selectRowClass(marketing === 'subscribed')}`}
+                  >
+                    Subscribed
+                  </button>
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={marketing === 'not_subscribed'}
+                    onClick={() => {
+                      setMarketing('not_subscribed');
+                      setPage(0);
+                    }}
+                    className={`flex w-full items-center rounded-lg px-2.5 py-2 text-left text-sm font-semibold ${selectRowClass(marketing === 'not_subscribed')}`}
+                  >
+                    Not subscribed
+                  </button>
+                </div>
+                <p className="mb-1.5 mt-2 px-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                  Consent recorded (optional)
+                </p>
+                <div className="grid grid-cols-2 gap-2 px-2">
+                  <label className="block text-xs font-medium text-slate-700">
+                    <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                      From
+                    </span>
+                    <input
+                      type="date"
+                      value={dateFrom ?? ''}
+                      onChange={(e) => {
+                        setDateFrom(e.target.value ? e.target.value : null);
+                        setPage(0);
+                      }}
+                      className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
+                    />
+                  </label>
+                  <label className="block text-xs font-medium text-slate-700">
+                    <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                      To
+                    </span>
+                    <input
+                      type="date"
+                      value={dateTo ?? ''}
+                      onChange={(e) => {
+                        setDateTo(e.target.value ? e.target.value : null);
+                        setPage(0);
+                      }}
+                      className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
+                    />
+                  </label>
+                </div>
+              </div>
+            ) : null}
+
+            {segment === 'last_staff' ? (
+              <div className="border-t border-slate-100 pt-2">
+                <label className="block px-2">
+                  <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                    Staff column
+                  </span>
+                  <select
+                    value={lastStaffId ?? ''}
+                    onChange={(e) => {
+                      setLastStaffId(e.target.value ? e.target.value : null);
+                      setPage(0);
+                    }}
+                    className="w-full rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm"
+                  >
+                    <option value="">Select…</option>
+                    {rosterStaff.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <p className="mb-1.5 mt-2 px-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                  Last appointment date (optional)
+                </p>
+                <div className="grid grid-cols-2 gap-2 px-2">
+                  <label className="block text-xs font-medium text-slate-700">
+                    <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                      From
+                    </span>
+                    <input
+                      type="date"
+                      value={dateFrom ?? ''}
+                      onChange={(e) => {
+                        setDateFrom(e.target.value ? e.target.value : null);
+                        setPage(0);
+                      }}
+                      className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
+                    />
+                  </label>
+                  <label className="block text-xs font-medium text-slate-700">
+                    <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                      To
+                    </span>
+                    <input
+                      type="date"
+                      value={dateTo ?? ''}
+                      onChange={(e) => {
+                        setDateTo(e.target.value ? e.target.value : null);
+                        setPage(0);
+                      }}
+                      className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
+                    />
+                  </label>
+                </div>
+              </div>
+            ) : null}
+
+            {segment === 'last_service' ? (
+              <div className="border-t border-slate-100 pt-2">
+                <label className="block px-2">
+                  <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                    Service
+                  </span>
+                  <select
+                    value={lastServiceId ?? ''}
+                    onChange={(e) => {
+                      setLastServiceId(e.target.value ? e.target.value : null);
+                      setPage(0);
+                    }}
+                    className="w-full rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm"
+                  >
+                    <option value="">Select…</option>
+                    {venueServices.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <p className="mb-1.5 mt-2 px-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                  Last appointment date (optional)
+                </p>
+                <div className="grid grid-cols-2 gap-2 px-2">
+                  <label className="block text-xs font-medium text-slate-700">
+                    <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                      From
+                    </span>
+                    <input
+                      type="date"
+                      value={dateFrom ?? ''}
+                      onChange={(e) => {
+                        setDateFrom(e.target.value ? e.target.value : null);
+                        setPage(0);
+                      }}
+                      className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
+                    />
+                  </label>
+                  <label className="block text-xs font-medium text-slate-700">
+                    <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                      To
+                    </span>
+                    <input
+                      type="date"
+                      value={dateTo ?? ''}
+                      onChange={(e) => {
+                        setDateTo(e.target.value ? e.target.value : null);
+                        setPage(0);
+                      }}
+                      className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
+                    />
+                  </label>
+                </div>
+              </div>
+            ) : null}
           </div>
         </ContactsToolbarOptionPopover>
         <ContactsToolbarOptionPopover
@@ -823,13 +1161,17 @@ export function ContactsDashboard({
     ),
     [
       filter,
-      lifecycle,
+      segment,
       sort,
       filterPopoverKind,
       contactsToolbarPanelsId,
-      setFilter,
-      setLifecycle,
-      setSort,
+      dateFrom,
+      dateTo,
+      marketing,
+      lastStaffId,
+      lastServiceId,
+      rosterStaff,
+      venueServices,
     ],
   );
 

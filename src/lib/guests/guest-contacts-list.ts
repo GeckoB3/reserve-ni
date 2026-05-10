@@ -7,18 +7,40 @@ import type { VenueStaff } from '@/lib/venue-auth';
 
 export const UPCOMING_BOOKING_STATUSES = ['Pending', 'Booked', 'Confirmed', 'Seated'] as const;
 
-export type ContactsLifecycleStatus = 'all' | 'upcoming' | 'lapsed' | 'new_this_month' | 'vip';
+export type ContactsSegment =
+  | 'all'
+  | 'new'
+  | 'upcoming'
+  | 'visit'
+  | 'marketing'
+  | 'last_staff'
+  | 'last_service'
+  | 'vip';
+
+export type ContactsMarketingFilter = 'subscribed' | 'not_subscribed';
+
+export type LastServiceKind = 'appointment_service' | 'service_item';
 
 export interface ParsedGuestListQuery {
   search: string;
   tags: string[];
   sort: string;
   filter: 'all' | 'identified' | 'anonymous';
-  lifecycle: ContactsLifecycleStatus;
+  /** Directory segment (replaces legacy `status` when `segment` query param is sent). */
+  segment: ContactsSegment;
+  /** Inclusive YYYY-MM-DD (venue calendar interpretation for guest fields / booking_date). */
+  date_from: string | null;
+  date_to: string | null;
+  marketing: ContactsMarketingFilter | null;
+  last_staff_id: string | null;
+  last_service_kind: LastServiceKind | null;
+  last_service_id: string | null;
   page: number;
   limit: number;
   /** When true, list rows include `custom_fields` JSON (heavier payload; used for CSV export). */
   include_custom_fields: boolean;
+  /** Legacy `status` query key preserved for deep links; mapped into `segment` when `segment` absent. */
+  legacy_status: string | null;
 }
 
 const INTERNAL_SORTS = new Set([
@@ -41,7 +63,41 @@ const SORT_ALIASES: Record<string, string> = {
 };
 
 const FILTERS = new Set(['all', 'identified', 'anonymous']);
-const LIFECYCLES = new Set<ContactsLifecycleStatus>(['all', 'upcoming', 'lapsed', 'new_this_month', 'vip']);
+const SEGMENTS = new Set<ContactsSegment>([
+  'all',
+  'new',
+  'upcoming',
+  'visit',
+  'marketing',
+  'last_staff',
+  'last_service',
+  'vip',
+]);
+const LEGACY_STATUS_MAP: Record<string, ContactsSegment> = {
+  upcoming: 'upcoming',
+  lapsed: 'visit',
+  new_this_month: 'new',
+  vip: 'vip',
+  all: 'all',
+};
+
+function parseOptionalISODate(raw: string | null | undefined): string | null {
+  if (!raw || typeof raw !== 'string') return null;
+  const t = raw.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(t)) return null;
+  return t;
+}
+
+function parseUuid(raw: string | null | undefined): string | null {
+  if (!raw || typeof raw !== 'string') return null;
+  const t = raw.trim().toLowerCase();
+  if (
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(t)
+  ) {
+    return null;
+  }
+  return t;
+}
 
 export function sanitiseIlikeSearch(raw: string): string {
   return raw.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_').replace(/,/g, '');
@@ -66,17 +122,59 @@ export function parseGuestListQuery(sp: URLSearchParams): ParsedGuestListQuery {
   const sort = resolveGuestListSort(sp.get('sort'));
   const filterRaw = (sp.get('filter') ?? 'identified').trim().toLowerCase();
   const filter = FILTERS.has(filterRaw) ? (filterRaw as ParsedGuestListQuery['filter']) : 'identified';
-  const lifeRaw = (sp.get('status') ?? 'all').trim().toLowerCase();
-  const lifecycle = LIFECYCLES.has(lifeRaw as ContactsLifecycleStatus)
-    ? (lifeRaw as ContactsLifecycleStatus)
-    : 'all';
+
+  const segmentRaw = sp.get('segment')?.trim().toLowerCase() ?? '';
+  const legacyStatusRaw = (sp.get('status') ?? 'all').trim().toLowerCase();
+
+  let segment: ContactsSegment = 'all';
+  if (segmentRaw && SEGMENTS.has(segmentRaw as ContactsSegment)) {
+    segment = segmentRaw as ContactsSegment;
+  } else if (LEGACY_STATUS_MAP[legacyStatusRaw]) {
+    segment = LEGACY_STATUS_MAP[legacyStatusRaw];
+  }
+
+  const date_from = parseOptionalISODate(sp.get('date_from'));
+  const date_to = parseOptionalISODate(sp.get('date_to'));
+
+  const marketingRaw = sp.get('marketing')?.trim().toLowerCase() ?? '';
+  let marketing: ContactsMarketingFilter | null =
+    marketingRaw === 'subscribed' || marketingRaw === 'not_subscribed' ? marketingRaw : null;
+
+  const last_staff_id = parseUuid(sp.get('last_staff_id'));
+
+  const lskRaw = sp.get('last_service_kind')?.trim().toLowerCase() ?? '';
+  const last_service_kind: LastServiceKind | null =
+    lskRaw === 'appointment_service' || lskRaw === 'service_item' ? lskRaw : null;
+  const last_service_id = parseUuid(sp.get('last_service_id'));
+
   const pageRaw = Number.parseInt(sp.get('page') ?? '0', 10);
   const page = Number.isFinite(pageRaw) && pageRaw >= 0 ? pageRaw : 0;
   const limitRaw = Number.parseInt(sp.get('limit') ?? '25', 10) || 25;
   const limit = Math.min(50, Math.max(1, limitRaw));
   const icf = sp.get('include_custom_fields');
   const include_custom_fields = icf === '1' || icf === 'true';
-  return { search, tags, sort, filter, lifecycle, page, limit, include_custom_fields };
+
+  if (segment === 'marketing' && !marketing) {
+    marketing = 'subscribed';
+  }
+
+  return {
+    search,
+    tags,
+    sort,
+    filter,
+    segment,
+    date_from,
+    date_to,
+    marketing,
+    last_staff_id,
+    last_service_kind,
+    last_service_id,
+    page,
+    limit,
+    include_custom_fields,
+    legacy_status: legacyStatusRaw,
+  };
 }
 
 export async function getVenueTimeZone(db: SupabaseClient, venueId: string): Promise<string> {
@@ -114,6 +212,138 @@ export function addDaysCalendarDate(calendarDate: string, deltaDays: number): st
   return `${yy}-${mm}-${dd}`;
 }
 
+/** Default and legacy-bound calendar dates for segment filters (inclusive YYYY-MM-DD). */
+export function resolveContactsSegmentDates(
+  segment: ContactsSegment,
+  date_from: string | null,
+  date_to: string | null,
+  today: string,
+  monthStart: string,
+  legacy_status: string | null,
+): { from: string | null; to: string | null } {
+  if (segment === 'new') {
+    return { from: date_from ?? monthStart, to: date_to ?? today };
+  }
+  if (segment === 'upcoming') {
+    return {
+      from: date_from ?? today,
+      to: date_to ?? addDaysCalendarDate(today, 365),
+    };
+  }
+  if (segment === 'visit') {
+    if (!date_from && !date_to && legacy_status === 'lapsed') {
+      return { from: null, to: addDaysCalendarDate(today, -90) };
+    }
+    return { from: date_from, to: date_to };
+  }
+  if (segment === 'marketing' || segment === 'last_staff' || segment === 'last_service') {
+    return { from: date_from, to: date_to };
+  }
+  return { from: null, to: null };
+}
+
+/** Chain subset used for guest list queries (PostgrestFilterBuilder-compatible). */
+export interface GuestFilterChain<Self> {
+  gte(column: string, value: string): Self;
+  lte(column: string, value: string): Self;
+  not(column: string, operator: string, value: unknown): Self;
+  eq(column: string, value: unknown): Self;
+  contains(column: string, value: string[]): Self;
+  in(column: string, values: string[]): Self;
+}
+
+/**
+ * Applies `segment` filters that live on `guests` only.
+ * Skip upcoming / last_staff / last_service (handled via id lists / special branches).
+ */
+export function applyGuestsDirectorySegment<Self extends GuestFilterChain<Self>>(
+  q: Self,
+  params: ParsedGuestListQuery,
+  today: string,
+  monthStart: string,
+): Self {
+  const bounds = resolveContactsSegmentDates(
+    params.segment,
+    params.date_from,
+    params.date_to,
+    today,
+    monthStart,
+    params.legacy_status,
+  );
+
+  switch (params.segment) {
+    case 'all':
+      return q;
+    case 'new': {
+      const from = bounds.from ?? monthStart;
+      const to = bounds.to ?? today;
+      return q.gte('created_at', `${from}T00:00:00`).lte('created_at', `${to}T23:59:59.999`);
+    }
+    case 'visit': {
+      if (bounds.from && bounds.to) {
+        return q.not('last_visit_date', 'is', null).gte('last_visit_date', bounds.from).lte('last_visit_date', bounds.to);
+      }
+      if (bounds.to) {
+        return q.not('last_visit_date', 'is', null).lte('last_visit_date', bounds.to);
+      }
+      if (bounds.from) {
+        return q.not('last_visit_date', 'is', null).gte('last_visit_date', bounds.from);
+      }
+      return q;
+    }
+    case 'marketing': {
+      let out: Self = q;
+      if (params.marketing === 'subscribed') {
+        out = out.eq('marketing_consent', true) as Self;
+      } else if (params.marketing === 'not_subscribed') {
+        out = out.eq('marketing_consent', false) as Self;
+      }
+      if (bounds.from) {
+        out = out.gte('marketing_consent_at', `${bounds.from}T00:00:00`) as Self;
+      }
+      if (bounds.to) {
+        out = out.lte('marketing_consent_at', `${bounds.to}T23:59:59.999`) as Self;
+      }
+      return out;
+    }
+    case 'vip':
+      return q.contains('tags', ['vip']) as Self;
+    case 'upcoming':
+    case 'last_staff':
+    case 'last_service':
+      return q;
+    default:
+      return q;
+  }
+}
+
+export async function fetchContactsLatestBookingMatchGuestIds(
+  db: SupabaseClient,
+  venueId: string,
+  args: {
+    staffColumnId: string | null;
+    appointmentServiceId: string | null;
+    serviceItemId: string | null;
+    bookingDateFrom: string | null;
+    bookingDateTo: string | null;
+  },
+): Promise<string[]> {
+  const { data, error } = await db.rpc('contacts_filter_guest_ids_latest_booking_match', {
+    p_venue_id: venueId,
+    p_staff_column_id: args.staffColumnId,
+    p_appointment_service_id: args.appointmentServiceId,
+    p_service_item_id: args.serviceItemId,
+    p_booking_date_from: args.bookingDateFrom,
+    p_booking_date_to: args.bookingDateTo,
+  });
+  if (error) {
+    console.error('[guest-contacts-list] contacts_filter_guest_ids_latest_booking_match failed:', error.message);
+    return [];
+  }
+  const rows = (data ?? []) as unknown as { guest_id?: string }[];
+  return rows.map((r) => r.guest_id).filter((id): id is string => typeof id === 'string' && id.length > 0);
+}
+
 export interface GuestRowBase {
   id: string;
   first_name: string | null;
@@ -135,6 +365,7 @@ export async function fetchUpcomingGuestIdsOrdered(
   db: SupabaseClient,
   venueId: string,
   fromDate: string,
+  toDate: string,
 ): Promise<string[]> {
   const { data, error } = await db
     .from('bookings')
@@ -142,6 +373,7 @@ export async function fetchUpcomingGuestIdsOrdered(
     .eq('venue_id', venueId)
     .not('guest_id', 'is', null)
     .gte('booking_date', fromDate)
+    .lte('booking_date', toDate)
     .in('status', [...UPCOMING_BOOKING_STATUSES]);
 
   if (error) {
@@ -260,24 +492,52 @@ export async function fetchGuestIdsForSpendSort(
 
   if (params.search) {
     const p = `%${params.search}%`;
-    q = q.or(`name.ilike.${p},email.ilike.${p},phone.ilike.${p}`);
+    q = q.or(`first_name.ilike.${p},last_name.ilike.${p},email.ilike.${p},phone.ilike.${p}`);
   }
 
   const today = calendarDateInTimeZone(new Date(), timeZone);
   const monthStart = monthStartCalendarDateInTimeZone(new Date(), timeZone);
-  const lapsedCut = addDaysCalendarDate(today, -90);
+  const bounds = resolveContactsSegmentDates(
+    params.segment,
+    params.date_from,
+    params.date_to,
+    today,
+    monthStart,
+    params.legacy_status,
+  );
 
-  if (params.lifecycle === 'upcoming') {
-    const orderedRaw = await fetchUpcomingGuestIdsOrdered(staff.db, staff.venue_id, today);
+  if (params.segment === 'upcoming') {
+    const fromD = bounds.from ?? today;
+    const toD = bounds.to ?? addDaysCalendarDate(today, 365);
+    const orderedRaw = await fetchUpcomingGuestIdsOrdered(staff.db, staff.venue_id, fromD, toD);
     const ordered = orderedRaw.slice(0, 500);
     if (ordered.length === 0) return { ids: [], capped: orderedRaw.length > 500 };
     q = q.in('id', ordered);
-  } else if (params.lifecycle === 'lapsed') {
-    q = q.not('last_visit_date', 'is', null).lte('last_visit_date', lapsedCut);
-  } else if (params.lifecycle === 'new_this_month') {
-    q = q.gte('created_at', `${monthStart}T00:00:00`);
-  } else if (params.lifecycle === 'vip') {
-    q = q.contains('tags', ['vip']);
+  } else if (params.segment === 'last_staff') {
+    if (!params.last_staff_id) return { ids: [], capped: false };
+    const segIds = await fetchContactsLatestBookingMatchGuestIds(staff.db, staff.venue_id, {
+      staffColumnId: params.last_staff_id,
+      appointmentServiceId: null,
+      serviceItemId: null,
+      bookingDateFrom: bounds.from,
+      bookingDateTo: bounds.to,
+    });
+    if (segIds.length === 0) return { ids: [], capped: false };
+    q = q.in('id', segIds);
+  } else if (params.segment === 'last_service') {
+    if (!params.last_service_kind || !params.last_service_id) return { ids: [], capped: false };
+    const segIds = await fetchContactsLatestBookingMatchGuestIds(staff.db, staff.venue_id, {
+      staffColumnId: null,
+      appointmentServiceId:
+        params.last_service_kind === 'appointment_service' ? params.last_service_id : null,
+      serviceItemId: params.last_service_kind === 'service_item' ? params.last_service_id : null,
+      bookingDateFrom: bounds.from,
+      bookingDateTo: bounds.to,
+    });
+    if (segIds.length === 0) return { ids: [], capped: false };
+    q = q.in('id', segIds);
+  } else {
+    q = applyGuestsDirectorySegment(q, params, today, monthStart);
   }
 
   const { data, error } = await q.limit(SPEND_SORT_MAX_IDS + 1);
