@@ -11,10 +11,10 @@ import {
 import { staffMayManageClassTypeSessions } from '@/lib/class-instances/class-staff-scope';
 import { DEFAULT_ENTITY_BOOKING_WINDOW } from '@/lib/booking/entity-booking-window';
 import {
+  buildUpcomingBookingsBlockMessage,
   hasActiveBookingsForClassInstance,
   hasUpcomingActiveBookingsForClassTimetableEntry,
   hasUpcomingActiveBookingsForClassType,
-  UPCOMING_ACTIVE_BOOKINGS_BLOCK_DELETE,
 } from '@/lib/venue/entity-delete-booking-guards';
 import { z } from 'zod';
 
@@ -721,7 +721,13 @@ export async function DELETE(request: NextRequest) {
         return NextResponse.json({ error: instGuard.error }, { status: 500 });
       }
       if (instGuard.blocked) {
-        return NextResponse.json({ error: UPCOMING_ACTIVE_BOOKINGS_BLOCK_DELETE }, { status: 409 });
+        return NextResponse.json(
+          {
+            error: buildUpcomingBookingsBlockMessage('class_session', instGuard.bookingCount),
+            booking_count: instGuard.bookingCount,
+          },
+          { status: 409 },
+        );
       }
       const { error } = await admin.from('class_instances').delete().eq('id', id);
       if (error) {
@@ -769,7 +775,13 @@ export async function DELETE(request: NextRequest) {
         return NextResponse.json({ error: ttGuard.error }, { status: 500 });
       }
       if (ttGuard.blocked) {
-        return NextResponse.json({ error: UPCOMING_ACTIVE_BOOKINGS_BLOCK_DELETE }, { status: 409 });
+        return NextResponse.json(
+          {
+            error: buildUpcomingBookingsBlockMessage('class_schedule', ttGuard.bookingCount),
+            booking_count: ttGuard.bookingCount,
+          },
+          { status: 409 },
+        );
       }
       const { error } = await admin.from('class_timetable').delete().eq('id', id);
       if (error) {
@@ -795,7 +807,13 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: typeGuard.error }, { status: 500 });
     }
     if (typeGuard.blocked) {
-      return NextResponse.json({ error: UPCOMING_ACTIVE_BOOKINGS_BLOCK_DELETE }, { status: 409 });
+      return NextResponse.json(
+        {
+          error: buildUpcomingBookingsBlockMessage('class', typeGuard.bookingCount),
+          booking_count: typeGuard.bookingCount,
+        },
+        { status: 409 },
+      );
     }
 
     const { error } = await admin.from('class_types').delete().eq('id', id).eq('venue_id', staff.venue_id);

@@ -21,8 +21,8 @@ import {
   DEFAULT_RESOURCE_SLOT_INTERVAL_MINUTES,
 } from '@/lib/booking/resource-booking-defaults';
 import {
+  buildUpcomingBookingsBlockMessage,
   hasUpcomingActiveBookingsForVenueResource,
-  UPCOMING_ACTIVE_BOOKINGS_BLOCK_DELETE,
 } from '@/lib/venue/entity-delete-booking-guards';
 import { z } from 'zod';
 
@@ -685,7 +685,13 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: bookingGuard.error }, { status: 500 });
     }
     if (bookingGuard.blocked) {
-      return NextResponse.json({ error: UPCOMING_ACTIVE_BOOKINGS_BLOCK_DELETE }, { status: 409 });
+      return NextResponse.json(
+        {
+          error: buildUpcomingBookingsBlockMessage('resource', bookingGuard.bookingCount),
+          booking_count: bookingGuard.bookingCount,
+        },
+        { status: 409 },
+      );
     }
 
     const { error } = await admin

@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { BOOKING_ACTIVE_STATUSES } from '@/lib/table-management/constants';
 import { normalizeTimeForDb, validateMergedEventTimes } from '@/lib/experience-events/experience-event-validation';
+import { buildUpcomingBookingsBlockMessage } from '@/lib/venue/entity-delete-booking-guards';
 
 export { normalizeTimeForDb, validateStartEndTimes } from '@/lib/experience-events/experience-event-validation';
 
@@ -41,8 +42,7 @@ export async function assertExperienceEventDeletable(
   if (n > 0) {
     return {
       ok: false,
-      error:
-        'There are upcoming active bookings for this event. Cancel or reschedule those bookings before deleting the event.',
+      error: buildUpcomingBookingsBlockMessage('event', n),
       booking_count: n,
     };
   }
@@ -62,10 +62,10 @@ export async function assertExperienceEventCalendarClearable(
     return { ok: false, error: 'Could not verify bookings for this event.' };
   }
   if (n > 0) {
+    const noun = n === 1 ? 'upcoming active booking' : 'upcoming active bookings';
     return {
       ok: false,
-      error:
-        'There are upcoming active bookings for this event. Cancel or resolve those bookings before removing the event from the calendar.',
+      error: `Can't remove this event from the calendar: there ${n === 1 ? 'is' : 'are'} ${n} ${noun} linked to it. Cancel or resolve ${n === 1 ? 'it' : 'them'} first, then try again.`,
     };
   }
   return { ok: true };

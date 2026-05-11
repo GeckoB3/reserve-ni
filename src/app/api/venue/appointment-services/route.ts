@@ -12,9 +12,9 @@ import {
   SERVICE_REMOVAL_BLOCKED_BY_BOOKINGS,
 } from '@/lib/venue/service-calendar-removal';
 import {
+  buildUpcomingBookingsBlockMessage,
   hasUpcomingActiveBookingsForVenueAppointmentService,
   hasUpcomingActiveBookingsForVenueServiceItem,
-  UPCOMING_ACTIVE_BOOKINGS_BLOCK_DELETE,
 } from '@/lib/venue/entity-delete-booking-guards';
 import { z } from 'zod';
 import type { ClassPaymentRequirement, PractitionerService, ServiceCustomScheduleStored } from '@/types/booking-models';
@@ -585,6 +585,7 @@ export async function POST(request: NextRequest) {
       const staffMayAllTrue = staff.role !== 'admin';
       const insertRow = {
         venue_id: staff.venue_id,
+        created_by_staff_id: staff.id,
         name: parsed.data.name,
         description: parsed.data.description ?? null,
         item_type: 'service' as const,
@@ -675,6 +676,7 @@ export async function POST(request: NextRequest) {
     const { payment_requirement: _pr0, deposit_pence: _dp0, ...restCreate } = parsed.data;
     const insertRow = {
       venue_id: staff.venue_id,
+      created_by_staff_id: staff.id,
       ...restCreate,
       buffer_minutes: parsed.data.buffer_minutes ?? 0,
       processing_time_blocks: normalizedParentProcessing,
@@ -798,6 +800,16 @@ export async function PATCH(request: NextRequest) {
 
       if (serviceErr || !serviceRow) {
         return NextResponse.json({ error: 'Service not found' }, { status: 404 });
+      }
+
+      if (staff.role !== 'admin') {
+        const creatorId = (serviceRow as { created_by_staff_id?: string | null }).created_by_staff_id ?? null;
+        if (creatorId !== staff.id) {
+          return NextResponse.json(
+            { error: 'Only the team member who created this service can change its definition.' },
+            { status: 403 },
+          );
+        }
       }
 
       const customCoherent = assertPatchCustomAvailabilityCoherent({
@@ -1004,6 +1016,16 @@ export async function PATCH(request: NextRequest) {
 
     if (serviceErr || !serviceRow) {
       return NextResponse.json({ error: 'Service not found' }, { status: 404 });
+    }
+
+    if (staff.role !== 'admin') {
+      const creatorId = (serviceRow as { created_by_staff_id?: string | null }).created_by_staff_id ?? null;
+      if (creatorId !== staff.id) {
+        return NextResponse.json(
+          { error: 'Only the team member who created this service can change its definition.' },
+          { status: 403 },
+        );
+      }
     }
 
     const legacyCustomCoherent = assertPatchCustomAvailabilityCoherent({
@@ -1215,43 +1237,65 @@ export async function DELETE(request: NextRequest) {
     const admin = getSupabaseAdminClient();
     const useUnified = await venueUsesUnifiedServiceItems(admin, staff.venue_id);
 
+    let createdByStaffId: string | null | undefined;
+
     if (useUnified) {
       const { data: row } = await admin
         .from('service_items')
-        .select('id')
+        .select('id, created_by_staff_id')
         .eq('id', id)
         .eq('venue_id', staff.venue_id)
         .maybeSingle();
       if (!row) {
         return NextResponse.json({ error: 'Service not found' }, { status: 404 });
       }
+      createdByStaffId = (row as { created_by_staff_id?: string | null }).created_by_staff_id ?? null;
       const venueGuard = await hasUpcomingActiveBookingsForVenueServiceItem(admin, staff.venue_id, id);
       if (venueGuard.error) {
         return NextResponse.json({ error: venueGuard.error }, { status: 500 });
       }
       if (venueGuard.blocked) {
-        return NextResponse.json({ error: UPCOMING_ACTIVE_BOOKINGS_BLOCK_DELETE }, { status: 409 });
+        return NextResponse.json(
+          {
+            error: buildUpcomingBookingsBlockMessage('service', venueGuard.bookingCount),
+            booking_count: venueGuard.bookingCount,
+          },
+          { status: 409 },
+        );
       }
     } else {
       const { data: row } = await admin
         .from('appointment_services')
-        .select('id')
+        .select('id, created_by_staff_id')
         .eq('id', id)
         .eq('venue_id', staff.venue_id)
         .maybeSingle();
       if (!row) {
         return NextResponse.json({ error: 'Service not found' }, { status: 404 });
       }
+      createdByStaffId = (row as { created_by_staff_id?: string | null }).created_by_staff_id ?? null;
       const venueGuard = await hasUpcomingActiveBookingsForVenueAppointmentService(admin, staff.venue_id, id);
       if (venueGuard.error) {
         return NextResponse.json({ error: venueGuard.error }, { status: 500 });
       }
       if (venueGuard.blocked) {
-        return NextResponse.json({ error: UPCOMING_ACTIVE_BOOKINGS_BLOCK_DELETE }, { status: 409 });
+        return NextResponse.json(
+          {
+            error: buildUpcomingBookingsBlockMessage('service', venueGuard.bookingCount),
+            booking_count: venueGuard.bookingCount,
+          },
+          { status: 409 },
+        );
       }
     }
 
     if (staff.role !== 'admin') {
+      if ((createdByStaffId ?? null) !== staff.id) {
+        return NextResponse.json(
+          { error: 'Only the team member who created this service can delete it.' },
+          { status: 403 },
+        );
+      }
       const scope = await requireManagedCalendarIds(admin, staff.venue_id, staff);
       if (!scope.ok) {
         return NextResponse.json({ error: scope.error }, { status: 403 });

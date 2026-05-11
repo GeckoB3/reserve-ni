@@ -43,6 +43,8 @@ import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 
 interface Service {
   id: string;
+  /** Staff row id of the creator; non-admins may edit/delete only when this matches their staff id. */
+  created_by_staff_id?: string | null;
   name: string;
   description: string | null;
   duration_minutes: number;
@@ -116,11 +118,14 @@ function poundsToPence(pounds: string): number | null {
 
 export function AppointmentServicesView({
   isAdmin,
+  currentStaffId,
   linkedPractitionerIds = [],
   currency = 'GBP',
   stripeConnected = false,
 }: {
   isAdmin: boolean;
+  /** Logged-in venue staff id (for creator checks when `isAdmin` is false). */
+  currentStaffId?: string | null;
   /** Bookable calendars (`unified_calendars.id`) this staff user manages. */
   linkedPractitionerIds?: string[];
   currency?: string;
@@ -153,6 +158,7 @@ export function AppointmentServicesView({
   const [addCalendarModalError, setAddCalendarModalError] = useState<string | null>(null);
   const [serviceToDelete, setServiceToDelete] = useState<{ id: string; name: string } | null>(null);
   const [deleteServiceBusy, setDeleteServiceBusy] = useState(false);
+  const [deleteServiceModalError, setDeleteServiceModalError] = useState<string | null>(null);
   const [venueOpeningHours, setVenueOpeningHours] = useState<OpeningHours | null>(null);
   const [venueOpeningExceptions, setVenueOpeningExceptions] = useState<VenueOpeningException[]>([]);
 
@@ -611,7 +617,7 @@ export function AppointmentServicesView({
   async function confirmDeleteService() {
     if (!serviceToDelete) return;
     setDeleteServiceBusy(true);
-    setError(null);
+    setDeleteServiceModalError(null);
     try {
       const res = await fetch('/api/venue/appointment-services', {
         method: 'DELETE',
@@ -619,16 +625,22 @@ export function AppointmentServicesView({
         body: JSON.stringify({ id: serviceToDelete.id }),
       });
       if (!res.ok) {
-        setError('Failed to delete service. Please try again.');
+        const json = (await res.json().catch(() => ({}))) as { error?: string };
+        setDeleteServiceModalError(json.error ?? 'Failed to delete service. Please try again.');
         return;
       }
       await fetchAll();
       setServiceToDelete(null);
     } catch {
-      setError('Failed to delete service. Please try again.');
+      setDeleteServiceModalError('Failed to delete service. Please try again.');
     } finally {
       setDeleteServiceBusy(false);
     }
+  }
+
+  function closeDeleteServiceModal() {
+    setServiceToDelete(null);
+    setDeleteServiceModalError(null);
   }
 
   function toggleCalendarLink(calendarId: string) {
@@ -867,12 +879,15 @@ export function AppointmentServicesView({
                       )}
                     </div>
 
-                  {(isAdmin || linkedPractitionerIds.length > 0) && (
+                  {(isAdmin ||
+                    (linkedPractitionerIds.length > 0 &&
+                      Boolean(currentStaffId) &&
+                      svc.created_by_staff_id === currentStaffId)) && (
                     <div className="flex flex-shrink-0 items-center sm:pt-1">
                       <DashboardEntityRowActions
                         onEdit={() => openEdit(svc)}
                         onDelete={() => {
-                          setError(null);
+                          setDeleteServiceModalError(null);
                           setServiceToDelete({ id: svc.id, name: svc.name });
                         }}
                       />
@@ -1124,7 +1139,7 @@ export function AppointmentServicesView({
         <div
           className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/25 p-4 backdrop-blur-[2px]"
           onClick={() => {
-            if (!deleteServiceBusy) setServiceToDelete(null);
+            if (!deleteServiceBusy) closeDeleteServiceModal();
           }}
         >
           <div
@@ -1142,18 +1157,18 @@ export function AppointmentServicesView({
               <span className="font-medium text-slate-800">{serviceToDelete.name}</span> will be removed. Calendar
               links to this service will be cleared. This cannot be undone.
             </p>
-            {error ? (
+            {deleteServiceModalError ? (
               <div
                 role="alert"
                 className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"
               >
-                {error}
+                {deleteServiceModalError}
               </div>
             ) : null}
             <div className="mt-6 flex flex-wrap justify-end gap-2">
               <button
                 type="button"
-                onClick={() => setServiceToDelete(null)}
+                onClick={closeDeleteServiceModal}
                 disabled={deleteServiceBusy}
                 className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
               >

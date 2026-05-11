@@ -557,12 +557,8 @@ export function EventManagerView({
         body: JSON.stringify({ id: target.id }),
       });
       if (!res.ok) {
-        const json = (await res.json()) as { error?: string; booking_count?: number };
-        const msg =
-          res.status === 409 && json.booking_count
-            ? `${json.error ?? 'Cannot delete this event'} (${json.booking_count} booking(s))`
-            : (json.error ?? 'Delete failed');
-        setDeleteEventModalError(msg);
+        const json = (await res.json().catch(() => ({}))) as { error?: string };
+        setDeleteEventModalError(json.error ?? 'Delete failed');
         return;
       }
       setEventToDelete(null);

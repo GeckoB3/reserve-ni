@@ -5,6 +5,10 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { z } from 'zod';
 import { detectOverlaps, formatOverlapWarning } from '@/lib/service-overlap';
 import { ensureDefaultDiningAreaForVenue } from '@/lib/areas/resolve-default-area';
+import {
+  buildUpcomingBookingsBlockMessage,
+  hasUpcomingActiveBookingsForVenueService,
+} from '@/lib/venue/entity-delete-booking-guards';
 
 const serviceSchema = z.object({
   name: z.string().min(1).max(100),
@@ -152,6 +156,21 @@ export async function DELETE(request: NextRequest) {
     if (!body.id) return NextResponse.json({ error: 'Missing service id' }, { status: 400 });
 
     const admin = getSupabaseAdminClient();
+
+    const guard = await hasUpcomingActiveBookingsForVenueService(admin, staff.venue_id, body.id);
+    if (guard.error) {
+      return NextResponse.json({ error: guard.error }, { status: 500 });
+    }
+    if (guard.blocked) {
+      return NextResponse.json(
+        {
+          error: buildUpcomingBookingsBlockMessage('service', guard.bookingCount),
+          booking_count: guard.bookingCount,
+        },
+        { status: 409 },
+      );
+    }
+
     const { error } = await admin
       .from('venue_services')
       .delete()

@@ -232,7 +232,18 @@ export function ServiceSettingsWorkspace({ services, setServices, selectedAreaId
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id }),
       });
-      if (!res.ok) throw new Error();
+      if (!res.ok) {
+        const json = (await res.json().catch(() => ({}))) as { error?: string };
+        const message = json.error ?? 'Failed to delete service';
+        // Use a blocking alert when the server gave a specific reason (e.g. upcoming bookings) so
+        // the operator definitely sees why; toasts auto-dismiss too quickly for a multi-line cause.
+        if (res.status === 409 && json.error) {
+          window.alert(message);
+        } else {
+          showToast(message);
+        }
+        return;
+      }
       setServices(services.filter((s) => s.id !== id));
       setRules((r) => r.filter((x) => x.service_id !== id));
       setDurations((d) => d.filter((x) => x.service_id !== id));
