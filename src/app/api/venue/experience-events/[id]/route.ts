@@ -8,6 +8,7 @@ import {
   assertExperienceEventDeletable,
   resolveExperienceEventPatch,
 } from '@/lib/experience-events/experience-event-guards';
+import { buildEntityNotFoundMessage } from '@/lib/venue/entity-delete-booking-guards';
 import { z } from 'zod';
 import { zExperienceEventDescription, zExperienceEventHhMm } from '@/lib/experience-events/experience-event-zod';
 
@@ -175,6 +176,26 @@ export async function DELETE(
 
     const { id } = await params;
 
+    const { data: existing, error: lookupErr } = await admin
+      .from('experience_events')
+      .select('id')
+      .eq('id', id)
+      .eq('venue_id', staff.venue_id)
+      .maybeSingle();
+    if (lookupErr) {
+      console.error('DELETE /api/venue/experience-events/[id] lookup:', lookupErr);
+      return NextResponse.json(
+        { error: 'Could not verify the event. Please try again.' },
+        { status: 500 },
+      );
+    }
+    if (!existing) {
+      return NextResponse.json(
+        { error: buildEntityNotFoundMessage('event') },
+        { status: 404 },
+      );
+    }
+
     const canDelete = await assertExperienceEventDeletable(admin, staff.venue_id, id);
     if (!canDelete.ok) {
       return NextResponse.json(
@@ -191,7 +212,10 @@ export async function DELETE(
 
     if (error) {
       console.error('DELETE /api/venue/experience-events/[id] failed:', error);
-      return NextResponse.json({ error: 'Failed to delete event' }, { status: 500 });
+      return NextResponse.json(
+        { error: 'Failed to delete the event. Please try again.' },
+        { status: 500 },
+      );
     }
 
     return NextResponse.json({ success: true });

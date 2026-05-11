@@ -11,6 +11,7 @@ import {
 import { staffMayManageClassTypeSessions } from '@/lib/class-instances/class-staff-scope';
 import { DEFAULT_ENTITY_BOOKING_WINDOW } from '@/lib/booking/entity-booking-window';
 import {
+  buildEntityNotFoundMessage,
   buildUpcomingBookingsBlockMessage,
   hasActiveBookingsForClassInstance,
   hasUpcomingActiveBookingsForClassTimetableEntry,
@@ -691,10 +692,16 @@ export async function DELETE(request: NextRequest) {
         .maybeSingle();
       if (instErr) {
         console.error('DELETE /api/venue/classes (instance) lookup failed:', instErr);
-        return NextResponse.json({ error: 'Failed to delete' }, { status: 500 });
+        return NextResponse.json(
+          { error: 'Could not verify the session. Please try again.' },
+          { status: 500 },
+        );
       }
       if (!inst) {
-        return NextResponse.json({ error: 'Session not found' }, { status: 404 });
+        return NextResponse.json(
+          { error: buildEntityNotFoundMessage('class_session') },
+          { status: 404 },
+        );
       }
       const { data: ct, error: ctErr } = await admin
         .from('class_types')
@@ -702,8 +709,18 @@ export async function DELETE(request: NextRequest) {
         .eq('id', (inst as { class_type_id: string }).class_type_id)
         .eq('venue_id', staff.venue_id)
         .maybeSingle();
-      if (ctErr || !ct) {
-        return NextResponse.json({ error: 'Forbidden or not found' }, { status: 404 });
+      if (ctErr) {
+        console.error('DELETE /api/venue/classes (instance class_type) lookup failed:', ctErr);
+        return NextResponse.json(
+          { error: 'Could not verify the session. Please try again.' },
+          { status: 500 },
+        );
+      }
+      if (!ct) {
+        return NextResponse.json(
+          { error: buildEntityNotFoundMessage('class_session') },
+          { status: 404 },
+        );
       }
       if (staff.role !== 'admin') {
         const scope = await staffMayManageClassTypeSessions(
@@ -732,7 +749,10 @@ export async function DELETE(request: NextRequest) {
       const { error } = await admin.from('class_instances').delete().eq('id', id);
       if (error) {
         console.error('DELETE /api/venue/classes (instance) failed:', error);
-        return NextResponse.json({ error: 'Failed to delete' }, { status: 500 });
+        return NextResponse.json(
+          { error: 'Failed to delete the session. Please try again.' },
+          { status: 500 },
+        );
       }
       return NextResponse.json({ success: true });
     }
@@ -745,10 +765,16 @@ export async function DELETE(request: NextRequest) {
         .maybeSingle();
       if (ttErr) {
         console.error('DELETE /api/venue/classes (timetable) lookup failed:', ttErr);
-        return NextResponse.json({ error: 'Failed to delete' }, { status: 500 });
+        return NextResponse.json(
+          { error: 'Could not verify the schedule entry. Please try again.' },
+          { status: 500 },
+        );
       }
       if (!ttRow) {
-        return NextResponse.json({ error: 'Schedule entry not found' }, { status: 404 });
+        return NextResponse.json(
+          { error: buildEntityNotFoundMessage('class_schedule') },
+          { status: 404 },
+        );
       }
       const { data: ct, error: ctErr } = await admin
         .from('class_types')
@@ -756,8 +782,18 @@ export async function DELETE(request: NextRequest) {
         .eq('id', (ttRow as { class_type_id: string }).class_type_id)
         .eq('venue_id', staff.venue_id)
         .maybeSingle();
-      if (ctErr || !ct) {
-        return NextResponse.json({ error: 'Forbidden or not found' }, { status: 404 });
+      if (ctErr) {
+        console.error('DELETE /api/venue/classes (timetable class_type) lookup failed:', ctErr);
+        return NextResponse.json(
+          { error: 'Could not verify the schedule entry. Please try again.' },
+          { status: 500 },
+        );
+      }
+      if (!ct) {
+        return NextResponse.json(
+          { error: buildEntityNotFoundMessage('class_schedule') },
+          { status: 404 },
+        );
       }
       if (staff.role !== 'admin') {
         const scope = await staffMayManageClassTypeSessions(
@@ -786,13 +822,36 @@ export async function DELETE(request: NextRequest) {
       const { error } = await admin.from('class_timetable').delete().eq('id', id);
       if (error) {
         console.error('DELETE /api/venue/classes (timetable) failed:', error);
-        return NextResponse.json({ error: 'Failed to delete' }, { status: 500 });
+        return NextResponse.json(
+          { error: 'Failed to delete the schedule entry. Please try again.' },
+          { status: 500 },
+        );
       }
       return NextResponse.json({ success: true });
     }
 
     if (entity_type !== 'class_type') {
       return NextResponse.json({ error: 'Invalid entity_type' }, { status: 400 });
+    }
+
+    const { data: classTypeRow, error: classTypeLookupErr } = await admin
+      .from('class_types')
+      .select('id')
+      .eq('id', id)
+      .eq('venue_id', staff.venue_id)
+      .maybeSingle();
+    if (classTypeLookupErr) {
+      console.error('DELETE /api/venue/classes (class_type) lookup failed:', classTypeLookupErr);
+      return NextResponse.json(
+        { error: 'Could not verify the class. Please try again.' },
+        { status: 500 },
+      );
+    }
+    if (!classTypeRow) {
+      return NextResponse.json(
+        { error: buildEntityNotFoundMessage('class') },
+        { status: 404 },
+      );
     }
 
     if (staff.role !== 'admin') {
@@ -819,7 +878,10 @@ export async function DELETE(request: NextRequest) {
     const { error } = await admin.from('class_types').delete().eq('id', id).eq('venue_id', staff.venue_id);
     if (error) {
       console.error('DELETE /api/venue/classes (class_type) failed:', error);
-      return NextResponse.json({ error: 'Failed to delete' }, { status: 500 });
+      return NextResponse.json(
+        { error: 'Failed to delete the class. Please try again.' },
+        { status: 500 },
+      );
     }
 
     return NextResponse.json({ success: true });

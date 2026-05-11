@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { detectOverlaps, formatOverlapWarning } from '@/lib/service-overlap';
 import { ensureDefaultDiningAreaForVenue } from '@/lib/areas/resolve-default-area';
 import {
+  buildEntityNotFoundMessage,
   buildUpcomingBookingsBlockMessage,
   hasUpcomingActiveBookingsForVenueService,
 } from '@/lib/venue/entity-delete-booking-guards';
@@ -157,6 +158,27 @@ export async function DELETE(request: NextRequest) {
 
     const admin = getSupabaseAdminClient();
 
+    const { data: existing, error: lookupErr } = await admin
+      .from('venue_services')
+      .select('id')
+      .eq('id', body.id)
+      .eq('venue_id', staff.venue_id)
+      .maybeSingle();
+
+    if (lookupErr) {
+      console.error('DELETE /api/venue/services lookup failed:', lookupErr);
+      return NextResponse.json(
+        { error: 'Could not verify the service. Please try again.' },
+        { status: 500 },
+      );
+    }
+    if (!existing) {
+      return NextResponse.json(
+        { error: buildEntityNotFoundMessage('service') },
+        { status: 404 },
+      );
+    }
+
     const guard = await hasUpcomingActiveBookingsForVenueService(admin, staff.venue_id, body.id);
     if (guard.error) {
       return NextResponse.json({ error: guard.error }, { status: 500 });
@@ -179,7 +201,10 @@ export async function DELETE(request: NextRequest) {
 
     if (error) {
       console.error('DELETE /api/venue/services failed:', error);
-      return NextResponse.json({ error: 'Failed to delete service' }, { status: 500 });
+      return NextResponse.json(
+        { error: 'Failed to delete the service. Please try again.' },
+        { status: 500 },
+      );
     }
 
     return NextResponse.json({ success: true });

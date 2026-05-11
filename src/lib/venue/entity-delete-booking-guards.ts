@@ -44,6 +44,15 @@ export function buildUpcomingBookingsBlockMessage(
   return `Can't delete ${label} while it has upcoming active bookings. Cancel or reschedule them first, then try again.`;
 }
 
+/**
+ * Friendly 404 message for delete handlers. The dashboard list can drift from the database (it was
+ * deleted by another operator, or the venue's booking model flipped) so we suggest a refresh
+ * rather than just saying "not found".
+ */
+export function buildEntityNotFoundMessage(kind: DeletableEntityKind): string {
+  return `Can't find ${ENTITY_LABELS[kind]}. It may have already been deleted, or the page is out of date — refresh and try again.`;
+}
+
 interface GuardResult {
   blocked: boolean;
   /** Number of bookings blocking the delete. -1 when the count could not be determined. */

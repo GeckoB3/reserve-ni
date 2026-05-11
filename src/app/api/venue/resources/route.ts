@@ -21,6 +21,7 @@ import {
   DEFAULT_RESOURCE_SLOT_INTERVAL_MINUTES,
 } from '@/lib/booking/resource-booking-defaults';
 import {
+  buildEntityNotFoundMessage,
   buildUpcomingBookingsBlockMessage,
   hasUpcomingActiveBookingsForVenueResource,
 } from '@/lib/venue/entity-delete-booking-guards';
@@ -651,10 +652,16 @@ export async function DELETE(request: NextRequest) {
 
     if (fetchErr) {
       console.error('DELETE /api/venue/resources lookup:', fetchErr);
-      return NextResponse.json({ error: 'Failed to load resource' }, { status: 500 });
+      return NextResponse.json(
+        { error: 'Could not verify the resource. Please try again.' },
+        { status: 500 },
+      );
     }
     if (!row) {
-      return NextResponse.json({ error: 'Resource not found' }, { status: 404 });
+      return NextResponse.json(
+        { error: buildEntityNotFoundMessage('resource') },
+        { status: 404 },
+      );
     }
 
     if (staff.role !== 'admin') {
@@ -703,7 +710,10 @@ export async function DELETE(request: NextRequest) {
 
     if (error) {
       console.error('DELETE /api/venue/resources failed:', error);
-      return NextResponse.json({ error: 'Failed to delete resource' }, { status: 500 });
+      return NextResponse.json(
+        { error: 'Failed to delete the resource. Please try again.' },
+        { status: 500 },
+      );
     }
 
     return NextResponse.json({ ok: true });

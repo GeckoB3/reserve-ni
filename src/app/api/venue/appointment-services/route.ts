@@ -12,6 +12,7 @@ import {
   SERVICE_REMOVAL_BLOCKED_BY_BOOKINGS,
 } from '@/lib/venue/service-calendar-removal';
 import {
+  buildEntityNotFoundMessage,
   buildUpcomingBookingsBlockMessage,
   hasUpcomingActiveBookingsForVenueAppointmentService,
   hasUpcomingActiveBookingsForVenueServiceItem,
@@ -1235,58 +1236,70 @@ export async function DELETE(request: NextRequest) {
     if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
 
     const admin = getSupabaseAdminClient();
-    const useUnified = await venueUsesUnifiedServiceItems(admin, staff.venue_id);
+    const preferUnified = await venueUsesUnifiedServiceItems(admin, staff.venue_id);
 
-    let createdByStaffId: string | null | undefined;
-
-    if (useUnified) {
-      const { data: row } = await admin
+    // Locate the service in whichever table actually holds it. Hybrid venues (primary
+    // 'appointment' with 'unified_scheduling' enabled as a secondary, or vice versa) may have
+    // services in either `service_items` or the legacy `appointment_services` table, so picking
+    // the table from `useUnified` alone produced spurious "Service not found" errors when the
+    // row lived in the other table.
+    const [unifiedLookup, legacyLookup] = await Promise.all([
+      admin
         .from('service_items')
         .select('id, created_by_staff_id')
         .eq('id', id)
         .eq('venue_id', staff.venue_id)
-        .maybeSingle();
-      if (!row) {
-        return NextResponse.json({ error: 'Service not found' }, { status: 404 });
-      }
-      createdByStaffId = (row as { created_by_staff_id?: string | null }).created_by_staff_id ?? null;
-      const venueGuard = await hasUpcomingActiveBookingsForVenueServiceItem(admin, staff.venue_id, id);
-      if (venueGuard.error) {
-        return NextResponse.json({ error: venueGuard.error }, { status: 500 });
-      }
-      if (venueGuard.blocked) {
-        return NextResponse.json(
-          {
-            error: buildUpcomingBookingsBlockMessage('service', venueGuard.bookingCount),
-            booking_count: venueGuard.bookingCount,
-          },
-          { status: 409 },
-        );
-      }
-    } else {
-      const { data: row } = await admin
+        .maybeSingle(),
+      admin
         .from('appointment_services')
         .select('id, created_by_staff_id')
         .eq('id', id)
         .eq('venue_id', staff.venue_id)
-        .maybeSingle();
-      if (!row) {
-        return NextResponse.json({ error: 'Service not found' }, { status: 404 });
-      }
-      createdByStaffId = (row as { created_by_staff_id?: string | null }).created_by_staff_id ?? null;
-      const venueGuard = await hasUpcomingActiveBookingsForVenueAppointmentService(admin, staff.venue_id, id);
-      if (venueGuard.error) {
-        return NextResponse.json({ error: venueGuard.error }, { status: 500 });
-      }
-      if (venueGuard.blocked) {
-        return NextResponse.json(
-          {
-            error: buildUpcomingBookingsBlockMessage('service', venueGuard.bookingCount),
-            booking_count: venueGuard.bookingCount,
-          },
-          { status: 409 },
-        );
-      }
+        .maybeSingle(),
+    ]);
+
+    if (unifiedLookup.error && legacyLookup.error) {
+      console.error('DELETE /api/venue/appointment-services lookup failed:', {
+        unified: unifiedLookup.error,
+        legacy: legacyLookup.error,
+      });
+      return NextResponse.json(
+        { error: 'Could not verify the service. Please try again.' },
+        { status: 500 },
+      );
+    }
+
+    const unifiedRow = unifiedLookup.data as { created_by_staff_id?: string | null } | null;
+    const legacyRow = legacyLookup.data as { created_by_staff_id?: string | null } | null;
+
+    if (!unifiedRow && !legacyRow) {
+      return NextResponse.json(
+        { error: buildEntityNotFoundMessage('service') },
+        { status: 404 },
+      );
+    }
+
+    // If both tables hold a row with this id (rare; only during migrations), respect the venue's
+    // current preference so we delete the row the dashboard is reading from.
+    const useUnified =
+      unifiedRow && legacyRow ? preferUnified : Boolean(unifiedRow);
+    const row = useUnified ? unifiedRow : legacyRow;
+    const createdByStaffId = row?.created_by_staff_id ?? null;
+
+    const venueGuard = useUnified
+      ? await hasUpcomingActiveBookingsForVenueServiceItem(admin, staff.venue_id, id)
+      : await hasUpcomingActiveBookingsForVenueAppointmentService(admin, staff.venue_id, id);
+    if (venueGuard.error) {
+      return NextResponse.json({ error: venueGuard.error }, { status: 500 });
+    }
+    if (venueGuard.blocked) {
+      return NextResponse.json(
+        {
+          error: buildUpcomingBookingsBlockMessage('service', venueGuard.bookingCount),
+          booking_count: venueGuard.bookingCount,
+        },
+        { status: 409 },
+      );
     }
 
     if (staff.role !== 'admin') {

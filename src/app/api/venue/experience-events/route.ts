@@ -12,6 +12,7 @@ import {
   validateStartEndTimes,
   assertExperienceEventCalendarClearable,
 } from '@/lib/experience-events/experience-event-guards';
+import { buildEntityNotFoundMessage } from '@/lib/venue/entity-delete-booking-guards';
 import { assertExperienceEventWindowFreeOnCalendar } from '@/lib/experience-events/calendar-event-window-conflicts';
 import { validateExperienceEventWindowAgainstVenueAndCalendar } from '@/lib/experience-events/event-hours-vs-venue-calendar';
 import { createTeamCalendarForEvent } from '@/lib/experience-events/create-team-calendar';
@@ -634,10 +635,16 @@ export async function DELETE(request: NextRequest) {
 
     if (evErr) {
       console.error('DELETE /api/venue/experience-events lookup:', evErr);
-      return NextResponse.json({ error: 'Failed to load event' }, { status: 500 });
+      return NextResponse.json(
+        { error: 'Could not verify the event. Please try again.' },
+        { status: 500 },
+      );
     }
     if (!eventRow) {
-      return NextResponse.json({ error: 'Event not found' }, { status: 404 });
+      return NextResponse.json(
+        { error: buildEntityNotFoundMessage('event') },
+        { status: 404 },
+      );
     }
 
     if (staff.role !== 'admin') {
@@ -679,7 +686,10 @@ export async function DELETE(request: NextRequest) {
 
     if (error) {
       console.error('DELETE /api/venue/experience-events failed:', error);
-      return NextResponse.json({ error: 'Failed to delete event' }, { status: 500 });
+      return NextResponse.json(
+        { error: 'Failed to delete the event. Please try again.' },
+        { status: 500 },
+      );
     }
 
     return NextResponse.json({ success: true });

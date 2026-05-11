@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildEntityNotFoundMessage,
   buildUpcomingBookingsBlockMessage,
   type DeletableEntityKind,
 } from './entity-delete-booking-guards';
@@ -61,5 +62,36 @@ describe('buildUpcomingBookingsBlockMessage', () => {
   it('always identifies upcoming bookings as the reason the delete was declined', () => {
     expect(buildUpcomingBookingsBlockMessage('class', 3).toLowerCase()).toContain('upcoming');
     expect(buildUpcomingBookingsBlockMessage('resource', 1).toLowerCase()).toContain('upcoming');
+  });
+});
+
+describe('buildEntityNotFoundMessage', () => {
+  it("uses the entity's friendly label and suggests refreshing the page", () => {
+    const msg = buildEntityNotFoundMessage('service');
+    expect(msg).toBe(
+      "Can't find this service. It may have already been deleted, or the page is out of date — refresh and try again.",
+    );
+  });
+
+  it('covers every entity kind with an entity-appropriate label', () => {
+    const cases: Array<{ kind: DeletableEntityKind; label: string }> = [
+      { kind: 'service', label: 'this service' },
+      { kind: 'class', label: 'this class' },
+      { kind: 'class_session', label: 'this session' },
+      { kind: 'class_schedule', label: 'this schedule entry' },
+      { kind: 'event', label: 'this event' },
+      { kind: 'resource', label: 'this resource' },
+    ];
+    for (const { kind, label } of cases) {
+      const msg = buildEntityNotFoundMessage(kind);
+      expect(msg).toContain(label);
+      expect(msg.toLowerCase()).toContain('refresh');
+    }
+  });
+
+  it('never falls back to a bare "not found" message', () => {
+    const msg = buildEntityNotFoundMessage('event');
+    expect(msg.toLowerCase()).not.toMatch(/^not found$/);
+    expect(msg).toMatch(/already been deleted|out of date/i);
   });
 });
