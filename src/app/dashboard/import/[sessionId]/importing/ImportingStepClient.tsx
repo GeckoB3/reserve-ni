@@ -62,10 +62,20 @@ export function ImportingStepClient({ sessionId }: { sessionId: string }) {
           setProgress(initial as typeof progress);
           return;
         }
-        const res = await fetch(`/api/import/sessions/${sessionId}/execute`, { method: 'POST' });
-        const body = await readResponseJson<{ ok?: boolean; error?: string; message?: string }>(res);
-        if (!res.ok) {
-          throw new Error(body.message ?? body.error ?? 'Import failed to start');
+        // Each POST processes up to a server-side row budget; repeat until the API reports done.
+        let batchDone = false;
+        while (!batchDone) {
+          const res = await fetch(`/api/import/sessions/${sessionId}/execute`, { method: 'POST' });
+          const body = await readResponseJson<{
+            ok?: boolean;
+            done?: boolean;
+            error?: string;
+            message?: string;
+          }>(res);
+          if (!res.ok) {
+            throw new Error(body.message ?? body.error ?? 'Import failed to start');
+          }
+          batchDone = body.done === true;
         }
         await poll();
         timer = setInterval(() => void poll(), 1200);
@@ -97,7 +107,9 @@ export function ImportingStepClient({ sessionId }: { sessionId: string }) {
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-semibold text-slate-900">Importing</h1>
-        <p className="mt-1 text-sm text-slate-500">Your data is being imported. You can leave this page — the job runs on the server.</p>
+        <p className="mt-1 text-sm text-slate-500">
+          Large imports run in batches. Keep this page open until completion, or come back here later — opening this step again will resume where it left off.
+        </p>
       </div>
 
       {error && (

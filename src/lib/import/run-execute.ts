@@ -28,6 +28,13 @@ import {
 import { normaliseGuestTagsInput } from '@/lib/guests/tags';
 import { getDefaultAreaIdForVenue } from '@/lib/areas/resolve-default-area';
 import type { BookingModel } from '@/types/booking-models';
+import {
+  IMPORT_EXECUTE_STATE_KEY,
+  ImportBatchPaused,
+  isImportBatchPaused,
+  snapshotImportExecuteStateForPause,
+  type ImportExecuteStateV1,
+} from '@/lib/import/import-execute-state';
 
 function hashGuest(email: string | null, phone: string | null): string | null {
   if (!email && !phone) return null;
@@ -148,12 +155,20 @@ async function ensureCustomClientFieldDefinitions(
   }
 }
 
-export async function runImportExecute(
+export async function runImportExecuteBatch(
   admin: SupabaseClient,
   sessionId: string,
   venueId: string,
   staffId: string,
-): Promise<void> {
+  options: { maxRows: number; state: ImportExecuteStateV1 },
+): Promise<{ state: ImportExecuteStateV1; finished: boolean }> {
+  try {
+  const st: ImportExecuteStateV1 = {
+    ...options.state,
+    defaultsPayload: options.state.defaultsPayload ? { ...options.state.defaultsPayload } : null,
+  };
+  let budget = options.maxRows;
+
   const { data: session } = await admin
     .from('import_sessions')
     .select('id, session_settings, total_rows, detected_platform')
@@ -203,11 +218,11 @@ export async function runImportExecute(
     byFile.set(fid, list);
   }
 
-  let importedClients = 0;
-  let importedBookings = 0;
-  let skipped = 0;
-  let updatedExisting = 0;
-  let processed = 0;
+  let importedClients = st.importedClients;
+  let importedBookings = st.importedBookings;
+  let skipped = st.skipped;
+  let updatedExisting = st.updatedExisting;
+  let processed = st.processed;
 
   const totalRows =
     (files ?? []).reduce((acc, f) => {
@@ -218,45 +233,148 @@ export async function runImportExecute(
     (session as { total_rows?: number }).total_rows ||
     0;
 
-  await admin
-    .from('import_sessions')
-    .update({
-      status: 'importing',
-      started_at: new Date().toISOString(),
-      progress_total: totalRows,
-      progress_processed: 0,
-      error_message: null,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', sessionId);
-
   const clientFiles = (files ?? []).filter((f) => {
     const t = (f as { file_type: string }).file_type;
     return t === 'clients' || t === 'unknown';
   });
   const bookingFiles = (files ?? []).filter((f) => (f as { file_type: string }).file_type === 'bookings');
 
-  async function bumpProgress() {
-    processed += 1;
+  const { data: stagedBookingRows } = await admin
+    .from('import_booking_rows')
+    .select('*')
+    .eq('session_id', sessionId)
+    .eq('is_future_booking', true);
+
+  const hasStagedFutureBookings = (stagedBookingRows ?? []).length > 0;
+  const todayStr = todayIsoLocal();
+
+  async function flushCountersToSession() {
+    st.importedClients = importedClients;
+    st.importedBookings = importedBookings;
+    st.skipped = skipped;
+    st.updatedExisting = updatedExisting;
+    st.processed = processed;
     await admin
       .from('import_sessions')
-      .update({ progress_processed: processed, updated_at: new Date().toISOString() })
+      .update({
+        progress_processed: processed,
+        imported_clients: importedClients,
+        imported_bookings: importedBookings,
+        skipped_rows: skipped,
+        updated_at: new Date().toISOString(),
+      })
       .eq('id', sessionId);
   }
 
-  for (const file of clientFiles) {
-    const f = file as { id: string; storage_path: string };
+  async function bumpProgress() {
+    processed += 1;
+    await flushCountersToSession();
+    budget -= 1;
+    if (budget <= 0) {
+      throw new ImportBatchPaused(snapshotImportExecuteStateForPause(st));
+    }
+  }
+
+  function bookingDefaultsOrThrow() {
+    if (!st.defaultsPayload) {
+      throw new Error('[import execute] booking defaults not loaded');
+    }
+    return st.defaultsPayload;
+  }
+
+  async function loadDefaultsIntoState() {
+    if (st.defaultsPayload) return;
+    let defaultAreaId: string | null = null;
+    if (bookingModel === 'table_reservation') {
+      defaultAreaId = await getDefaultAreaIdForVenue(admin, venueId);
+    }
+
+    let defaultCalendarId: string | null = null;
+    let defaultServiceItemId: string | null = null;
+    let defaultPractitionerId: string | null = null;
+    let defaultAppointmentServiceId: string | null = null;
+
+    if (unified) {
+      const { data: cal } = await admin
+        .from('unified_calendars')
+        .select('id')
+        .eq('venue_id', venueId)
+        .eq('is_active', true)
+        .order('sort_order')
+        .limit(1)
+        .maybeSingle();
+      defaultCalendarId = (cal as { id: string } | null)?.id ?? null;
+      if (defaultCalendarId) {
+        const { data: csa } = await admin
+          .from('calendar_service_assignments')
+          .select('service_item_id')
+          .eq('calendar_id', defaultCalendarId)
+          .limit(1)
+          .maybeSingle();
+        defaultServiceItemId = (csa as { service_item_id: string } | null)?.service_item_id ?? null;
+      }
+      if (!defaultServiceItemId) {
+        const { data: si } = await admin
+          .from('service_items')
+          .select('id')
+          .eq('venue_id', venueId)
+          .eq('is_active', true)
+          .order('sort_order')
+          .limit(1)
+          .maybeSingle();
+        defaultServiceItemId = (si as { id: string } | null)?.id ?? null;
+      }
+    } else if (bookingModel === 'practitioner_appointment') {
+      const { data: p } = await admin
+        .from('practitioners')
+        .select('id')
+        .eq('venue_id', venueId)
+        .eq('is_active', true)
+        .order('sort_order')
+        .limit(1)
+        .maybeSingle();
+      const { data: s } = await admin
+        .from('appointment_services')
+        .select('id')
+        .eq('venue_id', venueId)
+        .eq('is_active', true)
+        .order('sort_order')
+        .limit(1)
+        .maybeSingle();
+      defaultPractitionerId = (p as { id: string } | null)?.id ?? null;
+      defaultAppointmentServiceId = (s as { id: string } | null)?.id ?? null;
+    }
+
+    st.defaultsPayload = {
+      defaultAreaId,
+      defaultCalendarId,
+      defaultServiceItemId,
+      defaultPractitionerId,
+      defaultAppointmentServiceId,
+    };
+  }
+
+  while (st.phase === 'clients') {
+    if (st.clientFileIndex >= clientFiles.length) {
+      st.phase = hasStagedFutureBookings ? 'staged_bookings' : 'csv_bookings';
+      break;
+    }
+    const f = clientFiles[st.clientFileIndex] as { id: string; storage_path: string };
     const maps = byFile.get(f.id) ?? [];
-    await ensureCustomClientFieldDefinitions(admin, venueId, maps);
+    if (st.clientRowIndex === 0) {
+      await ensureCustomClientFieldDefinitions(admin, venueId, maps);
+    }
     const parsed = await downloadAndParseCsv(admin, f.storage_path);
 
-    for (let i = 0; i < parsed.rows.length; i++) {
+    while (st.clientRowIndex < parsed.rows.length) {
+      const i = st.clientRowIndex;
       const rowNum = i + 1;
       const row = parsed.rows[i]!;
       const issues = issueMap.get(issueKey(f.id, rowNum));
 
       if (rowShouldSkip(issues)) {
         skipped += 1;
+        st.clientRowIndex += 1;
         await bumpProgress();
         continue;
       }
@@ -271,6 +389,7 @@ export async function runImportExecute(
       }
       if (!fn || !ln) {
         skipped += 1;
+        st.clientRowIndex += 1;
         await bumpProgress();
         continue;
       }
@@ -439,12 +558,14 @@ export async function runImportExecute(
 
         updatedExisting += 1;
         importedClients += 1;
+        st.clientRowIndex += 1;
         await bumpProgress();
         continue;
       }
 
       if (existing && !shouldUpdateExisting(issues)) {
         skipped += 1;
+        st.clientRowIndex += 1;
         await bumpProgress();
         continue;
       }
@@ -470,6 +591,7 @@ export async function runImportExecute(
       if (insErr || !inserted) {
         console.error('[import execute] guest insert', insErr);
         skipped += 1;
+        st.clientRowIndex += 1;
         await bumpProgress();
         continue;
       }
@@ -504,70 +626,15 @@ export async function runImportExecute(
       }
 
       importedClients += 1;
+      st.clientRowIndex += 1;
       await bumpProgress();
     }
+
+    st.clientFileIndex += 1;
+    st.clientRowIndex = 0;
   }
 
-  let defaultAreaId: string | null = null;
-  if (bookingModel === 'table_reservation') {
-    defaultAreaId = await getDefaultAreaIdForVenue(admin, venueId);
-  }
-
-  let defaultCalendarId: string | null = null;
-  let defaultServiceItemId: string | null = null;
-  let defaultPractitionerId: string | null = null;
-  let defaultAppointmentServiceId: string | null = null;
-
-  if (unified) {
-    const { data: cal } = await admin
-      .from('unified_calendars')
-      .select('id')
-      .eq('venue_id', venueId)
-      .eq('is_active', true)
-      .order('sort_order')
-      .limit(1)
-      .maybeSingle();
-    defaultCalendarId = (cal as { id: string } | null)?.id ?? null;
-    if (defaultCalendarId) {
-      const { data: csa } = await admin
-        .from('calendar_service_assignments')
-        .select('service_item_id')
-        .eq('calendar_id', defaultCalendarId)
-        .limit(1)
-        .maybeSingle();
-      defaultServiceItemId = (csa as { service_item_id: string } | null)?.service_item_id ?? null;
-    }
-    if (!defaultServiceItemId) {
-      const { data: si } = await admin
-        .from('service_items')
-        .select('id')
-        .eq('venue_id', venueId)
-        .eq('is_active', true)
-        .order('sort_order')
-        .limit(1)
-        .maybeSingle();
-      defaultServiceItemId = (si as { id: string } | null)?.id ?? null;
-    }
-  } else if (bookingModel === 'practitioner_appointment') {
-    const { data: p } = await admin
-      .from('practitioners')
-      .select('id')
-      .eq('venue_id', venueId)
-      .eq('is_active', true)
-      .order('sort_order')
-      .limit(1)
-      .maybeSingle();
-    const { data: s } = await admin
-      .from('appointment_services')
-      .select('id')
-      .eq('venue_id', venueId)
-      .eq('is_active', true)
-      .order('sort_order')
-      .limit(1)
-      .maybeSingle();
-    defaultPractitionerId = (p as { id: string } | null)?.id ?? null;
-    defaultAppointmentServiceId = (s as { id: string } | null)?.id ?? null;
-  }
+  await loadDefaultsIntoState();
 
   async function findGuestForBooking(
     email: string | null,
@@ -714,21 +781,17 @@ export async function runImportExecute(
     }
 
     importedClients += 1;
+    st.importedClients = importedClients;
     return inserted.id as string;
   }
 
-  const { data: stagedBookingRows } = await admin
-    .from('import_booking_rows')
-    .select('*')
-    .eq('session_id', sessionId)
-    .eq('is_future_booking', true);
+  while (st.phase === 'staged_bookings') {
+    await loadDefaultsIntoState();
+    const { defaultAreaId } = bookingDefaultsOrThrow();
+    const stagedRows = stagedBookingRows ?? [];
 
-  const hasStagedFutureBookings = (stagedBookingRows ?? []).length > 0;
-  const todayStr = todayIsoLocal();
-
-  if (hasStagedFutureBookings) {
-    for (const sr of stagedBookingRows ?? []) {
-      const row = sr as {
+    while (st.stagedRowIndex < stagedRows.length) {
+      const row = stagedRows[st.stagedRowIndex]! as {
         file_id: string;
         row_number: number;
         booking_date: string;
@@ -763,6 +826,7 @@ export async function runImportExecute(
       const issues = issueMap.get(issueKey(row.file_id, row.row_number));
       if (rowShouldSkip(issues)) {
         skipped += 1;
+        st.stagedRowIndex += 1;
         await bumpProgress();
         continue;
       }
@@ -776,6 +840,7 @@ export async function runImportExecute(
         );
         if (dupAppt) {
           skipped += 1;
+          st.stagedRowIndex += 1;
           await bumpProgress();
           continue;
         }
@@ -794,6 +859,7 @@ export async function runImportExecute(
       });
       if (!guestId) {
         skipped += 1;
+        st.stagedRowIndex += 1;
         await bumpProgress();
         continue;
       }
@@ -901,14 +967,17 @@ export async function runImportExecute(
         insert.resource_id = row.resolved_resource_id;
       } else if (unified) {
         skipped += 1;
+        st.stagedRowIndex += 1;
         await bumpProgress();
         continue;
       } else if (bookingModel === 'practitioner_appointment') {
         skipped += 1;
+        st.stagedRowIndex += 1;
         await bumpProgress();
         continue;
       } else if (bookingModel === 'event_ticket' || bookingModel === 'class_session' || bookingModel === 'resource_booking') {
         skipped += 1;
+        st.stagedRowIndex += 1;
         await bumpProgress();
         continue;
       }
@@ -916,6 +985,7 @@ export async function runImportExecute(
       if (bookingModel === 'table_reservation') {
         if (!defaultAreaId) {
           skipped += 1;
+          st.stagedRowIndex += 1;
           await bumpProgress();
           continue;
         }
@@ -928,6 +998,7 @@ export async function runImportExecute(
       if (bErr || !booking) {
         console.error('[import execute] staged booking insert', bErr);
         skipped += 1;
+        st.stagedRowIndex += 1;
         await bumpProgress();
         continue;
       }
@@ -944,6 +1015,7 @@ export async function runImportExecute(
         console.error('[import execute] import_records after staged booking', recErr);
         await admin.from('bookings').delete().eq('id', booking.id);
         skipped += 1;
+        st.stagedRowIndex += 1;
         await bumpProgress();
         continue;
       }
@@ -975,22 +1047,39 @@ export async function runImportExecute(
       }
 
       importedBookings += 1;
+      st.stagedRowIndex += 1;
       await bumpProgress();
     }
+    st.phase = 'csv_bookings';
   }
 
-  for (const file of bookingFiles) {
-    const f = file as { id: string; storage_path: string };
+  while (st.phase === 'csv_bookings') {
+    await loadDefaultsIntoState();
+    const {
+      defaultAreaId,
+      defaultCalendarId,
+      defaultServiceItemId,
+      defaultPractitionerId,
+      defaultAppointmentServiceId,
+    } = bookingDefaultsOrThrow();
+
+    if (st.bookingFileIndex >= bookingFiles.length) {
+      break;
+    }
+
+    const f = bookingFiles[st.bookingFileIndex] as { id: string; storage_path: string };
     const maps = byFile.get(f.id) ?? [];
     const parsed = await downloadAndParseCsv(admin, f.storage_path);
 
-    for (let i = 0; i < parsed.rows.length; i++) {
+    while (st.bookingRowIndex < parsed.rows.length) {
+      const i = st.bookingRowIndex;
       const rowNum = i + 1;
       const row = parsed.rows[i]!;
       const issues = issueMap.get(issueKey(f.id, rowNum));
 
       if (rowShouldSkip(issues)) {
         skipped += 1;
+        st.bookingRowIndex += 1;
         await bumpProgress();
         continue;
       }
@@ -1004,12 +1093,14 @@ export async function runImportExecute(
       const bt = parseTimeString(btRaw);
       if (!dateIso || !bt) {
         skipped += 1;
+        st.bookingRowIndex += 1;
         await bumpProgress();
         continue;
       }
 
       if (hasStagedFutureBookings && dateIso >= todayStr) {
         skipped += 1;
+        st.bookingRowIndex += 1;
         await bumpProgress();
         continue;
       }
@@ -1023,6 +1114,7 @@ export async function runImportExecute(
         );
         if (dupAppt) {
           skipped += 1;
+          st.bookingRowIndex += 1;
           await bumpProgress();
           continue;
         }
@@ -1044,6 +1136,7 @@ export async function runImportExecute(
       });
       if (!guestId) {
         skipped += 1;
+        st.bookingRowIndex += 1;
         await bumpProgress();
         continue;
       }
@@ -1161,6 +1254,7 @@ export async function runImportExecute(
         insert.service_item_id = null;
       } else if (unified) {
         skipped += 1;
+        st.bookingRowIndex += 1;
         await bumpProgress();
         continue;
       }
@@ -1168,6 +1262,7 @@ export async function runImportExecute(
       if (bookingModel === 'table_reservation') {
         if (!defaultAreaId) {
           skipped += 1;
+          st.bookingRowIndex += 1;
           await bumpProgress();
           continue;
         }
@@ -1180,6 +1275,7 @@ export async function runImportExecute(
       if (bErr || !booking) {
         console.error('[import execute] booking insert', bErr);
         skipped += 1;
+        st.bookingRowIndex += 1;
         await bumpProgress();
         continue;
       }
@@ -1196,6 +1292,7 @@ export async function runImportExecute(
         console.error('[import execute] import_records after booking', recErr);
         await admin.from('bookings').delete().eq('id', booking.id);
         skipped += 1;
+        st.bookingRowIndex += 1;
         await bumpProgress();
         continue;
       }
@@ -1230,11 +1327,23 @@ export async function runImportExecute(
       }
 
       importedBookings += 1;
+      st.bookingRowIndex += 1;
       await bumpProgress();
     }
+
+    st.bookingFileIndex += 1;
+    st.bookingRowIndex = 0;
   }
 
   const undoUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+
+  const { data: settingsRow } = await admin
+    .from('import_sessions')
+    .select('session_settings')
+    .eq('id', sessionId)
+    .single();
+  const prevSettings = (settingsRow?.session_settings ?? {}) as Record<string, unknown>;
+  const { [IMPORT_EXECUTE_STATE_KEY]: _removed, ...sessionSettingsRest } = prevSettings;
 
   await admin
     .from('import_sessions')
@@ -1247,6 +1356,7 @@ export async function runImportExecute(
       updated_existing: updatedExisting,
       undo_available_until: undoUntil,
       progress_processed: totalRows,
+      session_settings: sessionSettingsRest,
       updated_at: new Date().toISOString(),
     })
     .eq('id', sessionId);
@@ -1258,6 +1368,19 @@ export async function runImportExecute(
     updatedExisting,
     undoUntil,
   });
+
+  st.importedClients = importedClients;
+  st.importedBookings = importedBookings;
+  st.skipped = skipped;
+  st.updatedExisting = updatedExisting;
+  st.processed = processed;
+  return { state: st, finished: true };
+  } catch (e) {
+    if (isImportBatchPaused(e)) {
+      return { state: e.checkpoint, finished: false };
+    }
+    throw e;
+  }
 }
 
 async function sendImportCompleteEmail(
