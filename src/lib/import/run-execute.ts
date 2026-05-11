@@ -29,6 +29,12 @@ import { normaliseGuestTagsInput } from '@/lib/guests/tags';
 import { getDefaultAreaIdForVenue } from '@/lib/areas/resolve-default-area';
 import type { BookingModel } from '@/types/booking-models';
 import {
+  fetchPractitionerServiceCommercialDefaults,
+  fetchUnifiedServiceCommercialDefaults,
+  isBookingImportFieldMapped,
+  type ServiceCommercialDefaults,
+} from '@/lib/import/booking-service-defaults';
+import {
   IMPORT_EXECUTE_STATE_KEY,
   ImportBatchPaused,
   isImportBatchPaused,
@@ -168,6 +174,36 @@ export async function runImportExecuteBatch(
     defaultsPayload: options.state.defaultsPayload ? { ...options.state.defaultsPayload } : null,
   };
   let budget = options.maxRows;
+
+  const unifiedCommercialsCache = new Map<string, ServiceCommercialDefaults | null>();
+  const practitionerCommercialsCache = new Map<string, ServiceCommercialDefaults | null>();
+
+  async function getUnifiedCommercials(calendarId: string, serviceItemId: string) {
+    const key = `${calendarId}:${serviceItemId}`;
+    if (!unifiedCommercialsCache.has(key)) {
+      unifiedCommercialsCache.set(
+        key,
+        await fetchUnifiedServiceCommercialDefaults(admin, venueId, calendarId, serviceItemId),
+      );
+    }
+    return unifiedCommercialsCache.get(key) ?? null;
+  }
+
+  async function getPractitionerCommercials(practitionerId: string, appointmentServiceId: string) {
+    const key = `${practitionerId}:${appointmentServiceId}`;
+    if (!practitionerCommercialsCache.has(key)) {
+      practitionerCommercialsCache.set(
+        key,
+        await fetchPractitionerServiceCommercialDefaults(
+          admin,
+          venueId,
+          practitionerId,
+          appointmentServiceId,
+        ),
+      );
+    }
+    return practitionerCommercialsCache.get(key) ?? null;
+  }
 
   const { data: session } = await admin
     .from('import_sessions')
@@ -821,6 +857,8 @@ export async function runImportExecuteBatch(
         resolved_event_session_id: string | null;
         resolved_class_instance_id: string | null;
         resolved_resource_id: string | null;
+        raw_booking_end_time: string | null;
+        raw_duration_minutes: string | null;
       };
 
       const issues = issueMap.get(issueKey(row.file_id, row.row_number));
@@ -864,7 +902,42 @@ export async function runImportExecuteBatch(
         continue;
       }
 
-      const duration = row.duration_minutes ?? 60;
+      let serviceCommercials: ServiceCommercialDefaults | null = null;
+      if (unified && row.resolved_calendar_id && row.resolved_service_id) {
+        serviceCommercials = await getUnifiedCommercials(row.resolved_calendar_id, row.resolved_service_id);
+      } else if (
+        bookingModel === 'practitioner_appointment' &&
+        row.resolved_practitioner_id &&
+        row.resolved_appointment_service_id
+      ) {
+        serviceCommercials = await getPractitionerCommercials(
+          row.resolved_practitioner_id,
+          row.resolved_appointment_service_id,
+        );
+      }
+
+      const rawEnd = row.raw_booking_end_time?.trim();
+      const rawDur = row.raw_duration_minutes?.trim();
+      const useExtractTiming = Boolean(rawEnd || rawDur);
+
+      const timeForDb =
+        row.booking_time.length === 5 ? `${row.booking_time}:00` : row.booking_time;
+
+      let bookingEndTime: string;
+      if (useExtractTiming && row.booking_end_time) {
+        bookingEndTime = row.booking_end_time;
+      } else {
+        const durForEnd =
+          serviceCommercials && serviceCommercials.durationMinutes > 0 ?
+            serviceCommercials.durationMinutes
+          : (row.duration_minutes ?? 60);
+        const endParts = timeForDb.slice(0, 5).split(':').map(Number);
+        const endMins = (endParts[0] ?? 0) * 60 + (endParts[1] ?? 0) + durForEnd;
+        const eh = Math.floor(endMins / 60) % 24;
+        const emin = endMins % 60;
+        bookingEndTime = `${String(eh).padStart(2, '0')}:${String(emin).padStart(2, '0')}:00`;
+      }
+
       const partySize =
         row.party_size ?? (bookingModel === 'table_reservation' ? 2 : 1);
       const meta = row.raw_import_metadata ?? {};
@@ -879,11 +952,17 @@ export async function runImportExecuteBatch(
               : null,
       }) as 'Pending' | 'Confirmed' | 'Cancelled' | 'No-Show' | 'Completed' | 'Seated' | 'Booked';
 
-      const pricePence = parseCurrencyPence(row.raw_price);
+      let pricePence = parseCurrencyPence(row.raw_price);
+      if (pricePence == null && serviceCommercials?.pricePence != null) {
+        pricePence = serviceCommercials.pricePence;
+      }
       const notes = row.raw_notes?.trim() ?? null;
       let specialRequests = notes;
       if (pricePence != null) {
-        const priceLabel = `Imported price £${(pricePence / 100).toFixed(2)}`;
+        const priceLabel =
+          row.raw_price?.trim() ?
+            `Imported price £${(pricePence / 100).toFixed(2)}`
+          : `Service price £${(pricePence / 100).toFixed(2)}`;
         specialRequests = specialRequests ? `${specialRequests} — ${priceLabel}` : priceLabel;
       }
 
@@ -905,23 +984,25 @@ export async function runImportExecuteBatch(
         specialRequests = specialRequests ? `${specialRequests}\n${block}` : block;
       }
 
-      const depositFields = resolveDepositFromImport({
+      let depositFields = resolveDepositFromImport({
         amountRaw: row.raw_deposit_amount,
         paidRaw: row.raw_deposit_paid,
         statusRaw: row.raw_deposit_status,
       });
-
-      const timeForDb =
-        row.booking_time.length === 5 ? `${row.booking_time}:00` : row.booking_time;
-      const bookingEndTime =
-        row.booking_end_time ??
-        (() => {
-          const endParts = timeForDb.slice(0, 5).split(':').map(Number);
-          const endMins = (endParts[0] ?? 0) * 60 + (endParts[1] ?? 0) + duration;
-          const eh = Math.floor(endMins / 60) % 24;
-          const emin = endMins % 60;
-          return `${String(eh).padStart(2, '0')}:${String(emin).padStart(2, '0')}:00`;
-        })();
+      const depositCsvExplicit = Boolean(
+        row.raw_deposit_amount?.trim() ||
+          row.raw_deposit_status?.trim() ||
+          (row.raw_deposit_paid != null && row.raw_deposit_paid.trim() !== ''),
+      );
+      if (
+        !depositCsvExplicit &&
+        serviceCommercials?.depositPence != null &&
+        serviceCommercials.depositPence > 0 &&
+        depositFields.deposit_status === 'Not Required' &&
+        (depositFields.deposit_amount_pence == null || depositFields.deposit_amount_pence === 0)
+      ) {
+        depositFields = { deposit_status: 'Pending', deposit_amount_pence: serviceCommercials.depositPence };
+      }
 
       const insert: Record<string, unknown> = {
         venue_id: venueId,
@@ -1152,29 +1233,8 @@ export async function runImportExecuteBatch(
         deletedFlag: targets.deleted ?? null,
       }) as 'Pending' | 'Confirmed' | 'Cancelled' | 'No-Show' | 'Completed' | 'Seated' | 'Booked';
 
-      const pricePence = parseCurrencyPence(targets.price);
-      const notes = targets.notes?.trim() ?? null;
-      let specialRequests = notes;
-      if (pricePence != null) {
-        const priceLabel = `Imported price £${(pricePence / 100).toFixed(2)}`;
-        specialRequests = specialRequests ? `${specialRequests} — ${priceLabel}` : priceLabel;
-      }
-
-      const csvMetaNotes: string[] = [];
-      if (targets.course_name?.trim()) csvMetaNotes.push(`Course: ${targets.course_name.trim()}`);
-      if (targets.appointment_source?.trim()) csvMetaNotes.push(`Source: ${targets.appointment_source.trim()}`);
-      if (targets.room_id?.trim()) csvMetaNotes.push(`Room: ${targets.room_id.trim()}`);
-      if (targets.machine_id?.trim()) csvMetaNotes.push(`Machine: ${targets.machine_id.trim()}`);
-      if (csvMetaNotes.length) {
-        const block = csvMetaNotes.join('\n');
-        specialRequests = specialRequests ? `${specialRequests}\n${block}` : block;
-      }
-
-      const depositFields = resolveDepositFromImport({
-        amountRaw: targets.deposit_amount,
-        paidRaw: targets.deposit_paid,
-        statusRaw: targets.deposit_status,
-      });
+      const durMapped =
+        isBookingImportFieldMapped(maps, 'duration_minutes') && Boolean(targets.duration_minutes?.trim());
 
       let calendarId = defaultCalendarId;
       let serviceItemId = defaultServiceItemId;
@@ -1204,6 +1264,16 @@ export async function runImportExecuteBatch(
         }
       }
 
+      let serviceCommercials: ServiceCommercialDefaults | null = null;
+      if (unified && calendarId && serviceItemId) {
+        serviceCommercials = await getUnifiedCommercials(calendarId, serviceItemId);
+      } else if (bookingModel === 'practitioner_appointment' && defaultPractitionerId && defaultAppointmentServiceId) {
+        serviceCommercials = await getPractitionerCommercials(
+          defaultPractitionerId,
+          defaultAppointmentServiceId,
+        );
+      }
+
       const timeForDb = bt.length === 5 ? `${bt}:00` : bt;
       const endBt = parseTimeString(targets.booking_end_time ?? null);
       const endTimeForDb = endBt ? (endBt.length === 5 ? `${endBt}:00` : endBt) : null;
@@ -1211,15 +1281,75 @@ export async function runImportExecuteBatch(
       let bookingEndTime: string;
       if (endTimeForDb) {
         const dm = durationMinutesBetweenTimes(timeForDb, endTimeForDb);
-        if (dm != null && dm > 0) duration = dm;
+        if (dm != null && dm > 0) {
+          duration = dm;
+        } else {
+          duration =
+            serviceCommercials?.durationMinutes ?? duration ?? 60;
+        }
         bookingEndTime = endTimeForDb;
       } else {
+        if (durMapped) {
+          duration = parseIntSafe(targets.duration_minutes) ?? serviceCommercials?.durationMinutes ?? 60;
+        } else {
+          duration = serviceCommercials?.durationMinutes ?? duration ?? 60;
+        }
         const dur = duration ?? 60;
         const endParts = timeForDb.slice(0, 5).split(':').map(Number);
         const endMins = (endParts[0] ?? 0) * 60 + (endParts[1] ?? 0) + dur;
         const eh = Math.floor(endMins / 60) % 24;
         const emin = endMins % 60;
         bookingEndTime = `${String(eh).padStart(2, '0')}:${String(emin).padStart(2, '0')}:00`;
+      }
+
+      const priceMapped = isBookingImportFieldMapped(maps, 'price');
+      let pricePence: number | null = null;
+      if (priceMapped && targets.price?.trim()) {
+        pricePence = parseCurrencyPence(targets.price);
+      } else if ((!priceMapped || !targets.price?.trim()) && serviceCommercials?.pricePence != null) {
+        pricePence = serviceCommercials.pricePence;
+      }
+
+      const notes = targets.notes?.trim() ?? null;
+      let specialRequests = notes;
+      if (pricePence != null) {
+        const priceLabel =
+          priceMapped && targets.price?.trim() ?
+            `Imported price £${(pricePence / 100).toFixed(2)}`
+          : `Service price £${(pricePence / 100).toFixed(2)}`;
+        specialRequests = specialRequests ? `${specialRequests} — ${priceLabel}` : priceLabel;
+      }
+
+      const csvMetaNotes: string[] = [];
+      if (targets.course_name?.trim()) csvMetaNotes.push(`Course: ${targets.course_name.trim()}`);
+      if (targets.appointment_source?.trim()) csvMetaNotes.push(`Source: ${targets.appointment_source.trim()}`);
+      if (targets.room_id?.trim()) csvMetaNotes.push(`Room: ${targets.room_id.trim()}`);
+      if (targets.machine_id?.trim()) csvMetaNotes.push(`Machine: ${targets.machine_id.trim()}`);
+      if (csvMetaNotes.length) {
+        const block = csvMetaNotes.join('\n');
+        specialRequests = specialRequests ? `${specialRequests}\n${block}` : block;
+      }
+
+      let depositFields = resolveDepositFromImport({
+        amountRaw: targets.deposit_amount,
+        paidRaw: targets.deposit_paid,
+        statusRaw: targets.deposit_status,
+      });
+      const depositCsvExplicit = Boolean(
+        (isBookingImportFieldMapped(maps, 'deposit_amount') && targets.deposit_amount?.trim()) ||
+          (isBookingImportFieldMapped(maps, 'deposit_status') && targets.deposit_status?.trim()) ||
+          (isBookingImportFieldMapped(maps, 'deposit_paid') &&
+            targets.deposit_paid != null &&
+            targets.deposit_paid.trim() !== ''),
+      );
+      if (
+        !depositCsvExplicit &&
+        serviceCommercials?.depositPence != null &&
+        serviceCommercials.depositPence > 0 &&
+        depositFields.deposit_status === 'Not Required' &&
+        (depositFields.deposit_amount_pence == null || depositFields.deposit_amount_pence === 0)
+      ) {
+        depositFields = { deposit_status: 'Pending', deposit_amount_pence: serviceCommercials.depositPence };
       }
 
       const insert: Record<string, unknown> = {

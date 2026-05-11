@@ -172,6 +172,7 @@ export async function runExtractBookingReferences(
     raw_external_client_id: string | null;
     raw_group_booking_id: string | null;
     raw_booking_end_time: string | null;
+    raw_duration_minutes: string | null;
     raw_import_metadata: Record<string, unknown>;
     is_future_booking: boolean;
   };
@@ -290,6 +291,7 @@ export async function runExtractBookingReferences(
         raw_external_client_id: extClient ?? null,
         raw_group_booking_id: grp ?? null,
         raw_booking_end_time: targets.booking_end_time?.trim() || null,
+        raw_duration_minutes: targets.duration_minutes?.trim() || null,
         raw_import_metadata: meta,
         is_future_booking: isFuture,
       });
@@ -346,6 +348,7 @@ export async function runExtractBookingReferences(
     raw_external_client_id: r.raw_external_client_id,
     raw_group_booking_id: r.raw_group_booking_id,
     raw_booking_end_time: r.raw_booking_end_time,
+    raw_duration_minutes: r.raw_duration_minutes,
     raw_import_metadata: r.raw_import_metadata,
     import_status: 'pending' as const,
     is_future_booking: true,
