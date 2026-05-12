@@ -34,6 +34,18 @@ type ProgressPayload = {
   error_message?: string | null;
 };
 
+const EXECUTE_CLIENT_TIMEOUT_MS = 280_000;
+const POLL_FAILURE_THRESHOLD = 8;
+
+function createExecuteAbortSignal(): { signal: AbortSignal; cancel: () => void } {
+  const controller = new AbortController();
+  const t = window.setTimeout(() => controller.abort(), EXECUTE_CLIENT_TIMEOUT_MS);
+  return {
+    signal: controller.signal,
+    cancel: () => clearTimeout(t),
+  };
+}
+
 export function ImportingStepClient({ sessionId }: { sessionId: string }) {
   const ran = useRef(false);
   /** Wall-clock baseline for elapsed + ETA (before first execute POST, or server `started_at` when resuming). */
@@ -44,6 +56,8 @@ export function ImportingStepClient({ sessionId }: { sessionId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [executingBatch, setExecutingBatch] = useState(false);
   const [progress, setProgress] = useState<ProgressPayload | null>(null);
+  const [pollFailureCount, setPollFailureCount] = useState(0);
+  const [pollError, setPollError] = useState<string | null>(null);
 
   useEffect(() => {
     if (progress?.status !== 'importing' && !executingBatch) return undefined;
@@ -73,11 +87,13 @@ export function ImportingStepClient({ sessionId }: { sessionId: string }) {
     }
 
     async function pollOnce(): Promise<ProgressPayload> {
-      const pr = await fetch(`/api/import/sessions/${sessionId}/progress`);
+      const pr = await fetch(`/api/import/sessions/${sessionId}/progress`, { cache: 'no-store' });
       const data = await readResponseJson<ProgressPayload & { error?: string }>(pr);
       if (!pr.ok) {
         throw new Error(data.error ?? 'Failed to load import progress');
       }
+      setPollFailureCount(0);
+      setPollError(null);
       ensureImportClock(data);
       if (!cancelled) setProgress(data);
       if (data.status === 'complete' || data.status === 'failed') {
@@ -94,8 +110,19 @@ export function ImportingStepClient({ sessionId }: { sessionId: string }) {
           void (async () => {
             try {
               await pollOnce();
-            } catch {
-              /* ignore transient poll errors; next tick retries */
+            } catch (e) {
+              if (cancelled) return;
+              setPollFailureCount((n) => {
+                const next = n + 1;
+                if (next >= POLL_FAILURE_THRESHOLD) {
+                  setPollError(
+                    e instanceof Error ?
+                      e.message
+                    : 'Could not load import progress. Check you are still signed in, then refresh this page.',
+                  );
+                }
+                return next;
+              });
             }
           })();
         }, 1000);
@@ -112,9 +139,22 @@ export function ImportingStepClient({ sessionId }: { sessionId: string }) {
           if (importStartMs.current === null) importStartMs.current = Date.now();
           setExecutingBatch(true);
           let res: Response;
+          const { signal, cancel } = createExecuteAbortSignal();
           try {
-            res = await fetch(`/api/import/sessions/${sessionId}/execute`, { method: 'POST' });
+            res = await fetch(`/api/import/sessions/${sessionId}/execute`, {
+              method: 'POST',
+              cache: 'no-store',
+              signal,
+            });
+          } catch (e) {
+            if (e instanceof DOMException && e.name === 'AbortError') {
+              throw new Error(
+                'The import request timed out in your browser. The server may still be working — wait a minute and refresh this page to see updated progress.',
+              );
+            }
+            throw e instanceof Error ? e : new Error('Import request failed');
           } finally {
+            cancel();
             setExecutingBatch(false);
           }
           const body = await readResponseJson<{
@@ -177,15 +217,26 @@ export function ImportingStepClient({ sessionId }: { sessionId: string }) {
   })();
 
   const stageLabel = (() => {
-    if (!started || error) return null;
+    if (!started) return null;
+    if (error) return null;
+    if (pollError) return 'Could not refresh status';
     const st = progress?.status;
     if (st === 'complete') return 'Finalised';
     if (st === 'failed') return 'Stopped';
     if (executingBatch) return 'Processing a batch on the server…';
     if (st === 'importing') return 'Import in progress…';
     if (st === 'ready') return 'Starting import…';
-    return 'Checking status…';
+    if (st === 'validating') return 'Validation still running — finish the Validate step, or wait and refresh.';
+    if (st === 'mapping') return 'Mappings not finished — complete the Map step first.';
+    if (st === 'uploading') return 'Upload not complete — finish the Upload step first.';
+    if (st === 'undone') return 'This import was undone.';
+    /** First paint before the first `/progress` response (or stalled load). */
+    if (progress == null) return 'Loading import status…';
+    return `Session status: ${st}`;
   })();
+
+  /** Non-blocking hint when progress polls fail repeatedly (distinct from fatal execute error). */
+  const stallHint = pollError && !error;
 
   return (
     <div className="space-y-6">
@@ -199,6 +250,22 @@ export function ImportingStepClient({ sessionId }: { sessionId: string }) {
 
       {error && (
         <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</div>
+      )}
+
+      {stallHint && (
+        <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+          <p>
+            <strong>Status updates paused.</strong> {pollError}
+            {pollFailureCount > 0 ? ` (${pollFailureCount} failed checks)` : ''}
+          </p>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="min-h-9 rounded-lg bg-amber-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-950"
+          >
+            Refresh page
+          </button>
+        </div>
       )}
 
       {started && !error && (

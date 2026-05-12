@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
 import { requireImportAdmin } from '@/lib/import/auth';
 
+/** Import progress must never be cached (stale status caused the UI to sit on "Checking status…"). */
+export const dynamic = 'force-dynamic';
+
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ sessionId: string }> },

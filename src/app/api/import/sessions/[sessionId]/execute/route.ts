@@ -10,6 +10,9 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 
 export const maxDuration = 300;
 
+/** Session lock + batch execute must not be served from cache. */
+export const dynamic = 'force-dynamic';
+
 /** Per-request row budget so each invocation stays under serverless limits; importer resumes across POSTs. */
 const IMPORT_BATCH_MAX_ROWS = 300;
 

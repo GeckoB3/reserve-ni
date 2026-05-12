@@ -286,7 +286,7 @@ export async function runImportExecuteBatch(
 
   const { data: stagedBookingRows } = await admin
     .from('import_booking_rows')
-    .select('*')
+    .select('file_id, row_number')
     .eq('session_id', sessionId)
     .eq('is_future_booking', true);
 
