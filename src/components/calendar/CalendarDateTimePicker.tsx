@@ -1,7 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
+import { createPortal } from 'react-dom';
 import { useDismissibleLayer } from '@/lib/ui/use-dismissible-layer';
+import { getViewportBounds } from '@/lib/ui/viewport-bounds';
+import { viewportMarginPx } from '@/lib/ui/viewport-margin';
 
 // ─── Date helpers ────────────────────────────────────────────────────────────
 
@@ -32,6 +35,68 @@ function daysInMonth(year: number, month: number): number {
 
 function formatHour(h: number): string {
   return `${String(h).padStart(2, '0')}:00`;
+}
+
+/** Portaled picker roots use this marker so toolbar `ClampedFixedDropdown` dismiss ignores them. */
+export const CALENDAR_PICKER_SUBPOPOVER_SELECTOR = '[data-calendar-picker-subpopover]';
+
+function computePickerSubpopoverStyle(
+  triggerRect: DOMRect,
+  preference: 'calendar' | 'time',
+): CSSProperties {
+  const { width: vw, height: vh } = getViewportBounds();
+  const margin = viewportMarginPx(vw);
+  const gap = 6;
+  const preferredWidth =
+    preference === 'calendar'
+      ? Math.min(276, vw - 2 * margin)
+      : Math.min(236, vw - 2 * margin);
+
+  let left = triggerRect.left + triggerRect.width / 2 - preferredWidth / 2;
+  left = Math.min(Math.max(margin, left), vw - preferredWidth - margin);
+
+  const spaceBelow = vh - triggerRect.bottom - gap - margin;
+  const spaceAbove = triggerRect.top - margin - gap;
+  const approxContent =
+    preference === 'calendar'
+      ? 320 /* month grid ~ 288 + chrome */
+      : 280 /* two selects + actions */;
+
+  let openAbove = spaceBelow < approxContent && spaceAbove > spaceBelow && spaceAbove >= 140;
+  /** If flipping still can't show content, expand scroll under trigger */
+  if (openAbove && spaceAbove < 160) openAbove = false;
+
+  const maxPanel = Math.min(Math.floor(vh * 0.85), Math.max(approxContent + 40, 360));
+
+  if (openAbove) {
+    const maxHeight = Math.max(160, Math.min(maxPanel, spaceAbove));
+    const bottomPx = Math.max(margin, vh - triggerRect.top + gap);
+    return {
+      position: 'fixed',
+      left,
+      width: preferredWidth,
+      bottom: bottomPx,
+      maxHeight,
+      overflowY: 'auto',
+      overscrollBehavior: 'contain',
+      boxSizing: 'border-box',
+      zIndex: 85,
+    };
+  }
+
+  const topPx = triggerRect.bottom + gap;
+  const maxHeight = Math.max(160, Math.min(maxPanel, vh - topPx - margin));
+  return {
+    position: 'fixed',
+    left,
+    top: topPx,
+    width: preferredWidth,
+    maxHeight,
+    overflowY: 'auto',
+    overscrollBehavior: 'contain',
+    boxSizing: 'border-box',
+    zIndex: 85,
+  };
 }
 
 // ─── Strip date item ──────────────────────────────────────────────────────────
@@ -240,8 +305,14 @@ export function CalendarDateTimePicker({
 
   const stripRef = useRef<HTMLDivElement>(null);
   const selectedItemRef = useRef<HTMLButtonElement>(null);
-  const calendarRef = useRef<HTMLDivElement>(null);
-  const timeRef = useRef<HTMLDivElement>(null);
+  const calendarOuterRef = useRef<HTMLDivElement>(null);
+  const timeOuterRef = useRef<HTMLDivElement>(null);
+  const calendarButtonRef = useRef<HTMLButtonElement>(null);
+  const timeButtonRef = useRef<HTMLButtonElement>(null);
+  const calendarPortalRef = useRef<HTMLDivElement>(null);
+  const timePortalRef = useRef<HTMLDivElement>(null);
+  const [calendarPopoverStyle, setCalendarPopoverStyle] = useState<CSSProperties>({});
+  const [timePopoverStyle, setTimePopoverStyle] = useState<CSSProperties>({});
 
   const strip = buildStrip(date, stripRadius * 2 + 1);
 
@@ -270,9 +341,55 @@ export function CalendarDateTimePicker({
 
   useDismissibleLayer({
     open: openDropdown !== null,
-    refs: [calendarRef, timeRef],
+    refs: [calendarOuterRef, timeOuterRef, calendarPortalRef, timePortalRef],
     onDismiss: () => setOpenDropdown(null),
   });
+
+  useLayoutEffect(() => {
+    if (openDropdown !== 'calendar' || !calendarButtonRef.current) {
+      setCalendarPopoverStyle({});
+      return undefined;
+    }
+    const update = () => {
+      const el = calendarButtonRef.current;
+      if (!el) return;
+      setCalendarPopoverStyle(computePickerSubpopoverStyle(el.getBoundingClientRect(), 'calendar'));
+    };
+    update();
+    window.addEventListener('resize', update);
+    window.visualViewport?.addEventListener('resize', update);
+    window.visualViewport?.addEventListener('scroll', update);
+    window.addEventListener('scroll', update, true);
+    return () => {
+      window.removeEventListener('resize', update);
+      window.visualViewport?.removeEventListener('resize', update);
+      window.visualViewport?.removeEventListener('scroll', update);
+      window.removeEventListener('scroll', update, true);
+    };
+  }, [openDropdown]);
+
+  useLayoutEffect(() => {
+    if (openDropdown !== 'time' || !timeButtonRef.current) {
+      setTimePopoverStyle({});
+      return undefined;
+    }
+    const update = () => {
+      const el = timeButtonRef.current;
+      if (!el) return;
+      setTimePopoverStyle(computePickerSubpopoverStyle(el.getBoundingClientRect(), 'time'));
+    };
+    update();
+    window.addEventListener('resize', update);
+    window.visualViewport?.addEventListener('resize', update);
+    window.visualViewport?.addEventListener('scroll', update);
+    window.addEventListener('scroll', update, true);
+    return () => {
+      window.removeEventListener('resize', update);
+      window.visualViewport?.removeEventListener('resize', update);
+      window.visualViewport?.removeEventListener('scroll', update);
+      window.removeEventListener('scroll', update, true);
+    };
+  }, [openDropdown]);
 
   function toggleDropdown(which: OpenDropdown) {
     setOpenDropdown((prev) => (prev === which ? null : which));
@@ -310,8 +427,9 @@ export function CalendarDateTimePicker({
       {/* Top bar: centred controls */}
       <div className="flex flex-wrap items-center justify-center gap-2">
         {/* Date label / calendar trigger */}
-        <div className="relative" ref={calendarRef}>
+        <div className="relative shrink-0" ref={calendarOuterRef}>
           <button
+            ref={calendarButtonRef}
             type="button"
             onClick={() => toggleDropdown('calendar')}
             className={`flex min-h-[38px] items-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-medium shadow-sm transition-colors ${
@@ -334,26 +452,35 @@ export function CalendarDateTimePicker({
             </svg>
           </button>
 
-          {openDropdown === 'calendar' && (
-            <div className="absolute inset-x-0 top-full z-50 mt-1 flex justify-center px-1">
-              <div className="max-h-[min(70vh,24rem)] max-w-[calc(100vw-1rem)] min-w-0 overflow-auto rounded-xl border border-slate-200 bg-white shadow-lg">
-              <MiniMonthGrid
-                month={calMonth}
-                year={calYear}
-                selected={date}
-                today={today}
-                onSelect={handleCalendarSelect}
-                onPrevMonth={prevMonth}
-                onNextMonth={nextMonth}
-              />
-            </div>
-            </div>
-          )}
+          {openDropdown === 'calendar' && typeof document !== 'undefined'
+            ? createPortal(
+                <div
+                  ref={calendarPortalRef}
+                  style={calendarPopoverStyle}
+                  data-calendar-picker-subpopover=""
+                  role="dialog"
+                  aria-label="Pick a date"
+                  className="rounded-xl border border-slate-200 bg-white shadow-lg ring-1 ring-slate-100"
+                >
+                  <MiniMonthGrid
+                    month={calMonth}
+                    year={calYear}
+                    selected={date}
+                    today={today}
+                    onSelect={handleCalendarSelect}
+                    onPrevMonth={prevMonth}
+                    onNextMonth={nextMonth}
+                  />
+                </div>,
+                document.body,
+              )
+            : null}
         </div>
 
         {/* Time range trigger */}
-        <div className="relative" ref={timeRef}>
+        <div className="relative shrink-0" ref={timeOuterRef}>
           <button
+            ref={timeButtonRef}
             type="button"
             onClick={() => toggleDropdown('time')}
             className={`flex min-h-[38px] items-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-medium shadow-sm transition-colors ${
@@ -376,19 +503,27 @@ export function CalendarDateTimePicker({
             </svg>
           </button>
 
-          {openDropdown === 'time' && (
-            <div className="absolute inset-x-0 top-full z-50 mt-1 flex justify-center px-1">
-              <div className="max-h-[min(70vh,28rem)] max-w-[calc(100vw-1rem)] min-w-0 overflow-auto rounded-xl border border-slate-200 bg-white shadow-lg">
-              <TimeRangeDropdown
-                key={`${startHour}-${endHour}`}
-                startHour={startHour}
-                endHour={endHour}
-                onApply={onTimeRangeChange}
-                onClose={() => setOpenDropdown(null)}
-              />
-            </div>
-            </div>
-          )}
+          {openDropdown === 'time' && typeof document !== 'undefined'
+            ? createPortal(
+                <div
+                  ref={timePortalRef}
+                  style={timePopoverStyle}
+                  data-calendar-picker-subpopover=""
+                  role="dialog"
+                  aria-label="Pick a time range"
+                  className="rounded-xl border border-slate-200 bg-white shadow-lg ring-1 ring-slate-100"
+                >
+                  <TimeRangeDropdown
+                    key={`${startHour}-${endHour}`}
+                    startHour={startHour}
+                    endHour={endHour}
+                    onApply={onTimeRangeChange}
+                    onClose={() => setOpenDropdown(null)}
+                  />
+                </div>,
+                document.body,
+              )
+            : null}
         </div>
 
         {/* Jump to today */}
