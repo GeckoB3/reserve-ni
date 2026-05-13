@@ -99,6 +99,39 @@ function computePickerSubpopoverStyle(
   };
 }
 
+/** Apply pickers as inline layout on the portal root (avoid setState inside layout effects). */
+function applyPickerSubpopoverLayout(
+  el: HTMLElement,
+  triggerRect: DOMRect,
+  preference: 'calendar' | 'time',
+): void {
+  const s = computePickerSubpopoverStyle(triggerRect, preference);
+  el.style.position = s.position ?? 'fixed';
+  el.style.left =
+    typeof s.left === 'number' ? `${s.left}px` : (s.left as string | undefined) ?? '';
+  el.style.width =
+    typeof s.width === 'number' ? `${s.width}px` : (s.width as string | undefined) ?? '';
+  el.style.maxHeight =
+    typeof s.maxHeight === 'number' ? `${s.maxHeight}px` : (s.maxHeight as string | undefined) ?? '';
+  el.style.overflowY = (s.overflowY as string) ?? 'auto';
+  el.style.overscrollBehavior = (s.overscrollBehavior as string) ?? 'contain';
+  el.style.boxSizing = (s.boxSizing as string) ?? 'border-box';
+  el.style.zIndex = typeof s.zIndex === 'number' ? String(s.zIndex) : `${s.zIndex ?? 85}`;
+  if (s.top !== undefined) {
+    el.style.top = typeof s.top === 'number' ? `${s.top}px` : String(s.top);
+    el.style.removeProperty('bottom');
+    return;
+  }
+  if (s.bottom !== undefined) {
+    el.style.bottom =
+      typeof s.bottom === 'number' ? `${s.bottom}px` : String(s.bottom);
+    el.style.removeProperty('top');
+    return;
+  }
+  el.style.removeProperty('top');
+  el.style.removeProperty('bottom');
+}
+
 // ─── Strip date item ──────────────────────────────────────────────────────────
 
 interface StripDateItem {
@@ -311,8 +344,6 @@ export function CalendarDateTimePicker({
   const timeButtonRef = useRef<HTMLButtonElement>(null);
   const calendarPortalRef = useRef<HTMLDivElement>(null);
   const timePortalRef = useRef<HTMLDivElement>(null);
-  const [calendarPopoverStyle, setCalendarPopoverStyle] = useState<CSSProperties>({});
-  const [timePopoverStyle, setTimePopoverStyle] = useState<CSSProperties>({});
 
   const strip = buildStrip(date, stripRadius * 2 + 1);
 
@@ -346,14 +377,12 @@ export function CalendarDateTimePicker({
   });
 
   useLayoutEffect(() => {
-    if (openDropdown !== 'calendar' || !calendarButtonRef.current) {
-      setCalendarPopoverStyle({});
-      return undefined;
-    }
+    if (openDropdown !== 'calendar') return undefined;
     const update = () => {
-      const el = calendarButtonRef.current;
-      if (!el) return;
-      setCalendarPopoverStyle(computePickerSubpopoverStyle(el.getBoundingClientRect(), 'calendar'));
+      const btn = calendarButtonRef.current;
+      const portal = calendarPortalRef.current;
+      if (!btn || !portal) return;
+      applyPickerSubpopoverLayout(portal, btn.getBoundingClientRect(), 'calendar');
     };
     update();
     window.addEventListener('resize', update);
@@ -369,14 +398,12 @@ export function CalendarDateTimePicker({
   }, [openDropdown]);
 
   useLayoutEffect(() => {
-    if (openDropdown !== 'time' || !timeButtonRef.current) {
-      setTimePopoverStyle({});
-      return undefined;
-    }
+    if (openDropdown !== 'time') return undefined;
     const update = () => {
-      const el = timeButtonRef.current;
-      if (!el) return;
-      setTimePopoverStyle(computePickerSubpopoverStyle(el.getBoundingClientRect(), 'time'));
+      const btn = timeButtonRef.current;
+      const portal = timePortalRef.current;
+      if (!btn || !portal) return;
+      applyPickerSubpopoverLayout(portal, btn.getBoundingClientRect(), 'time');
     };
     update();
     window.addEventListener('resize', update);
@@ -456,7 +483,6 @@ export function CalendarDateTimePicker({
             ? createPortal(
                 <div
                   ref={calendarPortalRef}
-                  style={calendarPopoverStyle}
                   data-calendar-picker-subpopover=""
                   role="dialog"
                   aria-label="Pick a date"
@@ -507,7 +533,6 @@ export function CalendarDateTimePicker({
             ? createPortal(
                 <div
                   ref={timePortalRef}
-                  style={timePopoverStyle}
                   data-calendar-picker-subpopover=""
                   role="dialog"
                   aria-label="Pick a time range"
