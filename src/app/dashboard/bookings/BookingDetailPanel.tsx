@@ -32,11 +32,6 @@ import {
   showAttendanceConfirmedSupplementPill,
   showDepositPendingPill,
 } from '@/lib/booking/booking-staff-indicators';
-import {
-  bookingExpandAccordionBodyClass,
-  bookingExpandAccordionDetailsClass,
-  bookingExpandAccordionSummaryClass,
-} from '@/app/dashboard/bookings/booking-expand-accordion-classes';
 import type { BookingDetailPanelSnapshot } from '@/app/dashboard/bookings/booking-detail-panel-snapshot';
 
 export type { BookingDetailPanelSnapshot } from '@/app/dashboard/bookings/booking-detail-panel-snapshot';
@@ -363,6 +358,22 @@ export function BookingDetailPanel({
     }
     return Math.max(15, durationMins);
   }, [displayDetail]);
+
+  const guestHistoryRebookPrefill = useMemo((): StaffRebookGuestPrefill | undefined => {
+    const row = displayDetail;
+    if (!isHydrated || !row?.guest?.id) return undefined;
+    return {
+      firstName: row.guest.first_name ?? undefined,
+      lastName: row.guest.last_name ?? undefined,
+      email: row.guest.email,
+      phone: row.guest.phone,
+      dietaryNotes: row.dietary_notes,
+      occasion: row.occasion,
+      specialRequests: row.special_requests,
+      internalNotes: row.internal_notes,
+      customerProfileNotes: row.guest.customer_profile_notes,
+    };
+  }, [isHydrated, displayDetail]);
 
   const load = useCallback(async () => {
     const bookingPromise = fetch(`/api/venue/bookings/${bookingId}`);
@@ -788,28 +799,6 @@ export function BookingDetailPanel({
     null;
   const panelBodySpacing = isPopover ? 'space-y-1.5 p-2' : 'space-y-3 p-4';
   const sectionPadding = isPopover ? 'p-2' : 'p-3.5';
-
-  const guestHistoryRebookPrefill = useMemo((): StaffRebookGuestPrefill | undefined => {
-    if (!isHydrated || !d.guest?.id) return undefined;
-    return {
-      firstName: d.guest.first_name ?? undefined,
-      lastName: d.guest.last_name ?? undefined,
-      email: d.guest.email,
-      phone: d.guest.phone,
-      dietaryNotes: d.dietary_notes,
-      occasion: d.occasion,
-      specialRequests: d.special_requests,
-      internalNotes: d.internal_notes,
-      customerProfileNotes: d.guest.customer_profile_notes,
-    };
-  }, [
-    isHydrated,
-    d.guest,
-    d.dietary_notes,
-    d.occasion,
-    d.special_requests,
-    d.internal_notes,
-  ]);
 
   if (isPopover && shouldHoldPopoverForFullDetail) {
     return (

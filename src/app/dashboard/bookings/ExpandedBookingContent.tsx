@@ -356,10 +356,7 @@ export function ExpandedBookingContent({
       phone: g?.phone ?? booking.guest_phone,
     };
   }, [
-    detail?.guest?.email,
-    detail?.guest?.first_name,
-    detail?.guest?.last_name,
-    detail?.guest?.phone,
+    detail?.guest,
     booking.guest_email,
     booking.guest_first_name,
     booking.guest_last_name,
