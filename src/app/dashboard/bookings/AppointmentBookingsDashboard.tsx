@@ -259,6 +259,30 @@ function filterRegistryAppointments(
   );
 }
 
+function timeToMinutesHHMM(t: string): number {
+  const [hh, mm] = t.slice(0, 5).split(':').map(Number);
+  return (hh ?? 0) * 60 + (mm ?? 0);
+}
+
+/**
+ * Collapsed list bar should match the slot wall times (and expanded detail), not only the catalogue default.
+ * Aligns with practitioner grid `bookingDurationMinutes`: `booking_end_time` wins when present.
+ */
+function registryAppointmentDurationMinutes(
+  b: RegistryAppointment,
+  serviceDefaultMinutes: number | null,
+): number | null {
+  const endRaw = b.booking_end_time;
+  if (typeof endRaw === 'string' && endRaw.trim().length >= 5) {
+    const startM = timeToMinutesHHMM(b.booking_time);
+    let endM = timeToMinutesHHMM(endRaw);
+    if (endM <= startM) endM += 24 * 60;
+    const span = endM - startM;
+    return span > 0 ? span : null;
+  }
+  return serviceDefaultMinutes;
+}
+
 function registryToExpandedBookingRow(b: RegistryAppointment): BookingRow {
   return {
     id: b.id,
@@ -1199,7 +1223,7 @@ export function AppointmentBookingsDashboard({
     const endTime = b.booking_end_time ? b.booking_end_time.slice(0, 5) : null;
     const showConfirm = canShowConfirmBookingAttendanceAction(b);
     const showCancelConfirm = canShowCancelStaffAttendanceConfirmationAction(b);
-    const duration = svc?.duration_minutes ?? null;
+    const duration = registryAppointmentDurationMinutes(b, svc?.duration_minutes ?? null);
     const priceDisplay =
       b.deposit_amount_pence != null
         ? formatMoneyPence(b.deposit_amount_pence, sym)
