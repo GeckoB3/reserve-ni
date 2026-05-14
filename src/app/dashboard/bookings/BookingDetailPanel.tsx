@@ -44,6 +44,7 @@ import {
   BOOKING_DETAIL_MAX_STACK_DEPTH,
   GuestBookingsForGuestAccordion,
 } from '@/app/dashboard/bookings/GuestBookingsForGuestAccordion';
+import type { StaffRebookGuestPrefill } from '@/lib/booking/staff-rebook-bootstrap';
 
 function displayBookingGuestName(
   guest: { first_name?: string | null; last_name?: string | null } | null | undefined,
@@ -788,6 +789,28 @@ export function BookingDetailPanel({
   const panelBodySpacing = isPopover ? 'space-y-1.5 p-2' : 'space-y-3 p-4';
   const sectionPadding = isPopover ? 'p-2' : 'p-3.5';
 
+  const guestHistoryRebookPrefill = useMemo((): StaffRebookGuestPrefill | undefined => {
+    if (!isHydrated || !d.guest?.id) return undefined;
+    return {
+      firstName: d.guest.first_name ?? undefined,
+      lastName: d.guest.last_name ?? undefined,
+      email: d.guest.email,
+      phone: d.guest.phone,
+      dietaryNotes: d.dietary_notes,
+      occasion: d.occasion,
+      specialRequests: d.special_requests,
+      internalNotes: d.internal_notes,
+      customerProfileNotes: d.guest.customer_profile_notes,
+    };
+  }, [
+    isHydrated,
+    d.guest,
+    d.dietary_notes,
+    d.occasion,
+    d.special_requests,
+    d.internal_notes,
+  ]);
+
   if (isPopover && shouldHoldPopoverForFullDetail) {
     return (
       <>
@@ -1497,6 +1520,7 @@ export function BookingDetailPanel({
                     });
                   }}
                   listRefreshKey={guestHistoryListRefresh}
+                  rebookGuestPrefill={guestHistoryRebookPrefill}
                 />
               </div>
             ) : null}

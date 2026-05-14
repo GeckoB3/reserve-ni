@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { VenuePublic, GuestDetails } from './types';
 import { DetailsStep } from './DetailsStep';
 import { BookingSubmittingPanel } from './BookingSubmittingPanel';
@@ -33,6 +33,22 @@ import {
   venueBookingsCreateUrl,
 } from '@/lib/booking/booking-flow-api';
 import { ResourceCalendarMonth, todayYmdLocal } from './ResourceCalendarMonth';
+import type { StaffRebookBootstrapPayloadV1 } from '@/lib/booking/staff-rebook-bootstrap';
+
+function staffRebookAppointmentInitialDetails(
+  bootstrap: StaffRebookBootstrapPayloadV1 | null | undefined,
+): Partial<GuestDetails> | undefined {
+  if (!bootstrap?.guest) return undefined;
+  const g = bootstrap.guest;
+  return {
+    first_name: g.firstName?.trim() ?? '',
+    last_name: g.lastName?.trim() ?? '',
+    email: typeof g.email === 'string' ? g.email : '',
+    phone: typeof g.phone === 'string' ? g.phone : '',
+    ...(g.dietaryNotes?.trim() ? { dietary_notes: g.dietaryNotes.trim() } : {}),
+    ...(g.occasion?.trim() ? { occasion: g.occasion.trim() } : {}),
+  };
+}
 
 /** One bookable variant of a service. Mirrors the public catalog's `AppointmentCatalogVariant`. */
 interface CatalogVariant {
@@ -147,6 +163,8 @@ interface AppointmentBookingFlowProps {
     guest_phone?: string;
     publicAuth?: { token?: string; hmac?: string };
   };
+  /** Built from sessionStorage when staff uses “Rebook” from guest history (same venue). */
+  staffRebookBootstrap?: StaffRebookBootstrapPayloadV1 | null;
 }
 
 function formatDateHuman(dateStr: string): string {
@@ -191,6 +209,7 @@ export function AppointmentBookingFlow({
   preselectedPractitionerId,
   staffBookingSource = 'phone',
   editBooking,
+  staffRebookBootstrap = null,
 }: AppointmentBookingFlowProps) {
   const isStaff = bookingAudience === 'staff';
   const isEdit = Boolean(editBooking);
@@ -270,6 +289,9 @@ export function AppointmentBookingFlow({
   const [availableDates, setAvailableDates] = useState<Set<string>>(new Set());
   const [loadingCalendar, setLoadingCalendar] = useState(false);
   const [calendarCache, setCalendarCache] = useState<Map<string, Set<string>>>(() => new Map());
+  /** One-shot bootstrap from guest-history Rebook — applied after catalog load. */
+  const staffRebookApplyRef = useRef(false);
+  const [staffRebookPriming, setStaffRebookPriming] = useState(false);
   const calendarCacheRef = useRef(calendarCache);
   calendarCacheRef.current = calendarCache;
   const calendarInFlightRef = useRef<Map<string, Promise<Set<string>>>>(new Map());
@@ -354,6 +376,12 @@ export function AppointmentBookingFlow({
   useEffect(() => {
     if (initialDate) setDate(initialDate);
   }, [initialDate]);
+
+  useEffect(() => {
+    if (editBooking) return;
+    if (!initialTime) return;
+    setSelectedTime(initialTime.trim().slice(0, 5));
+  }, [initialTime, editBooking]);
 
   useEffect(() => {
     if (editBooking || !preselectedPractitionerId || catalogStaff.length === 0 || lockedPractitioner) return;
@@ -510,9 +538,21 @@ export function AppointmentBookingFlow({
   );
 
   const primeSelectedAppointmentCalendar = useCallback(
-    (practitionerId: string, serviceId: string, durationMinutes?: number | null) => {
+    (
+      practitionerId: string,
+      serviceId: string,
+      durationMinutes?: number | null,
+      variantId?: string | null,
+    ) => {
       const { year, month } = calendarMonthRef.current;
-      void loadAppointmentCalendarMonth({ practitionerId, serviceId, durationMinutes, year, month }).catch(() => {
+      void loadAppointmentCalendarMonth({
+        practitionerId,
+        serviceId,
+        variantId: variantId ?? null,
+        durationMinutes: durationMinutes ?? null,
+        year,
+        month,
+      }).catch(() => {
         /* best-effort: the mounted calendar effect will surface an empty state if needed */
       });
     },
@@ -534,6 +574,63 @@ export function AppointmentBookingFlow({
     },
     [catalogStaff, prefetchCalendarTasks],
   );
+
+  const primeSelectedAppointmentCalendarRef = useRef(primeSelectedAppointmentCalendar);
+  primeSelectedAppointmentCalendarRef.current = primeSelectedAppointmentCalendar;
+  const queuePrefetchForServicePractitionersRef = useRef(queuePrefetchForServicePractitioners);
+  queuePrefetchForServicePractitionersRef.current = queuePrefetchForServicePractitioners;
+
+  useLayoutEffect(() => {
+    if (!staffRebookBootstrap?.appointment || editBooking || !isStaff || !staffRebookBootstrap) return;
+    if (catalogLoading || catalogStaff.length === 0) return;
+    if (staffRebookApplyRef.current) return;
+
+    const appt = staffRebookBootstrap.appointment;
+    const practitioner = catalogStaff.find((p) => p.id === appt.practitionerId);
+    const offer = practitioner?.services.find((s) => s.id === appt.serviceId);
+    if (!practitioner || !offer) {
+      staffRebookApplyRef.current = true;
+      setError('Could not reopen this appointment in the picker. Choose a service, staff member, and time.');
+      return;
+    }
+
+    const catalogVariants = offer.variants ?? [];
+    let variantId: string | null = appt.variantId ?? null;
+    if (catalogVariants.length > 0) {
+      if (!variantId || !catalogVariants.some((v) => v.id === variantId)) {
+        staffRebookApplyRef.current = true;
+        setSelectedServiceId(appt.serviceId);
+        setSelectedVariantId(null);
+        setSelectedPractitionerId(appt.practitionerId);
+        setStep('variant');
+        return;
+      }
+    } else {
+      variantId = null;
+    }
+
+    const naturalDuration =
+      variantId != null
+        ? (catalogVariants.find((v) => v.id === variantId)?.duration_minutes ?? offer.duration_minutes)
+        : offer.duration_minutes;
+
+    let durationMinutesParam: number | null = null;
+    if (appt.durationMinutes != null && appt.durationMinutes !== naturalDuration) {
+      durationMinutesParam = appt.durationMinutes;
+      setStaffDurationOverrides((prev) => ({ ...prev, [appt.serviceId]: appt.durationMinutes! }));
+    }
+
+    staffRebookApplyRef.current = true;
+    setStaffRebookPriming(true);
+    queuePrefetchForServicePractitionersRef.current(appt.serviceId, durationMinutesParam ?? naturalDuration);
+    setSelectedServiceId(appt.serviceId);
+    setSelectedVariantId(variantId);
+    setSelectedPractitionerId(appt.practitionerId);
+    primeSelectedAppointmentCalendarRef.current(appt.practitionerId, appt.serviceId, durationMinutesParam, variantId);
+    setStep('slot');
+    setError(null);
+    queueMicrotask(() => setStaffRebookPriming(false));
+  }, [staffRebookBootstrap, editBooking, isStaff, catalogLoading, catalogStaff]);
 
   useEffect(() => {
     if (step !== 'slot' && step !== 'group_slot') return;
@@ -1387,8 +1484,27 @@ export function AppointmentBookingFlow({
     return `${sym}${amt} total: refund per appointment (≥${hrs}h before start); cut-off passed for some - those shares are not refundable.`;
   }, [groupPeople, refundNoticeHours, groupCreateResult, sym]);
 
+  const appointmentRebookWait =
+    Boolean(staffRebookBootstrap?.appointment) && isStaff && !editBooking && (catalogLoading || staffRebookPriming);
+
   return (
-    <div ref={containerRef} className="mx-auto max-w-lg" style={accentColour ? { '--accent': accentColour } as React.CSSProperties : undefined}>
+    <div
+      ref={containerRef}
+      className={`relative mx-auto max-w-lg${appointmentRebookWait ? ' min-h-[14rem]' : ''}`}
+      style={accentColour ? { '--accent': accentColour } as React.CSSProperties : undefined}
+    >
+      {appointmentRebookWait ? (
+        <div
+          className="pointer-events-none absolute inset-0 z-30 flex flex-col items-center justify-center rounded-2xl bg-white/80 backdrop-blur-[1px]"
+          aria-busy="true"
+          aria-live="polite"
+        >
+          <div className="h-10 w-10 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" aria-hidden />
+          <p className="mt-3 text-sm font-medium text-slate-700">
+            {catalogLoading ? 'Loading services…' : 'Opening date & time…'}
+          </p>
+        </div>
+      ) : null}
       {isLockedPractitionerFlow && lockedPractitioner && singleFlowSteps.includes(step) && (
         <div className="mb-4 flex items-center gap-3 rounded-xl border border-brand-100 bg-brand-50/80 px-4 py-3 text-sm text-brand-900">
           <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-brand-100 text-sm font-bold text-brand-800">
@@ -1512,7 +1628,7 @@ export function AppointmentBookingFlow({
                           return;
                         }
                         if (isLockedPractitionerFlow && selectedPractitionerId) {
-                          primeSelectedAppointmentCalendar(selectedPractitionerId, svc.id, displayedDuration);
+                          primeSelectedAppointmentCalendar(selectedPractitionerId, svc.id, displayedDuration, null);
                         }
                         setStep(isLockedPractitionerFlow ? 'slot' : 'practitioner');
                       }}
@@ -1676,6 +1792,7 @@ export function AppointmentBookingFlow({
                       selectedPractitionerId,
                       selectedServiceId,
                       staffDurationOverrides[selectedServiceId] ?? null,
+                      variant.id,
                     );
                   }
                   setStep(isLockedPractitionerFlow ? 'slot' : 'practitioner');
@@ -2134,12 +2251,17 @@ export function AppointmentBookingFlow({
               refundNoticeHours={refundNoticeHours}
               phoneDefaultCountry={phoneDefaultCountry}
               audience={detailsAudience}
-              initialDetails={editBooking ? {
-                first_name: editBooking.guest_first_name,
-                last_name: editBooking.guest_last_name,
-                email: editBooking.guest_email,
-                phone: editBooking.guest_phone,
-              } : undefined}
+              initialDetails={
+                editBooking
+                  ? {
+                      first_name: editBooking.guest_first_name,
+                      last_name: editBooking.guest_last_name,
+                      email: editBooking.guest_email,
+                      phone: editBooking.guest_phone,
+                    }
+                  : staffRebookAppointmentInitialDetails(staffRebookBootstrap)
+              }
+              initialAppointmentComments={editBooking ? undefined : staffRebookBootstrap?.appointmentComments}
               hideAppointmentRequestField={isEdit}
               submitLabel={isEdit ? 'Save changes' : undefined}
             />

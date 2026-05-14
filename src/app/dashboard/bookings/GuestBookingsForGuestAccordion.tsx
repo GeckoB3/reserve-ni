@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { calendarDateInTimeZone } from '@/lib/guests/guest-contacts-list';
 import type { BookingDetailPanelSnapshot } from '@/app/dashboard/bookings/booking-detail-panel-snapshot';
 import {
@@ -9,6 +10,15 @@ import {
   bookingExpandAccordionSummaryClass,
 } from '@/app/dashboard/bookings/booking-expand-accordion-classes';
 import { readResponseJson } from '@/lib/http/read-response-json';
+import {
+  staffBookingSurfaceTabIdToQueryParam,
+} from '@/lib/booking/staff-booking-modal-options';
+import {
+  bookingSourceDurationMinutes,
+  bookingSourceWallEndHm,
+  buildStaffRebookBootstrapFromBookingSource,
+} from '@/lib/booking/staff-rebook-from-booking-source';
+import { type StaffRebookGuestPrefill, writeStaffRebookBootstrap } from '@/lib/booking/staff-rebook-bootstrap';
 
 /** Max depth of BookingDetailPanel opened from nested “Detail” (guest history), including the root panel. */
 export const BOOKING_DETAIL_MAX_STACK_DEPTH = 8;
@@ -20,6 +30,8 @@ export interface GuestBookingHistoryRow {
   party_size: number;
   status: string;
   estimated_end_time: string | null;
+  /** Wall-clock segment end when `estimated_end_time` is unavailable (PostgreSQL `time`). */
+  booking_end_time?: string | null;
   booking_item_name: string | null;
   booking_model?: string | null;
   experience_event_id?: string | null;
@@ -27,10 +39,17 @@ export interface GuestBookingHistoryRow {
   resource_id?: string | null;
   event_session_id?: string | null;
   calendar_id?: string | null;
+  /** Resolved from `unified_calendars` when `calendar_id` is set (`GET /api/venue/bookings/list`). */
+  calendar_name?: string | null;
   service_item_id?: string | null;
   practitioner_id?: string | null;
   appointment_service_id?: string | null;
   service_id?: string | null;
+  service_variant_id?: string | null;
+  /** Dining area FK when assigned. */
+  area_id?: string | null;
+  /** Dinner / seating area when assigned (see `GET /api/venue/bookings/list`). */
+  area_name?: string | null;
 }
 
 export interface GuestHistoryRelatedBookingPayload {
@@ -88,10 +107,180 @@ function isBookingUpcomingInVenue(
   return bookingTimeHm >= nowHm;
 }
 
+function parseEstimatedEndInstantMs(iso: string | null | undefined): number | null {
+  if (!iso?.trim()) return null;
+  const ms = new Date(iso.trim()).getTime();
+  return Number.isNaN(ms) ? null : ms;
+}
+
+/** Postgres `time` → HH:mm when parseable */
+function bookingEndWallHm(raw: string | null | undefined): string | null {
+  if (!raw?.trim()) return null;
+  const t = raw.trim();
+  const hm = t.length >= 5 ? t.slice(0, 5) : t;
+  return /^\d{2}:\d{2}$/.test(hm) ? hm : null;
+}
+
+function guestBookingHistoryTimeRange(row: GuestBookingHistoryRow): string {
+  const st = row.booking_time.length >= 5 ? row.booking_time.slice(0, 5) : row.booking_time;
+  const endHm = bookingSourceWallEndHm(row);
+  if (endHm && endHm !== st) return `${st}–${endHm}`;
+  return st;
+}
+
+function guestBookingHistoryDurationLabel(row: GuestBookingHistoryRow): string | null {
+  const mins = bookingSourceDurationMinutes(row);
+  if (mins == null) return null;
+  if (mins < 60) return `${mins} min`;
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return m === 0 ? `${h}h` : `${h}h ${m}m`;
+}
+
+const guestBookingBarBaseClass =
+  'flex min-w-0 items-start justify-between gap-2 rounded-lg border border-slate-200/90 bg-white px-2.5 py-2 shadow-sm ring-1 ring-slate-900/[0.03]';
+const guestBookingBarCurrentClass =
+  `${guestBookingBarBaseClass} border-brand-200/80 bg-brand-50/50 ring-brand-100`;
+
+function GuestBookingHistoryBar({
+  row: r,
+  currentBookingId,
+  canOpenNested,
+  guestDisplayNameForSnapshots,
+  onOpenBookingDetail,
+  showRebook,
+  onRebook,
+}: {
+  row: GuestBookingHistoryRow;
+  currentBookingId: string;
+  canOpenNested: boolean;
+  guestDisplayNameForSnapshots: string;
+  onOpenBookingDetail: (payload: GuestHistoryRelatedBookingPayload) => void;
+  showRebook: boolean;
+  onRebook: (row: GuestBookingHistoryRow) => void;
+}) {
+  const isThisBooking = r.id === currentBookingId;
+  const timeRange = guestBookingHistoryTimeRange(r);
+  const durationLabel = guestBookingHistoryDurationLabel(r);
+  const serviceLabel =
+    typeof r.booking_item_name === 'string' && r.booking_item_name.trim() !== '' ? r.booking_item_name.trim() : null;
+  const calendarLabel =
+    typeof r.calendar_name === 'string' && r.calendar_name.trim() !== '' ? r.calendar_name.trim() : null;
+  const areaLabel =
+    typeof r.area_name === 'string' && r.area_name.trim() !== '' ? r.area_name.trim() : null;
+  const secondaryLocationLabel = calendarLabel ?? areaLabel;
+
+  return (
+    <li className={isThisBooking ? guestBookingBarCurrentClass : guestBookingBarBaseClass} aria-current={isThisBooking ? 'true' : undefined}>
+      <div className="min-w-0 flex-1 space-y-1">
+        <div className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-1 text-[11px] tabular-nums leading-snug text-slate-800">
+          <span className="font-semibold text-slate-900">{formatDateNice(r.booking_date)}</span>
+          <span className="text-slate-300" aria-hidden>
+            ·
+          </span>
+          <span className="font-semibold text-slate-800">{timeRange}</span>
+          {durationLabel ? (
+            <>
+              <span className="text-slate-300" aria-hidden>
+                ·
+              </span>
+              <span className="font-medium text-slate-600">{durationLabel}</span>
+            </>
+          ) : null}
+        </div>
+        <div className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-0.5 text-[11px] text-slate-600">
+          <span className={`min-w-0 font-semibold ${serviceLabel ? 'text-slate-800' : 'font-medium text-slate-400 italic'}`}>
+            {serviceLabel ?? 'No service'}
+          </span>
+          {secondaryLocationLabel ? (
+            <>
+              <span className="shrink-0 text-slate-300">·</span>
+              <span className="min-w-0 max-w-[min(14rem,100%)] truncate text-slate-600" title={secondaryLocationLabel}>
+                {secondaryLocationLabel}
+              </span>
+            </>
+          ) : null}
+        </div>
+      </div>
+      {isThisBooking ? (
+        <span
+          className="shrink-0 self-center rounded-lg border border-brand-200 bg-brand-50 px-2.5 py-1.5 text-[11px] font-semibold text-brand-800"
+          title="The booking expanded above"
+        >
+          This booking
+        </span>
+      ) : (
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-1 self-center">
+          {showRebook ? (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                onRebook(r);
+              }}
+              className="rounded-lg border border-brand-200 bg-brand-50 px-2 py-1.5 text-[11px] font-semibold text-brand-800 shadow-sm ring-1 ring-brand-100/80 hover:bg-brand-100/70"
+            >
+              Rebook
+            </button>
+          ) : null}
+          <button
+            type="button"
+            disabled={!canOpenNested}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onOpenBookingDetail({
+                bookingId: r.id,
+                snapshot: rowToBookingDetailSnapshot(r, guestDisplayNameForSnapshots),
+                row: r,
+              });
+            }}
+            className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 shadow-sm ring-1 ring-slate-900/[0.03] hover:bg-slate-50 disabled:pointer-events-none disabled:opacity-40"
+          >
+            Detail
+          </button>
+        </div>
+      )}
+    </li>
+  );
+}
+
+/**
+ * Upcoming = scheduled end time is still in the future (same instant/wall rules as dashboard).
+ * When no end boundary exists, falls back to start-time-based “today / future”.
+ */
+function isBookingUpcomingBeforeScheduledEnd(
+  row: GuestBookingHistoryRow,
+  now: Date,
+  venueTimeZone: string,
+): boolean {
+  const endInstant = parseEstimatedEndInstantMs(row.estimated_end_time);
+  if (endInstant !== null) {
+    return now.getTime() < endInstant;
+  }
+
+  const endHm = bookingEndWallHm(row.booking_end_time ?? null);
+  const todayVenue = calendarDateInTimeZone(now, venueTimeZone);
+  const startHm =
+    typeof row.booking_time === 'string' && row.booking_time.length >= 5 ? row.booking_time.slice(0, 5) : '00:00';
+
+  if (row.booking_date > todayVenue) return true;
+  if (row.booking_date < todayVenue) return false;
+
+  if (endHm) {
+    const nowHm = wallClockHHMMInVenue(now, venueTimeZone);
+    return nowHm < endHm;
+  }
+
+  return isBookingUpcomingInVenue(row.booking_date, startHm, now, venueTimeZone);
+}
+
 export function rowToBookingDetailSnapshot(row: GuestBookingHistoryRow, guestDisplayName: string): BookingDetailPanelSnapshot {
   const st = row.booking_time.slice(0, 5);
   const parsedEnd = estimatedEndToHHMM(row.estimated_end_time);
-  const endTime = parsedEnd ?? st;
+  const wallEndHm = bookingEndWallHm(row.booking_end_time ?? null);
+  const endTime = parsedEnd ?? wallEndHm ?? st;
   const serviceLabel =
     typeof row.booking_item_name === 'string' && row.booking_item_name.trim() !== ''
       ? row.booking_item_name.trim()
@@ -115,6 +304,7 @@ export function GuestBookingsForGuestAccordion({
   canOpenNested,
   onOpenBookingDetail,
   listRefreshKey,
+  rebookGuestPrefill,
 }: {
   guestId: string | null | undefined;
   currentBookingId: string;
@@ -125,10 +315,23 @@ export function GuestBookingsForGuestAccordion({
   onOpenBookingDetail: (payload: GuestHistoryRelatedBookingPayload) => void;
   /** Bumped when this panel reloads booking detail so the list stays in sync after edits. */
   listRefreshKey: number;
+  /** Guest + booking notes for POST sessionStorage staff rebook (optional). */
+  rebookGuestPrefill?: StaffRebookGuestPrefill;
 }) {
+  const router = useRouter();
   const [rows, setRows] = useState<GuestBookingHistoryRow[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
+
+  const handleRebookRow = useCallback(
+    (row: GuestBookingHistoryRow) => {
+      const payload = buildStaffRebookBootstrapFromBookingSource(row, rebookGuestPrefill);
+      if (!payload) return;
+      writeStaffRebookBootstrap(payload);
+      void router.push(`/dashboard/bookings/new?tab=${staffBookingSurfaceTabIdToQueryParam(payload.surface)}`);
+    },
+    [rebookGuestPrefill, router],
+  );
 
   useEffect(() => {
     if (!guestId) {
@@ -177,16 +380,9 @@ export function GuestBookingsForGuestAccordion({
     if (!rows?.length) {
       return { upcomingRows: [] as GuestBookingHistoryRow[], previousRows: [] as GuestBookingHistoryRow[] };
     }
-    const others = rows.filter((r) => r.id !== currentBookingId);
     const now = new Date();
-    const upcoming = others.filter((r) => {
-      const hm = typeof r.booking_time === 'string' ? r.booking_time.slice(0, 5) : '00:00';
-      return isBookingUpcomingInVenue(r.booking_date, hm, now, venueTimeZone);
-    });
-    const previous = others.filter((r) => {
-      const hm = typeof r.booking_time === 'string' ? r.booking_time.slice(0, 5) : '00:00';
-      return !isBookingUpcomingInVenue(r.booking_date, hm, now, venueTimeZone);
-    });
+    const upcoming = rows.filter((r) => isBookingUpcomingBeforeScheduledEnd(r, now, venueTimeZone));
+    const previous = rows.filter((r) => !isBookingUpcomingBeforeScheduledEnd(r, now, venueTimeZone));
     upcoming.sort((a, b) => {
       const dc = a.booking_date.localeCompare(b.booking_date);
       if (dc !== 0) return dc;
@@ -198,7 +394,7 @@ export function GuestBookingsForGuestAccordion({
       return b.booking_time.localeCompare(a.booking_time);
     });
     return { upcomingRows: upcoming, previousRows: previous };
-  }, [rows, currentBookingId, venueTimeZone]);
+  }, [rows, venueTimeZone]);
 
   if (!guestId) return null;
 
@@ -208,9 +404,6 @@ export function GuestBookingsForGuestAccordion({
     if (!rows) return 'Other visits for this guest';
     return `${upcomingRows.length} upcoming · ${previousRows.length} previous`;
   })();
-
-  const rowListItemClass =
-    'flex min-w-0 items-center justify-between gap-2 rounded-lg border border-slate-200/90 bg-white px-2.5 py-2 text-[11px] text-slate-600 shadow-sm ring-1 ring-slate-900/[0.03]';
 
   return (
     <details className={bookingExpandAccordionDetailsClass}>
@@ -235,28 +428,16 @@ export function GuestBookingsForGuestAccordion({
               ) : (
                 <ul className="grid gap-2">
                   {upcomingRows.map((r) => (
-                    <li key={r.id} className={rowListItemClass}>
-                      <span className="min-w-0 flex-1 truncate tabular-nums text-slate-800">
-                        {formatDateNice(r.booking_date)} · {r.booking_time.slice(0, 5)} ·{' '}
-                        {r.booking_item_name?.trim() ? r.booking_item_name.trim() : '—'}
-                      </span>
-                      <button
-                        type="button"
-                        disabled={!canOpenNested}
-                        onClick={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          onOpenBookingDetail({
-                            bookingId: r.id,
-                            snapshot: rowToBookingDetailSnapshot(r, guestDisplayNameForSnapshots),
-                            row: r,
-                          });
-                        }}
-                        className="shrink-0 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 shadow-sm ring-1 ring-slate-900/[0.03] hover:bg-slate-50 disabled:pointer-events-none disabled:opacity-40"
-                      >
-                        Detail
-                      </button>
-                    </li>
+                    <GuestBookingHistoryBar
+                      key={r.id}
+                      row={r}
+                      currentBookingId={currentBookingId}
+                      canOpenNested={canOpenNested}
+                      guestDisplayNameForSnapshots={guestDisplayNameForSnapshots}
+                      onOpenBookingDetail={onOpenBookingDetail}
+                      showRebook={buildStaffRebookBootstrapFromBookingSource(r, {}) !== null}
+                      onRebook={handleRebookRow}
+                    />
                   ))}
                 </ul>
               )}
@@ -268,28 +449,16 @@ export function GuestBookingsForGuestAccordion({
               ) : (
                 <ul className="grid gap-2">
                   {previousRows.map((r) => (
-                    <li key={r.id} className={rowListItemClass}>
-                      <span className="min-w-0 flex-1 truncate tabular-nums text-slate-800">
-                        {formatDateNice(r.booking_date)} · {r.booking_time.slice(0, 5)} ·{' '}
-                        {r.booking_item_name?.trim() ? r.booking_item_name.trim() : '—'}
-                      </span>
-                      <button
-                        type="button"
-                        disabled={!canOpenNested}
-                        onClick={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          onOpenBookingDetail({
-                            bookingId: r.id,
-                            snapshot: rowToBookingDetailSnapshot(r, guestDisplayNameForSnapshots),
-                            row: r,
-                          });
-                        }}
-                        className="shrink-0 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 shadow-sm ring-1 ring-slate-900/[0.03] hover:bg-slate-50 disabled:pointer-events-none disabled:opacity-40"
-                      >
-                        Detail
-                      </button>
-                    </li>
+                    <GuestBookingHistoryBar
+                      key={r.id}
+                      row={r}
+                      currentBookingId={currentBookingId}
+                      canOpenNested={canOpenNested}
+                      guestDisplayNameForSnapshots={guestDisplayNameForSnapshots}
+                      onOpenBookingDetail={onOpenBookingDetail}
+                      showRebook={buildStaffRebookBootstrapFromBookingSource(r, {}) !== null}
+                      onRebook={handleRebookRow}
+                    />
                   ))}
                 </ul>
               )}

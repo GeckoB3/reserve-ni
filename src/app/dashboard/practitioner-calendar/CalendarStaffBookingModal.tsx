@@ -2,6 +2,10 @@
 
 import { StaffSurfaceBookingStack } from '@/components/booking/StaffSurfaceBookingStack';
 import type { BookingModel } from '@/types/booking-models';
+import {
+  getStaffBookingSurfaceTabs,
+  type StaffBookingSurfaceTabId,
+} from '@/lib/booking/staff-booking-modal-options';
 
 export interface CalendarStaffBookingModalProps {
   open: boolean;
@@ -38,6 +42,15 @@ export function CalendarStaffBookingModal({
   preselectedTime,
 }: CalendarStaffBookingModalProps) {
   const title = intent === 'new' ? 'New booking' : 'Walk-in';
+
+  const timedSlotPrefill = typeof preselectedTime === 'string' && preselectedTime.trim() !== '';
+
+  const staffSurfaceTabs = getStaffBookingSurfaceTabs(bookingModel, enabledModels);
+  /** Empty-slot clicks prefill HH:mm — open the Appointment surface first when hybrid venues expose it. */
+  const initialStaffSurfaceTabId: StaffBookingSurfaceTabId | undefined =
+    timedSlotPrefill && staffSurfaceTabs.some((t) => t.id === 'unified_scheduling')
+      ? 'unified_scheduling'
+      : undefined;
 
   if (!open) return null;
 
@@ -81,6 +94,7 @@ export function CalendarStaffBookingModal({
             onClose={onClose}
             initialDate={preselectedDate}
             initialTime={preselectedTime}
+            initialStaffSurfaceTabId={initialStaffSurfaceTabId}
             preselectedPractitionerId={preselectedPractitionerId}
           />
         </div>
