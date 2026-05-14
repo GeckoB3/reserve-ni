@@ -1,15 +1,15 @@
 'use client';
 
-import Link from 'next/link';
-import { useEffect, useState, type ReactNode } from 'react';
+import { useRouter } from 'next/navigation';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { GuestMessageChannelSelect } from '@/components/booking/GuestMessageChannelSelect';
 import type { GuestMessageChannel } from '@/lib/booking/guest-message-channel';
 import { useToast } from '@/components/ui/Toast';
 import { GuestTagEditor } from '@/components/dashboard/GuestTagEditor';
 import { CustomerProfileNotesCard } from '@/components/booking/CustomerProfileNotesCard';
-import { StatTile } from '@/components/ui/dashboard/StatTile';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { Pill } from '@/components/ui/dashboard/Pill';
+import type { BookingModel } from '@/types/booking-models';
 import type { GuestDetailResponse, GuestListRow } from '@/types/contacts';
 import {
   formatCalendarDayShort,
@@ -19,7 +19,6 @@ import {
 import { ContactCustomFieldsSection } from '@/components/dashboard/contacts/ContactCustomFieldsSection';
 import { ContactDocumentsSection } from '@/components/dashboard/contacts/ContactDocumentsSection';
 import { ContactMarketingSection } from '@/components/dashboard/contacts/ContactMarketingSection';
-import { ContactTimelineSection } from '@/components/dashboard/contacts/ContactTimelineSection';
 import { ContactHouseholdSection } from '@/components/dashboard/contacts/ContactHouseholdSection';
 import { ContactGdprSection } from '@/components/dashboard/contacts/ContactGdprSection';
 import { formatGuestDisplayName } from '@/lib/guests/name';
@@ -29,6 +28,16 @@ import {
   bookingExpandAccordionSummaryClass,
   bookingExpandActionsBarClass,
 } from '@/app/dashboard/bookings/booking-expand-accordion-classes';
+import {
+  EXP_BOOKING_ICO,
+  EXP_BOOKING_NEUTRAL_PROMINENT,
+} from '@/app/dashboard/bookings/expanded-booking-toolbar-classes';
+import {
+  GuestBookingsForGuestAccordion,
+  type GuestHistoryRelatedBookingPayload,
+} from '@/app/dashboard/bookings/GuestBookingsForGuestAccordion';
+import { writeStaffRebookBootstrap, type StaffRebookGuestPrefill } from '@/lib/booking/staff-rebook-bootstrap';
+import { defaultStaffBookingSurfaceTab, staffBookingSurfaceTabIdToQueryParam } from '@/lib/booking/staff-booking-modal-options';
 
 const accordionChevron = (
   <svg className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-open:rotate-180" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
@@ -49,7 +58,6 @@ export function ContactDetailPanel({
   id,
   clientLower,
   bookingWord,
-  currencySymbol,
   venueId,
   isAdmin,
   listRow,
@@ -72,11 +80,14 @@ export function ContactDetailPanel({
   eraseLoadingId,
   onEraseGuest,
   onOpenMerge,
+  venueStaffBookingModel,
+  venueStaffEnabledBookingModels,
+  venueTimezone,
+  onOpenRelatedGuestBooking,
 }: {
   id: string;
   clientLower: string;
   bookingWord: string;
-  currencySymbol: string;
   venueId: string;
   isAdmin: boolean;
   listRow: GuestListRow;
@@ -99,8 +110,78 @@ export function ContactDetailPanel({
   eraseLoadingId: string | null;
   onEraseGuest: (guestId: string) => Promise<void>;
   onOpenMerge?: () => void;
+  venueStaffBookingModel: BookingModel;
+  venueStaffEnabledBookingModels: BookingModel[];
+  venueTimezone: string;
+  onOpenRelatedGuestBooking: (payload: GuestHistoryRelatedBookingPayload) => void;
 }) {
+  const router = useRouter();
   const { addToast } = useToast();
+
+  const staffNewBookingGuestContacts = useMemo((): StaffRebookGuestPrefill => {
+    const dg = detail?.guest;
+    const matches = Boolean(dg && dg.id === selectedId);
+    if (matches && dg) {
+      return {
+        firstName: dg.first_name ?? undefined,
+        lastName: dg.last_name ?? undefined,
+        email: dg.email,
+        phone: dg.phone,
+      };
+    }
+    return {
+      firstName: listRow.first_name ?? undefined,
+      lastName: listRow.last_name ?? undefined,
+      email: listRow.email,
+      phone: listRow.phone,
+    };
+  }, [
+    detail?.guest,
+    selectedId,
+    listRow.email,
+    listRow.first_name,
+    listRow.last_name,
+    listRow.phone,
+  ]);
+
+  const staffNewBookingDefaultSurfaceTab = useMemo(
+    () => defaultStaffBookingSurfaceTab(venueStaffBookingModel, venueStaffEnabledBookingModels),
+    [venueStaffBookingModel, venueStaffEnabledBookingModels],
+  );
+
+  const handleStaffNewBookingFromContact = useCallback(() => {
+    writeStaffRebookBootstrap({
+      v: 1,
+      surface: staffNewBookingDefaultSurfaceTab,
+      guest: staffNewBookingGuestContacts,
+    });
+    void router.push(`/dashboard/bookings/new?tab=${staffBookingSurfaceTabIdToQueryParam(staffNewBookingDefaultSurfaceTab)}`);
+  }, [router, staffNewBookingDefaultSurfaceTab, staffNewBookingGuestContacts]);
+
+  const contactRebookGuestPrefill = useMemo((): StaffRebookGuestPrefill | undefined => {
+    const guest = detail?.guest;
+    if (!guest || guest.id !== selectedId) return undefined;
+    return {
+      firstName: guest.first_name ?? undefined,
+      lastName: guest.last_name ?? undefined,
+      email: guest.email,
+      phone: guest.phone,
+      customerProfileNotes: guest.customer_profile_notes,
+    };
+  }, [
+    detail?.guest,
+    selectedId,
+  ]);
+
+  const guestBookingsListRefreshKey = useMemo(() => {
+    const guest = detail?.guest;
+    if (!guest || guest.id !== selectedId || !detail) return 0;
+    const s = `${guest.updated_at}|${detail.booking_history.length}|${selectedId}`;
+    let h = 0;
+    for (let i = 0; i < s.length; i++) h = (Math.imul(31, h) + s.charCodeAt(i)) | 0;
+    return Math.abs(h);
+  }, [detail, selectedId]);
+
   const [messageChannel, setMessageChannel] = useState<GuestMessageChannel>('both');
   const [messageDraft, setMessageDraft] = useState('');
   const [messageSending, setMessageSending] = useState(false);
@@ -152,7 +233,6 @@ export function ContactDetailPanel({
     g.marketing_opt_out ? 'Opted out' : g.marketing_consent ? 'Subscribed' : 'No consent';
   const recordSummaryHint =
     activeFieldCount === 0 ? marketingHint : `${marketingHint} · ${activeFieldCount} field${activeFieldCount === 1 ? '' : 's'}`;
-  const activitySummaryHint = `${detail.booking_history.length} in list`;
   const inboxSummaryHint =
     `${detail.communications.length} message${detail.communications.length === 1 ? '' : 's'}`
     + (g.customer_profile_notes?.trim() ? ' · note on file' : '');
@@ -219,34 +299,34 @@ export function ContactDetailPanel({
             </div>
           </div>
 
-          <div className="mt-2 grid grid-cols-2 gap-1.5 sm:grid-cols-4">
-            <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            <div className="min-w-[min(100%,12rem)] max-w-full flex-[1_1_12rem] rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
               <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Email</p>
               {email ? (
-                <a href={`mailto:${email}`} className="mt-0.5 block truncate text-xs font-bold text-slate-800 hover:text-brand-700">
+                <a href={`mailto:${email}`} className="mt-0.5 block hyphens-auto break-words text-xs font-bold leading-snug text-slate-800 [overflow-wrap:anywhere] hover:text-brand-700">
                   {email}
                 </a>
               ) : (
                 <p className="mt-0.5 text-xs font-bold text-slate-400">Not provided</p>
               )}
             </div>
-            <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
+            <div className="min-w-[min(100%,12rem)] max-w-full flex-[1_1_12rem] rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
               <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Phone</p>
               {phone ? (
-                <a href={`tel:${phone}`} className="mt-0.5 block truncate text-xs font-bold text-slate-800 hover:text-brand-700">
+                <a href={`tel:${phone}`} className="mt-0.5 block whitespace-normal hyphens-auto break-words text-xs font-bold leading-snug tabular-nums text-slate-800 [overflow-wrap:anywhere] hover:text-brand-700">
                   {phone}
                 </a>
               ) : (
                 <p className="mt-0.5 text-xs font-bold text-slate-400">Not provided</p>
               )}
             </div>
-            <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
+            <div className="min-w-[min(100%,12rem)] max-w-full flex-[1_1_12rem] rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
               <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Last visit</p>
-              <p className="mt-0.5 truncate text-xs font-bold text-slate-800" title={lastVisitRelative ?? undefined}>
+              <p className="mt-0.5 hyphens-auto break-words text-xs font-bold leading-snug text-slate-800 [overflow-wrap:anywhere]" title={lastVisitRelative ?? undefined}>
                 {g.last_visit_date || listRow.last_visit_date ? (
                   <>
                     <span className="sm:hidden">{lastVisitCal}</span>
-                    <span className="hidden cursor-help sm:inline">{lastVisitRelative ?? lastVisitCal}</span>
+                    <span className="hidden sm:inline">{lastVisitRelative ?? lastVisitCal}</span>
                   </>
                 ) : (
                   '—'
@@ -254,12 +334,12 @@ export function ContactDetailPanel({
               </p>
             </div>
             <div
-              className={`rounded-lg border px-2 py-1.5 ${
+              className={`min-w-[min(100%,12rem)] max-w-full flex-[1_1_12rem] rounded-lg border px-2 py-1.5 ${
                 nextVisitLabel ? 'border-sky-200 bg-sky-50/80' : 'border-slate-200 bg-slate-50/70'
               }`}
             >
               <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Next visit</p>
-              <p className={`mt-0.5 truncate text-xs font-bold ${nextVisitLabel ? 'text-sky-900' : 'text-slate-500'}`}>
+              <p className={`mt-0.5 hyphens-auto break-words text-xs font-bold leading-snug [overflow-wrap:anywhere] ${nextVisitLabel ? 'text-sky-900' : 'text-slate-500'}`}>
                 {nextVisitLabel ?? 'None scheduled'}
               </p>
             </div>
@@ -305,18 +385,17 @@ export function ContactDetailPanel({
 
       <div className={bookingExpandActionsBarClass}>
         <div className="flex flex-wrap items-center gap-1.5 px-2 py-2 sm:px-3">
-          <Link
-            href="/dashboard/bookings/new"
-            className="inline-flex min-h-7 shrink-0 items-center gap-1 rounded-md bg-brand-600 px-2 py-0.5 text-[10px] font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 sm:text-[11px]"
+          <button
+            type="button"
+            aria-label={`New booking for this ${clientLower}`}
+            onClick={handleStaffNewBookingFromContact}
+            className={EXP_BOOKING_NEUTRAL_PROMINENT}
           >
-            New {bookingWord.toLowerCase()}
-          </Link>
-          <Link
-            href={`/dashboard/bookings?guest=${encodeURIComponent(g.id)}`}
-            className="inline-flex min-h-7 shrink-0 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 sm:text-[11px]"
-          >
-            View {bookingWord.toLowerCase()}s
-          </Link>
+            <svg className={EXP_BOOKING_ICO} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+            </svg>
+            New
+          </button>
           {isAdmin && onOpenMerge ? (
             <button
               type="button"
@@ -416,76 +495,18 @@ export function ContactDetailPanel({
         </div>
       </details>
 
-      <details className={bookingExpandAccordionDetailsClass}>
-        <summary className={bookingExpandAccordionSummaryClass}>
-          <span>
-            {bookingWord}
-            {' '}
-            history &amp; activity
-          </span>
-          <span className="text-[11px] font-medium text-slate-400 group-open:hidden">{activitySummaryHint}</span>
-          {accordionChevron}
-        </summary>
-        <div className={`${bookingExpandAccordionBodyClass} space-y-4`}>
-          <SubBlock title="At a glance">
-            <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
-              <StatTile label={`Total ${bookingWord.toLowerCase()}s`} value={String(detail.stats.total_bookings)} color="slate" />
-              <StatTile label="Cancellations" value={String(detail.stats.cancellations)} color="amber" />
-              <StatTile label="No-shows" value={String(detail.stats.no_shows)} color="amber" />
-              <StatTile
-                label="Deposits paid"
-                value={`${currencySymbol}${(detail.stats.total_deposit_pence_paid / 100).toFixed(2)}`}
-                color="emerald"
-              />
-              <StatTile
-                label="Since last visit"
-                value={detail.stats.days_since_last_visit != null ? `${detail.stats.days_since_last_visit}d` : '—'}
-                color="brand"
-              />
-              <StatTile label="Relationship" value={`${detail.stats.days_as_customer}d`} color="brand" />
-            </div>
-          </SubBlock>
-
-          <SubBlock
-            title={
-              <>
-                {bookingWord}
-                {' '}
-                history
-              </>
-            }
-            className="border-t border-slate-200/70 pt-4"
-          >
-            <ul className="max-h-60 divide-y divide-slate-100 overflow-y-auto rounded-lg border border-slate-100 bg-white">
-              {detail.booking_history.map((b) => (
-                <li key={b.id}>
-                  <Link
-                    href={`/dashboard/bookings?openBooking=${encodeURIComponent(b.id)}`}
-                    className="flex flex-col gap-0.5 px-2.5 py-2 text-sm hover:bg-slate-50"
-                  >
-                    <span className="font-medium text-slate-900">
-                      {b.booking_date} {b.booking_time}
-                    </span>
-                    <span className="text-xs text-slate-600">
-                      <span className="font-medium text-slate-700">{b.kind_label}</span>
-                      {' · '}
-                      {b.detail_label} · {b.status}
-                      {b.deposit_status ? ` · deposit ${b.deposit_status}` : ''}
-                      {typeof b.deposit_amount_pence === 'number' && b.deposit_amount_pence > 0
-                        ? ` · ${currencySymbol}${(b.deposit_amount_pence / 100).toFixed(2)}`
-                        : ''}
-                    </span>
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </SubBlock>
-
-          <SubBlock title="Timeline" className="border-t border-slate-200/70 pt-4">
-            <ContactTimelineSection guestId={g.id} />
-          </SubBlock>
-        </div>
-      </details>
+      <div className="px-0 sm:px-0.5">
+        <GuestBookingsForGuestAccordion
+          guestId={g.id}
+          currentBookingId=""
+          guestDisplayNameForSnapshots={displayName}
+          venueTimeZone={venueTimezone}
+          canOpenNested={Boolean(onOpenRelatedGuestBooking)}
+          onOpenBookingDetail={onOpenRelatedGuestBooking}
+          listRefreshKey={guestBookingsListRefreshKey}
+          rebookGuestPrefill={contactRebookGuestPrefill}
+        />
+      </div>
 
       <details
         className={bookingExpandAccordionDetailsClass}

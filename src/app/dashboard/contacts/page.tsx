@@ -44,7 +44,7 @@ export default async function ContactsPage() {
   const admin = getSupabaseAdminClient();
   const { data: venueRow, error: venueRowError } = await admin
     .from('venues')
-    .select('booking_model, terminology, pricing_tier, currency')
+    .select('booking_model, terminology, pricing_tier, currency, enabled_models, timezone')
     .eq('id', venueId)
     .single();
 
@@ -60,6 +60,8 @@ export default async function ContactsPage() {
   );
   const terminology = mergeVenueTerminology(bookingModel, venueRow?.terminology);
   const currency = (venueRow as { currency?: string | null } | null)?.currency ?? 'GBP';
+  const rawTz = (venueRow as { timezone?: string | null } | null)?.timezone?.trim();
+  const venueTimezone = rawTz && rawTz.length > 0 ? rawTz : 'Europe/London';
   const appointmentDashboardExperience = isAppointmentDashboardExperience(
     pricingTier,
     bookingModel,
@@ -78,6 +80,9 @@ export default async function ContactsPage() {
             appointmentDashboardExperience={appointmentDashboardExperience}
             isAdmin={staff.role === 'admin'}
             usesUnifiedServices={usesUnifiedServices}
+            venueBookingModel={bookingModel}
+            venueEnabledBookingModels={enabledModels}
+            venueTimezone={venueTimezone}
           />
         </div>
       </div>

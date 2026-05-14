@@ -1461,6 +1461,8 @@ export function AppointmentBookingsDashboard({
                 void fetchBookings({ silent: true });
                 void fetchBookingsForStats();
               }}
+              venueStaffBookingModel={primaryBookingModel}
+              venueStaffEnabledBookingModels={enabledModels}
             />
           </div>
         )}
