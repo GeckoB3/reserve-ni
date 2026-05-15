@@ -277,17 +277,7 @@ export function StaffAppointmentModifyForm({
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [
-    catalogError,
-    practitionerId,
-    serviceId,
-    bookingDate,
-    bookingTime,
-    durationMinutes,
-    variantId,
-    serviceWarning,
-    runValidate,
-  ]);
+  }, [catalogError, practitionerId, serviceId, bookingDate, bookingTime, durationMinutes, variantId, runValidate]);
 
   const endPreview = useMemo(() => {
     const start = bookingTime.slice(0, 5);

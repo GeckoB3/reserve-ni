@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   BOOKING_PRIMARY_ACTIONS,
   BOOKING_REVERT_ACTIONS,
@@ -301,58 +301,6 @@ export function ExpandedBookingContent({
       });
     }
   }, [guestMessageChannel, onSendMessage]);
-
-  const rebookGuestPrefill = useMemo((): StaffRebookGuestPrefill | undefined => {
-    const g = detail?.guest;
-    return {
-      firstName: g?.first_name ?? booking.guest_first_name ?? undefined,
-      lastName: g?.last_name ?? booking.guest_last_name ?? undefined,
-      email: g?.email ?? booking.guest_email,
-      phone: g?.phone ?? booking.guest_phone,
-      dietaryNotes: booking.dietary_notes,
-      occasion: booking.occasion,
-      specialRequests: detail?.special_requests,
-      internalNotes: detail?.internal_notes,
-      customerProfileNotes: g?.customer_profile_notes,
-    };
-  }, [
-    booking.dietary_notes,
-    booking.guest_email,
-    booking.guest_first_name,
-    booking.guest_last_name,
-    booking.guest_phone,
-    booking.occasion,
-    detail?.guest,
-    detail?.internal_notes,
-    detail?.special_requests,
-  ]);
-
-  const canExpandStaffRebook = useMemo(
-    () => buildStaffRebookBootstrapFromBookingSource(booking, {}) !== null,
-    [booking],
-  );
-
-  const staffNewBookingDefaultSurfaceTab = useMemo(() => {
-    const primary = venueStaffBookingModel ?? inferBookingRowModel(booking);
-    const enabled = venueStaffEnabledBookingModels ?? NO_EXTRA_ENABLED_BOOKING_MODELS;
-    return defaultStaffBookingSurfaceTab(primary, enabled);
-  }, [venueStaffBookingModel, venueStaffEnabledBookingModels, booking]);
-
-  const staffNewBookingGuestContacts = useMemo((): StaffRebookGuestPrefill => {
-    const g = detail?.guest;
-    return {
-      firstName: g?.first_name ?? booking.guest_first_name ?? undefined,
-      lastName: g?.last_name ?? booking.guest_last_name ?? undefined,
-      email: g?.email ?? booking.guest_email,
-      phone: g?.phone ?? booking.guest_phone,
-    };
-  }, [
-    detail?.guest,
-    booking.guest_email,
-    booking.guest_first_name,
-    booking.guest_last_name,
-    booking.guest_phone,
-  ]);
 
   const displayLinkedBookings = booking.group_booking_id ? linkedBookings : [];
 
@@ -1020,7 +968,7 @@ export function ExpandedBookingContent({
                 onClick={() => {
                   void handleSendGuestMessage();
                 }}
-                className="inline-flex min-w-[5.25rem] items-center justify-center gap-2 rounded-lg bg-slate-800 px-[15px] py-2 text-xs font-semibold text-white transition-colors duration-150 hover:bg-slate-900 disabled:opacity-50 sm:py-1.5"
+                className="inline-flex min-w-[5.25rem] items-center justify-center gap-2 rounded-lg bg-slate-800 px-4 py-2 text-xs font-semibold text-white transition-colors duration-150 hover:bg-slate-900 disabled:opacity-50 sm:py-1.5"
                 aria-busy={sendingMessage}
               >
                 {sendingMessage ? (

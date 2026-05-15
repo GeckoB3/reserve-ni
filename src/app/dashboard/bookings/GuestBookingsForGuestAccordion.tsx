@@ -11,29 +11,6 @@ import {
   bookingExpandAccordionSummaryClass,
 } from '@/app/dashboard/bookings/booking-expand-accordion-classes';
 import { readResponseJson } from '@/lib/http/read-response-json';
-import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
-import {
-  staffBookingSurfaceTabIdToQueryParam,
-} from '@/lib/booking/staff-booking-modal-options';
-import {
-  bookingSourceDurationMinutes,
-  bookingSourceWallEndHm,
-  buildStaffRebookBootstrapFromBookingSource,
-} from '@/lib/booking/staff-rebook-from-booking-source';
-import {
-  type StaffRebookBootstrapPayloadV1,
-  type StaffRebookGuestPrefill,
-  writeStaffRebookBootstrap,
-} from '@/lib/booking/staff-rebook-bootstrap';
-import type { BookingModel } from '@/types/booking-models';
-
-interface GuestBookingsStaffVenueDefaults {
-  venueId: string;
-  currency: string;
-  bookingModel: BookingModel;
-  enabledModels: BookingModel[];
-  tableManagementEnabled: boolean;
-}
 
 /** Max depth of BookingDetailPanel opened from nested “Detail” (guest history), including the root panel. */
 export const BOOKING_DETAIL_MAX_STACK_DEPTH = 8;
