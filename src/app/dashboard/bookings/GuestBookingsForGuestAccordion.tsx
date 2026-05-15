@@ -2,6 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { StaffSurfaceBookingModal } from '@/components/booking/StaffSurfaceBookingModal';
 import { calendarDateInTimeZone } from '@/lib/guests/guest-contacts-list';
 import type { BookingDetailPanelSnapshot } from '@/app/dashboard/bookings/booking-detail-panel-snapshot';
 import {
@@ -10,6 +11,7 @@ import {
   bookingExpandAccordionSummaryClass,
 } from '@/app/dashboard/bookings/booking-expand-accordion-classes';
 import { readResponseJson } from '@/lib/http/read-response-json';
+import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
 import {
   staffBookingSurfaceTabIdToQueryParam,
 } from '@/lib/booking/staff-booking-modal-options';
@@ -18,7 +20,20 @@ import {
   bookingSourceWallEndHm,
   buildStaffRebookBootstrapFromBookingSource,
 } from '@/lib/booking/staff-rebook-from-booking-source';
-import { type StaffRebookGuestPrefill, writeStaffRebookBootstrap } from '@/lib/booking/staff-rebook-bootstrap';
+import {
+  type StaffRebookBootstrapPayloadV1,
+  type StaffRebookGuestPrefill,
+  writeStaffRebookBootstrap,
+} from '@/lib/booking/staff-rebook-bootstrap';
+import type { BookingModel } from '@/types/booking-models';
+
+interface GuestBookingsStaffVenueDefaults {
+  venueId: string;
+  currency: string;
+  bookingModel: BookingModel;
+  enabledModels: BookingModel[];
+  tableManagementEnabled: boolean;
+}
 
 /** Max depth of BookingDetailPanel opened from nested “Detail” (guest history), including the root panel. */
 export const BOOKING_DETAIL_MAX_STACK_DEPTH = 8;
@@ -305,6 +320,7 @@ export function GuestBookingsForGuestAccordion({
   onOpenBookingDetail,
   listRefreshKey,
   rebookGuestPrefill,
+  onStaffBookingCreated,
 }: {
   guestId: string | null | undefined;
   currentBookingId: string;
@@ -315,22 +331,82 @@ export function GuestBookingsForGuestAccordion({
   onOpenBookingDetail: (payload: GuestHistoryRelatedBookingPayload) => void;
   /** Bumped when this panel reloads booking detail so the list stays in sync after edits. */
   listRefreshKey: number;
-  /** Guest + booking notes for POST sessionStorage staff rebook (optional). */
+  /** Guest + booking notes for staff rebook prefill (optional). */
   rebookGuestPrefill?: StaffRebookGuestPrefill;
+  /** After a booking is created from the Rebook modal (refresh parent lists / detail). */
+  onStaffBookingCreated?: () => void;
 }) {
   const router = useRouter();
   const [rows, setRows] = useState<GuestBookingHistoryRow[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  const [staffVenueDefaults, setStaffVenueDefaults] = useState<GuestBookingsStaffVenueDefaults | null>(null);
+  const [rebookModalBootstrap, setRebookModalBootstrap] = useState<StaffRebookBootstrapPayloadV1 | null>(null);
+  const [rebookModalEpoch, setRebookModalEpoch] = useState(0);
+
+  useEffect(() => {
+    setRebookModalBootstrap(null);
+  }, [guestId]);
+
+  useEffect(() => {
+    if (!guestId) {
+      setStaffVenueDefaults(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const [venueRes, tablesRes] = await Promise.all([
+          fetch('/api/venue'),
+          fetch('/api/venue/tables').catch(() => null),
+        ]);
+        if (!venueRes.ok || cancelled) return;
+        const data = (await venueRes.json()) as Record<string, unknown>;
+        const activeModels = Array.isArray(data.active_booking_models)
+          ? (data.active_booking_models as BookingModel[])
+          : [];
+        const primary =
+          (activeModels.length > 0 ? activeModels[0] : (data.booking_model as BookingModel)) ??
+          'table_reservation';
+        const enabledModels = normalizeEnabledModels(data.enabled_models, primary);
+        let tableManagementEnabled = false;
+        if (tablesRes?.ok) {
+          const td = (await tablesRes.json()) as { settings?: { table_management_enabled?: boolean } };
+          tableManagementEnabled = Boolean(td.settings?.table_management_enabled);
+        }
+        const venueIdStr = typeof data.id === 'string' ? data.id : '';
+        const currency = typeof data.currency === 'string' ? data.currency : 'GBP';
+        if (!cancelled && venueIdStr) {
+          setStaffVenueDefaults({
+            venueId: venueIdStr,
+            currency,
+            bookingModel: primary,
+            enabledModels,
+            tableManagementEnabled,
+          });
+        }
+      } catch {
+        if (!cancelled) setStaffVenueDefaults(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [guestId]);
 
   const handleRebookRow = useCallback(
     (row: GuestBookingHistoryRow) => {
       const payload = buildStaffRebookBootstrapFromBookingSource(row, rebookGuestPrefill);
       if (!payload) return;
+      if (staffVenueDefaults?.venueId) {
+        setRebookModalEpoch((e) => e + 1);
+        setRebookModalBootstrap(payload);
+        return;
+      }
       writeStaffRebookBootstrap(payload);
       void router.push(`/dashboard/bookings/new?tab=${staffBookingSurfaceTabIdToQueryParam(payload.surface)}`);
     },
-    [rebookGuestPrefill, router],
+    [rebookGuestPrefill, router, staffVenueDefaults?.venueId],
   );
 
   useEffect(() => {
@@ -406,7 +482,8 @@ export function GuestBookingsForGuestAccordion({
   })();
 
   return (
-    <details className={bookingExpandAccordionDetailsClass}>
+    <>
+      <details className={bookingExpandAccordionDetailsClass}>
       <summary className={bookingExpandAccordionSummaryClass}>
         <span>Guest bookings</span>
         <span className="text-[11px] font-medium text-slate-400 group-open:hidden">{summaryHint}</span>
@@ -466,6 +543,27 @@ export function GuestBookingsForGuestAccordion({
           </>
         )}
       </div>
-    </details>
+      </details>
+
+      {rebookModalBootstrap && staffVenueDefaults ? (
+        <StaffSurfaceBookingModal
+          open
+          heading="Rebook"
+          onClose={() => setRebookModalBootstrap(null)}
+          onCreated={() => {
+            setRebookModalBootstrap(null);
+            onStaffBookingCreated?.();
+          }}
+          venueId={staffVenueDefaults.venueId}
+          currency={staffVenueDefaults.currency}
+          bookingModel={staffVenueDefaults.bookingModel}
+          enabledModels={staffVenueDefaults.enabledModels}
+          intent="new"
+          advancedMode={staffVenueDefaults.tableManagementEnabled}
+          staffRebookBootstrap={rebookModalBootstrap}
+          stackKey={rebookModalEpoch}
+        />
+      ) : null}
+    </>
   );
 }

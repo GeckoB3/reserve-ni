@@ -21,7 +21,6 @@ import {
 import { GuestMessageChannelSelect } from '@/components/booking/GuestMessageChannelSelect';
 import type { GuestMessageChannel, GuestMessageSendResult } from '@/lib/booking/guest-message-channel';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { Pill } from '@/components/ui/dashboard/Pill';
 import { BookingStatusPill } from '@/components/ui/dashboard/BookingStatusPill';
@@ -52,11 +51,8 @@ import {
   GuestBookingsForGuestAccordion,
   type GuestHistoryRelatedBookingPayload,
 } from '@/app/dashboard/bookings/GuestBookingsForGuestAccordion';
-import {
-  writeStaffRebookBootstrap,
-  type StaffRebookGuestPrefill,
-} from '@/lib/booking/staff-rebook-bootstrap';
-import { defaultStaffBookingSurfaceTab, staffBookingSurfaceTabIdToQueryParam } from '@/lib/booking/staff-booking-modal-options';
+import type { StaffRebookBootstrapPayloadV1, StaffRebookGuestPrefill } from '@/lib/booking/staff-rebook-bootstrap';
+import { defaultStaffBookingSurfaceTab } from '@/lib/booking/staff-booking-modal-options';
 import { buildStaffRebookBootstrapFromBookingSource } from '@/lib/booking/staff-rebook-from-booking-source';
 import { formatGuestDisplayName } from '@/lib/guests/name';
 import {
@@ -66,6 +62,7 @@ import {
   showDepositPendingPill,
 } from '@/lib/booking/booking-staff-indicators';
 import { BOOKING_ATTENDANCE_CONFIRM_SPINNER } from '@/lib/table-management/booking-status-visual';
+import { StaffSurfaceBookingModal } from '@/components/booking/StaffSurfaceBookingModal';
 
 export interface BookingRow {
   id: string;
@@ -233,6 +230,9 @@ export function ExpandedBookingContent({
     text: string;
   } | null>(null);
   const [modifyBookingOpen, setModifyBookingOpen] = useState(false);
+  const [staffBookingModal, setStaffBookingModal] = useState<
+    null | { mode: 'new' | 'rebook'; bootstrap: StaffRebookBootstrapPayloadV1 }
+  >(null);
   const [confirmAction, setConfirmAction] = useState<{ status: BookingStatus; label: string } | null>(null);
   const [inlineActionLoading, setInlineActionLoading] = useState<string | null>(null);
   const [inlineActionError, setInlineActionError] = useState<string | null>(null);
@@ -327,19 +327,10 @@ export function ExpandedBookingContent({
     detail?.special_requests,
   ]);
 
-  const router = useRouter();
-
   const canExpandStaffRebook = useMemo(
     () => buildStaffRebookBootstrapFromBookingSource(booking, {}) !== null,
     [booking],
   );
-
-  const handleExpandedStaffRebook = useCallback(() => {
-    const payload = buildStaffRebookBootstrapFromBookingSource(booking, rebookGuestPrefill);
-    if (!payload) return;
-    writeStaffRebookBootstrap(payload);
-    void router.push(`/dashboard/bookings/new?tab=${staffBookingSurfaceTabIdToQueryParam(payload.surface)}`);
-  }, [booking, rebookGuestPrefill, router]);
 
   const staffNewBookingDefaultSurfaceTab = useMemo(() => {
     const primary = venueStaffBookingModel ?? inferBookingRowModel(booking);
@@ -362,15 +353,6 @@ export function ExpandedBookingContent({
     booking.guest_last_name,
     booking.guest_phone,
   ]);
-
-  const handleExpandedStaffNewBooking = useCallback(() => {
-    writeStaffRebookBootstrap({
-      v: 1,
-      surface: staffNewBookingDefaultSurfaceTab,
-      guest: staffNewBookingGuestContacts,
-    });
-    void router.push(`/dashboard/bookings/new?tab=${staffBookingSurfaceTabIdToQueryParam(staffNewBookingDefaultSurfaceTab)}`);
-  }, [router, staffNewBookingDefaultSurfaceTab, staffNewBookingGuestContacts]);
 
   const displayLinkedBookings = booking.group_booking_id ? linkedBookings : [];
 
@@ -786,7 +768,14 @@ export function ExpandedBookingContent({
               type="button"
               aria-label="New booking"
               onClick={() => {
-                handleExpandedStaffNewBooking();
+                setStaffBookingModal({
+                  mode: 'new',
+                  bootstrap: {
+                    v: 1,
+                    surface: staffNewBookingDefaultSurfaceTab,
+                    guest: staffNewBookingGuestContacts,
+                  },
+                });
                 setShowMessageBox(false);
                 setModifyBookingOpen(false);
               }}
@@ -802,7 +791,9 @@ export function ExpandedBookingContent({
               <button
                 type="button"
                 onClick={() => {
-                  handleExpandedStaffRebook();
+                  const payload = buildStaffRebookBootstrapFromBookingSource(booking, rebookGuestPrefill);
+                  if (!payload) return;
+                  setStaffBookingModal({ mode: 'rebook', bootstrap: payload });
                   setShowMessageBox(false);
                   setModifyBookingOpen(false);
                 }}
@@ -923,9 +914,6 @@ export function ExpandedBookingContent({
               onSaved={onDetailUpdated}
             />
             <div className="border-t border-slate-100 pt-2">
-              <div className="mb-2">
-                <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Booking notes</p>
-              </div>
               {booking.occasion ? (
                 <div className="mb-2">
                   <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Occasion</p>
@@ -962,6 +950,7 @@ export function ExpandedBookingContent({
             }}
             listRefreshKey={guestHistoryListRefresh}
             rebookGuestPrefill={rebookGuestPrefill}
+            onStaffBookingCreated={onDetailUpdated}
           />
         </div>
       ) : null}
@@ -1274,6 +1263,25 @@ export function ExpandedBookingContent({
           }
         />
       )}
+
+      {staffBookingModal ? (
+        <StaffSurfaceBookingModal
+          open
+          heading={staffBookingModal.mode === 'rebook' ? 'Rebook' : undefined}
+          onClose={() => setStaffBookingModal(null)}
+          onCreated={() => {
+            setStaffBookingModal(null);
+            onDetailUpdated();
+          }}
+          venueId={venueId}
+          currency={venueCurrency ?? 'GBP'}
+          bookingModel={venueStaffBookingModel ?? inferBookingRowModel(booking)}
+          enabledModels={venueStaffEnabledBookingModels ?? NO_EXTRA_ENABLED_BOOKING_MODELS}
+          intent="new"
+          advancedMode={tableManagementEnabled}
+          staffRebookBootstrap={staffBookingModal.bootstrap}
+        />
+      ) : null}
     </div>
   );
 }

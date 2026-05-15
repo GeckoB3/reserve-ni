@@ -1,10 +1,10 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { GuestMessageChannelSelect } from '@/components/booking/GuestMessageChannelSelect';
 import type { GuestMessageChannel } from '@/lib/booking/guest-message-channel';
 import { useToast } from '@/components/ui/Toast';
+import { StaffSurfaceBookingModal } from '@/components/booking/StaffSurfaceBookingModal';
 import { GuestTagEditor } from '@/components/dashboard/GuestTagEditor';
 import { CustomerProfileNotesCard } from '@/components/booking/CustomerProfileNotesCard';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
@@ -16,11 +16,11 @@ import {
   formatNextBookingSummary,
   formatRelativeVisitDate,
 } from '@/lib/guests/contact-formatting';
-import { ContactCustomFieldsSection } from '@/components/dashboard/contacts/ContactCustomFieldsSection';
 import { ContactDocumentsSection } from '@/components/dashboard/contacts/ContactDocumentsSection';
 import { ContactMarketingSection } from '@/components/dashboard/contacts/ContactMarketingSection';
 import { ContactHouseholdSection } from '@/components/dashboard/contacts/ContactHouseholdSection';
 import { ContactGdprSection } from '@/components/dashboard/contacts/ContactGdprSection';
+import { EraseGuestDataModal } from '@/components/dashboard/contacts/EraseGuestDataModal';
 import { formatGuestDisplayName } from '@/lib/guests/name';
 import {
   bookingExpandAccordionBodyClass,
@@ -36,8 +36,8 @@ import {
   GuestBookingsForGuestAccordion,
   type GuestHistoryRelatedBookingPayload,
 } from '@/app/dashboard/bookings/GuestBookingsForGuestAccordion';
-import { writeStaffRebookBootstrap, type StaffRebookGuestPrefill } from '@/lib/booking/staff-rebook-bootstrap';
-import { defaultStaffBookingSurfaceTab, staffBookingSurfaceTabIdToQueryParam } from '@/lib/booking/staff-booking-modal-options';
+import type { StaffRebookBootstrapPayloadV1, StaffRebookGuestPrefill } from '@/lib/booking/staff-rebook-bootstrap';
+import { defaultStaffBookingSurfaceTab } from '@/lib/booking/staff-booking-modal-options';
 
 const accordionChevron = (
   <svg className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-open:rotate-180" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
@@ -59,6 +59,8 @@ export function ContactDetailPanel({
   clientLower,
   bookingWord,
   venueId,
+  venueCurrency = 'GBP',
+  tableManagementEnabled,
   isAdmin,
   listRow,
   selectedId,
@@ -89,6 +91,8 @@ export function ContactDetailPanel({
   clientLower: string;
   bookingWord: string;
   venueId: string;
+  venueCurrency?: string;
+  tableManagementEnabled: boolean;
   isAdmin: boolean;
   listRow: GuestListRow;
   selectedId: string;
@@ -104,19 +108,20 @@ export function ContactDetailPanel({
   editPhone: string;
   setEditPhone: (v: string) => void;
   editSaving: boolean;
-  onSaveGuestDetails: () => Promise<void>;
+  onSaveGuestDetails: () => Promise<boolean>;
   loadDetail: (guestId: string) => Promise<void>;
   loadList: () => Promise<void>;
   eraseLoadingId: string | null;
-  onEraseGuest: (guestId: string) => Promise<void>;
+  onEraseGuest: (guestId: string) => Promise<boolean>;
   onOpenMerge?: () => void;
   venueStaffBookingModel: BookingModel;
   venueStaffEnabledBookingModels: BookingModel[];
   venueTimezone: string;
   onOpenRelatedGuestBooking: (payload: GuestHistoryRelatedBookingPayload) => void;
 }) {
-  const router = useRouter();
   const { addToast } = useToast();
+  const [newBookingModal, setNewBookingModal] = useState<StaffRebookBootstrapPayloadV1 | null>(null);
+  const [newBookingModalEpoch, setNewBookingModalEpoch] = useState(0);
 
   const staffNewBookingGuestContacts = useMemo((): StaffRebookGuestPrefill => {
     const dg = detail?.guest;
@@ -149,14 +154,14 @@ export function ContactDetailPanel({
     [venueStaffBookingModel, venueStaffEnabledBookingModels],
   );
 
-  const handleStaffNewBookingFromContact = useCallback(() => {
-    writeStaffRebookBootstrap({
+  const handleOpenNewBookingModal = useCallback(() => {
+    setNewBookingModalEpoch((e) => e + 1);
+    setNewBookingModal({
       v: 1,
       surface: staffNewBookingDefaultSurfaceTab,
       guest: staffNewBookingGuestContacts,
     });
-    void router.push(`/dashboard/bookings/new?tab=${staffBookingSurfaceTabIdToQueryParam(staffNewBookingDefaultSurfaceTab)}`);
-  }, [router, staffNewBookingDefaultSurfaceTab, staffNewBookingGuestContacts]);
+  }, [staffNewBookingDefaultSurfaceTab, staffNewBookingGuestContacts]);
 
   const contactRebookGuestPrefill = useMemo((): StaffRebookGuestPrefill | undefined => {
     const guest = detail?.guest;
@@ -185,10 +190,20 @@ export function ContactDetailPanel({
   const [messageChannel, setMessageChannel] = useState<GuestMessageChannel>('both');
   const [messageDraft, setMessageDraft] = useState('');
   const [messageSending, setMessageSending] = useState(false);
+  const [eraseConfirmOpen, setEraseConfirmOpen] = useState(false);
+  const [contactDetailsEditing, setContactDetailsEditing] = useState(false);
+
+  const handleSaveContactDetails = useCallback(async () => {
+    const ok = await onSaveGuestDetails();
+    if (ok) setContactDetailsEditing(false);
+  }, [onSaveGuestDetails]);
 
   useEffect(() => {
     setMessageDraft('');
     setMessageChannel('both');
+    setNewBookingModal(null);
+    setEraseConfirmOpen(false);
+    setContactDetailsEditing(false);
   }, [selectedId]);
 
   if (detailLoading) {
@@ -224,20 +239,21 @@ export function ContactDetailPanel({
   const displayName = isAnonRow ? 'Anonymous' : formatGuestDisplayName(g.first_name, g.last_name);
   const email = g.email?.trim() || null;
   const phone = g.phone?.trim() || null;
+  const savedFirstName = (g.first_name ?? '').trim();
+  const savedLastName = (g.last_name ?? '').trim();
   const tags = g.tags ?? [];
   const nextVisitLabel = formatNextBookingSummary(listRow.next_booking_date, listRow.next_booking_time);
   const lastVisitRelative = g.last_visit_date ? formatRelativeVisitDate(g.last_visit_date) : null;
   const lastVisitCal = formatCalendarDayShort(g.last_visit_date ?? listRow.last_visit_date);
-  const activeFieldCount = (detail.custom_field_definitions ?? []).filter((d) => d.is_active).length;
   const marketingHint =
     g.marketing_opt_out ? 'Opted out' : g.marketing_consent ? 'Subscribed' : 'No consent';
-  const recordSummaryHint =
-    activeFieldCount === 0 ? marketingHint : `${marketingHint} · ${activeFieldCount} field${activeFieldCount === 1 ? '' : 's'}`;
+  const recordSummaryHint = marketingHint;
   const inboxSummaryHint =
     `${detail.communications.length} message${detail.communications.length === 1 ? '' : 's'}`
     + (g.customer_profile_notes?.trim() ? ' · note on file' : '');
 
   return (
+    <>
     <div
       id={id}
       className="mt-1.5 flex flex-col gap-2.5 px-0.5 pb-2.5 sm:px-1"
@@ -301,23 +317,87 @@ export function ContactDetailPanel({
 
           <div className="mt-2 flex flex-wrap gap-1.5">
             <div className="min-w-[min(100%,12rem)] max-w-full flex-[1_1_12rem] rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
+              <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">First name</p>
+              {contactDetailsEditing ? (
+                <input
+                  id={`${id}-first`}
+                  value={editFirstName}
+                  onChange={(e) => setEditFirstName(e.target.value)}
+                  autoComplete="given-name"
+                  className="mt-0.5 min-h-8 w-full rounded-md border border-slate-200/90 bg-white px-2 py-1 text-xs font-semibold text-slate-900 shadow-sm placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-1 focus:ring-brand-200"
+                />
+              ) : savedFirstName ? (
+                <p className="mt-0.5 min-h-8 hyphens-auto break-words text-xs font-bold leading-snug text-slate-800 [overflow-wrap:anywhere]">
+                  {savedFirstName}
+                </p>
+              ) : (
+                <p className="mt-0.5 min-h-8 text-xs font-bold text-slate-400">Not provided</p>
+              )}
+            </div>
+            <div className="min-w-[min(100%,12rem)] max-w-full flex-[1_1_12rem] rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
+              <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Surname</p>
+              {contactDetailsEditing ? (
+                <input
+                  id={`${id}-last`}
+                  value={editLastName}
+                  onChange={(e) => setEditLastName(e.target.value)}
+                  autoComplete="family-name"
+                  className="mt-0.5 min-h-8 w-full rounded-md border border-slate-200/90 bg-white px-2 py-1 text-xs font-semibold text-slate-900 shadow-sm placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-1 focus:ring-brand-200"
+                />
+              ) : savedLastName ? (
+                <p className="mt-0.5 min-h-8 hyphens-auto break-words text-xs font-bold leading-snug text-slate-800 [overflow-wrap:anywhere]">
+                  {savedLastName}
+                </p>
+              ) : (
+                <p className="mt-0.5 min-h-8 text-xs font-bold text-slate-400">Not provided</p>
+              )}
+            </div>
+            <div className="min-w-[min(100%,12rem)] max-w-full flex-[1_1_12rem] rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
               <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Email</p>
-              {email ? (
-                <a href={`mailto:${email}`} className="mt-0.5 block hyphens-auto break-words text-xs font-bold leading-snug text-slate-800 [overflow-wrap:anywhere] hover:text-brand-700">
+              {contactDetailsEditing ? (
+                <input
+                  id={`${id}-email`}
+                  type="email"
+                  inputMode="email"
+                  autoComplete="email"
+                  value={editEmail}
+                  onChange={(e) => setEditEmail(e.target.value)}
+                  placeholder="Not provided"
+                  className="mt-0.5 min-h-8 w-full rounded-md border border-slate-200/90 bg-white px-2 py-1 text-xs font-semibold text-slate-900 shadow-sm placeholder:font-normal placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-1 focus:ring-brand-200"
+                />
+              ) : email ? (
+                <a
+                  href={`mailto:${email}`}
+                  className="mt-0.5 flex min-h-8 items-center hyphens-auto break-words text-xs font-bold leading-snug text-slate-800 [overflow-wrap:anywhere] hover:text-brand-700"
+                >
                   {email}
                 </a>
               ) : (
-                <p className="mt-0.5 text-xs font-bold text-slate-400">Not provided</p>
+                <p className="mt-0.5 min-h-8 text-xs font-bold text-slate-400">Not provided</p>
               )}
             </div>
             <div className="min-w-[min(100%,12rem)] max-w-full flex-[1_1_12rem] rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
               <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Phone</p>
-              {phone ? (
-                <a href={`tel:${phone}`} className="mt-0.5 block whitespace-normal hyphens-auto break-words text-xs font-bold leading-snug tabular-nums text-slate-800 [overflow-wrap:anywhere] hover:text-brand-700">
+              {contactDetailsEditing ? (
+                <input
+                  id={`${id}-phone`}
+                  type="tel"
+                  inputMode="tel"
+                  autoComplete="tel"
+                  value={editPhone}
+                  onChange={(e) => setEditPhone(e.target.value)}
+                  placeholder="Not provided"
+                  className="mt-0.5 min-h-8 w-full rounded-md border border-slate-200/90 bg-white px-2 py-1 text-xs font-semibold tabular-nums text-slate-900 shadow-sm placeholder:font-normal placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-1 focus:ring-brand-200"
+                />
+              ) : phone ? (
+                <a
+                  href={`tel:${phone}`}
+                  className="mt-0.5 flex min-h-8 items-center whitespace-normal hyphens-auto break-words text-xs font-bold leading-snug tabular-nums text-slate-800 [overflow-wrap:anywhere] hover:text-brand-700"
+                >
                   {phone}
                 </a>
               ) : (
-                <p className="mt-0.5 text-xs font-bold text-slate-400">Not provided</p>
+                <p className="mt-0.5 min-h-8 text-xs font-bold tabular-nums text-slate-400">Not provided</p>
               )}
             </div>
             <div className="min-w-[min(100%,12rem)] max-w-full flex-[1_1_12rem] rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
@@ -345,12 +425,35 @@ export function ContactDetailPanel({
             </div>
           </div>
 
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            {contactDetailsEditing ? (
+              <button
+                type="button"
+                disabled={editSaving}
+                onClick={() => void handleSaveContactDetails()}
+                className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
+              >
+                {editSaving ? 'Saving…' : 'Save changes'}
+              </button>
+            ) : (
+              <button
+                type="button"
+                disabled={editSaving}
+                onClick={() => setContactDetailsEditing(true)}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-800 shadow-sm hover:bg-slate-50 disabled:opacity-50"
+              >
+                Edit
+              </button>
+            )}
+          </div>
+
           <div className="mt-2.5 border-t border-slate-100 pt-2.5">
             <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Tags</p>
             <div className="mt-1.5">
               <GuestTagEditor
                 tags={tags}
                 venueId={venueId}
+                hideSectionLabel
                 onTagsChange={async (next) => {
                   const res = await fetch(`/api/venue/guests/${g.id}`, {
                     method: 'PATCH',
@@ -369,7 +472,7 @@ export function ContactDetailPanel({
           </div>
 
           <div className="mt-2.5 border-t border-slate-100 pt-2.5">
-            <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Staff notes</p>
+            <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Customer info</p>
             <div className="mt-1.5">
               <CustomerProfileNotesCard
                 embedded
@@ -388,13 +491,13 @@ export function ContactDetailPanel({
           <button
             type="button"
             aria-label={`New booking for this ${clientLower}`}
-            onClick={handleStaffNewBookingFromContact}
+            onClick={handleOpenNewBookingModal}
             className={EXP_BOOKING_NEUTRAL_PROMINENT}
           >
             <svg className={EXP_BOOKING_ICO} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
             </svg>
-            New
+            New booking
           </button>
           {isAdmin && onOpenMerge ? (
             <button
@@ -409,7 +512,7 @@ export function ContactDetailPanel({
             <button
               type="button"
               disabled={eraseLoadingId === g.id}
-              onClick={() => void onEraseGuest(g.id)}
+              onClick={() => setEraseConfirmOpen(true)}
               className="inline-flex min-h-7 shrink-0 items-center gap-1 rounded-md border border-transparent px-2 py-0.5 text-[10px] font-semibold text-red-600 transition-colors hover:border-red-100 hover:bg-red-50 disabled:opacity-50 sm:text-[11px]"
             >
               {eraseLoadingId === g.id ? 'Erasing…' : 'Erase data'}
@@ -417,83 +520,6 @@ export function ContactDetailPanel({
           ) : null}
         </div>
       </div>
-
-      <details className={bookingExpandAccordionDetailsClass}>
-        <summary className={bookingExpandAccordionSummaryClass}>
-          <span>Record &amp; preferences</span>
-          <span className="max-w-[9rem] truncate text-[11px] font-medium text-slate-400 group-open:hidden sm:max-w-[14rem]">
-            {recordSummaryHint}
-          </span>
-          {accordionChevron}
-        </summary>
-        <div className={`${bookingExpandAccordionBodyClass} space-y-4`}>
-          <SubBlock title="Name & contact details">
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              <div>
-                <label htmlFor={`${id}-first`} className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">First name</label>
-                <input
-                  id={`${id}-first`}
-                  value={editFirstName}
-                  onChange={(e) => setEditFirstName(e.target.value)}
-                  className="mt-0.5 w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm"
-                />
-              </div>
-              <div>
-                <label htmlFor={`${id}-last`} className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Surname</label>
-                <input
-                  id={`${id}-last`}
-                  value={editLastName}
-                  onChange={(e) => setEditLastName(e.target.value)}
-                  className="mt-0.5 w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm"
-                />
-              </div>
-              <div className="sm:col-span-2">
-                <label htmlFor={`${id}-email`} className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Email</label>
-                <input
-                  id={`${id}-email`}
-                  type="email"
-                  value={editEmail}
-                  onChange={(e) => setEditEmail(e.target.value)}
-                  className="mt-0.5 w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm"
-                />
-              </div>
-              <div className="sm:col-span-2">
-                <label htmlFor={`${id}-phone`} className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Phone</label>
-                <input
-                  id={`${id}-phone`}
-                  value={editPhone}
-                  onChange={(e) => setEditPhone(e.target.value)}
-                  className="mt-0.5 w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm"
-                />
-              </div>
-            </div>
-            <button
-              type="button"
-              disabled={editSaving}
-              onClick={() => void onSaveGuestDetails()}
-              className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
-            >
-              {editSaving ? 'Saving…' : 'Save changes'}
-            </button>
-          </SubBlock>
-
-          <SubBlock title="Marketing preferences" className="border-t border-slate-200/70 pt-4">
-            <ContactMarketingSection guestId={g.id} detail={detail} onUpdated={() => void loadDetail(g.id)} />
-          </SubBlock>
-
-          <SubBlock title="Custom fields" className="border-t border-slate-200/70 pt-4">
-            <ContactCustomFieldsSection guestId={g.id} detail={detail} onUpdated={() => void loadDetail(g.id)} />
-          </SubBlock>
-
-          <SubBlock title="Household" className="border-t border-slate-200/70 pt-4">
-            <ContactHouseholdSection guestId={g.id} clientLower={clientLower} onChanged={() => void loadDetail(g.id)} />
-          </SubBlock>
-
-          <SubBlock title="Documents" className="border-t border-slate-200/70 pt-4">
-            <ContactDocumentsSection guestId={g.id} onChanged={() => void loadDetail(g.id)} />
-          </SubBlock>
-        </div>
-      </details>
 
       <div className="px-0 sm:px-0.5">
         <GuestBookingsForGuestAccordion
@@ -505,8 +531,32 @@ export function ContactDetailPanel({
           onOpenBookingDetail={onOpenRelatedGuestBooking}
           listRefreshKey={guestBookingsListRefreshKey}
           rebookGuestPrefill={contactRebookGuestPrefill}
+          onStaffBookingCreated={() => void loadDetail(g.id)}
         />
       </div>
+
+      <details className={bookingExpandAccordionDetailsClass}>
+        <summary className={bookingExpandAccordionSummaryClass}>
+          <span>Record &amp; preferences</span>
+          <span className="max-w-[9rem] truncate text-[11px] font-medium text-slate-400 group-open:hidden sm:max-w-[14rem]">
+            {recordSummaryHint}
+          </span>
+          {accordionChevron}
+        </summary>
+        <div className={`${bookingExpandAccordionBodyClass} space-y-4`}>
+          <SubBlock title="Marketing preferences">
+            <ContactMarketingSection guestId={g.id} detail={detail} onUpdated={() => void loadDetail(g.id)} />
+          </SubBlock>
+
+          <SubBlock title="Household" className="border-t border-slate-200/70 pt-4">
+            <ContactHouseholdSection guestId={g.id} clientLower={clientLower} onChanged={() => void loadDetail(g.id)} />
+          </SubBlock>
+
+          <SubBlock title="Documents" className="border-t border-slate-200/70 pt-4">
+            <ContactDocumentsSection guestId={g.id} onChanged={() => void loadDetail(g.id)} />
+          </SubBlock>
+        </div>
+      </details>
 
       <details
         className={bookingExpandAccordionDetailsClass}
@@ -598,5 +648,39 @@ export function ContactDetailPanel({
         </div>
       </details>
     </div>
+
+      {newBookingModal ? (
+        <StaffSurfaceBookingModal
+          open
+          onClose={() => setNewBookingModal(null)}
+          onCreated={() => {
+            setNewBookingModal(null);
+            void loadDetail(g.id);
+            void loadList();
+          }}
+          venueId={venueId}
+          currency={venueCurrency}
+          bookingModel={venueStaffBookingModel}
+          enabledModels={venueStaffEnabledBookingModels}
+          intent="new"
+          advancedMode={tableManagementEnabled}
+          staffRebookBootstrap={newBookingModal}
+          stackKey={newBookingModalEpoch}
+        />
+      ) : null}
+
+      <EraseGuestDataModal
+        open={eraseConfirmOpen}
+        guestDisplayName={displayName}
+        clientLower={clientLower}
+        bookingWordLower={bookingWord.toLowerCase()}
+        busy={eraseLoadingId === g.id}
+        onClose={() => {
+          if (eraseLoadingId === g.id) return;
+          setEraseConfirmOpen(false);
+        }}
+        onConfirmErase={() => onEraseGuest(g.id)}
+      />
+    </>
   );
 }
