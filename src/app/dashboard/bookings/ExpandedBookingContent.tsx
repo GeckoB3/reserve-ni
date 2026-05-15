@@ -5,6 +5,7 @@ import {
   BOOKING_PRIMARY_ACTIONS,
   BOOKING_REVERT_ACTIONS,
   canTransitionBookingStatus,
+  isBookingInstantRevertTransition,
   isDestructiveBookingStatus,
   isRevertTransition,
   type BookingStatus,
@@ -481,6 +482,10 @@ export function ExpandedBookingContent({
     return revertAction.label;
   };
 
+  /** Status revert that only undoes attendance confirmation (distinct from amber “Undo Start” etc.). */
+  const revertIsAttendanceUndoConfirm =
+    booking.status === 'Confirmed' && revertAction?.target === 'Booked';
+
   const forwardActions = (
     [
       BOOKING_PRIMARY_ACTIONS.Pending,
@@ -490,18 +495,31 @@ export function ExpandedBookingContent({
     ] as Array<{ label: string; target: BookingStatus } | undefined>
   ).reduce<Array<{ label: string; target: BookingStatus }>>((actions, action) => {
     if (!action || !canTransitionBookingStatus(booking.status, action.target)) return actions;
+    /** Do not treat lifecycle reverts as “forward” primaries (e.g. Confirmed→Booked reused Pending’s {Confirm,Booked} row). */
+    if (isRevertTransition(booking.status as BookingStatus, action.target)) return actions;
     if (actions.some((existing) => existing.target === action.target)) return actions;
     return [...actions, action];
   }, []);
 
   const staffIndicatorRow = { ...booking, status: booking.status };
   const showStaffAttendanceConfirm = canShowConfirmBookingAttendanceAction(staffIndicatorRow);
-  const showStaffAttendanceCancel = canShowCancelStaffAttendanceConfirmationAction(staffIndicatorRow);
+  /** Attendance undo via PATCH; skip when status revert already offers “Undo confirm” (Confirmed → Booked). */
+  const showUndoAttendanceViaPatch =
+    canShowCancelStaffAttendanceConfirmationAction(staffIndicatorRow) &&
+    !(booking.status === 'Confirmed' && revertAction?.target === 'Booked');
   const arrived = Boolean(booking.client_arrived_at);
   const showArrivedClear =
     booking.status === 'Pending' || booking.status === 'Booked' || booking.status === 'Confirmed';
 
   const handleStatusClick = (status: BookingStatus, label: string) => {
+    /** Label fallback when `tableStyle` mis-infers reservation (still “Undo start / undo confirm”). */
+    if (
+      (status === 'Booked' && (label === 'Undo Start' || label === 'Undo confirm')) ||
+      isBookingInstantRevertTransition(booking.status as BookingStatus, status, tableStyle)
+    ) {
+      onStatusAction(status);
+      return;
+    }
     if (isDestructiveBookingStatus(status) || isRevertTransition(booking.status as BookingStatus, status)) {
       setConfirmAction({ status, label });
     } else {
@@ -700,7 +718,7 @@ export function ExpandedBookingContent({
               </button>
             ) : null}
 
-            {showStaffAttendanceCancel ? (
+            {showUndoAttendanceViaPatch ? (
               <button
                 type="button"
                 disabled={inlineActionLoading !== null}
