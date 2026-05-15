@@ -34,17 +34,17 @@ import {
 } from '@/app/dashboard/bookings/booking-expand-accordion-classes';
 import {
   EXP_BOOKING_AMBER_ATTN,
-  EXP_BOOKING_ATTEND,
+  EXP_BOOKING_BTN,
   EXP_BOOKING_DANGER,
   EXP_BOOKING_DANGER_ROSE,
   EXP_BOOKING_ICO,
   EXP_BOOKING_NEUTRAL,
   EXP_BOOKING_NEUTRAL_PROMINENT,
-  EXP_BOOKING_PRIMARY,
   EXP_BOOKING_REVERT,
   EXP_BOOKING_SOFT,
   EXP_BOOKING_SPIN_AM,
   EXP_BOOKING_SPIN_NA,
+  EXP_BOOKING_ST_FOCUS,
   NO_EXTRA_ENABLED_BOOKING_MODELS,
 } from '@/app/dashboard/bookings/expanded-booking-toolbar-classes';
 import {
@@ -59,10 +59,17 @@ import { formatGuestDisplayName } from '@/lib/guests/name';
 import {
   canShowCancelStaffAttendanceConfirmationAction,
   canShowConfirmBookingAttendanceAction,
+  isAttendanceConfirmed,
   showAttendanceConfirmedSupplementPill,
   showDepositPendingPill,
 } from '@/lib/booking/booking-staff-indicators';
-import { BOOKING_ATTENDANCE_CONFIRM_SPINNER } from '@/lib/table-management/booking-status-visual';
+import {
+  BOOKING_ATTENDANCE_CONFIRM_SOLID_BUTTON,
+  BOOKING_ATTENDANCE_CONFIRM_SPINNER,
+  BOOKING_ATTENDANCE_UNDO_SPINNER,
+  BOOKING_BOOKED_LIGHT_BUTTON,
+  BOOKING_START_PRIMARY_BUTTON_CLASSES,
+} from '@/lib/table-management/booking-status-visual';
 import { StaffSurfaceBookingModal } from '@/components/booking/StaffSurfaceBookingModal';
 
 export interface BookingRow {
@@ -238,6 +245,37 @@ export function ExpandedBookingContent({
   const [inlineActionLoading, setInlineActionLoading] = useState<string | null>(null);
   const [inlineActionError, setInlineActionError] = useState<string | null>(null);
   const [linkedBookings, setLinkedBookings] = useState<Array<{ id: string; person_label: string | null; booking_time: string; status: string }>>([]);
+  /**
+   * After lifecycle Confirmed→Booked (“Undo confirm”), the parent often briefly shows `Booked` while
+   * attendance timestamps are still present; that wrongly enables PATCH “Cancel confirmation”. Suppress
+   * until rows match or a short timeout (state so clearing re-renders).
+   */
+  const [suppressPatchCancelAfterUndoConfirm, setSuppressPatchCancelAfterUndoConfirm] = useState(false);
+
+  useEffect(() => {
+    setSuppressPatchCancelAfterUndoConfirm(false);
+  }, [booking.id]);
+
+  useEffect(() => {
+    if (!suppressPatchCancelAfterUndoConfirm) return;
+    if (
+      !isAttendanceConfirmed({
+        status: booking.status,
+        guest_attendance_confirmed_at: booking.guest_attendance_confirmed_at ?? null,
+        staff_attendance_confirmed_at: booking.staff_attendance_confirmed_at ?? null,
+      })
+    ) {
+      setSuppressPatchCancelAfterUndoConfirm(false);
+      return;
+    }
+    const t = window.setTimeout(() => setSuppressPatchCancelAfterUndoConfirm(false), 4000);
+    return () => clearTimeout(t);
+  }, [
+    suppressPatchCancelAfterUndoConfirm,
+    booking.status,
+    booking.guest_attendance_confirmed_at,
+    booking.staff_attendance_confirmed_at,
+  ]);
 
   useEffect(() => {
     if (!booking.group_booking_id) return;
@@ -482,10 +520,6 @@ export function ExpandedBookingContent({
     return revertAction.label;
   };
 
-  /** Status revert that only undoes attendance confirmation (distinct from amber “Undo Start” etc.). */
-  const revertIsAttendanceUndoConfirm =
-    booking.status === 'Confirmed' && revertAction?.target === 'Booked';
-
   const forwardActions = (
     [
       BOOKING_PRIMARY_ACTIONS.Pending,
@@ -506,7 +540,8 @@ export function ExpandedBookingContent({
   /** Attendance undo via PATCH; skip when status revert already offers “Undo confirm” (Confirmed → Booked). */
   const showUndoAttendanceViaPatch =
     canShowCancelStaffAttendanceConfirmationAction(staffIndicatorRow) &&
-    !(booking.status === 'Confirmed' && revertAction?.target === 'Booked');
+    !(booking.status === 'Confirmed' && revertAction?.target === 'Booked') &&
+    !suppressPatchCancelAfterUndoConfirm;
   const arrived = Boolean(booking.client_arrived_at);
   const showArrivedClear =
     booking.status === 'Pending' || booking.status === 'Booked' || booking.status === 'Confirmed';
@@ -517,6 +552,9 @@ export function ExpandedBookingContent({
       (status === 'Booked' && (label === 'Undo Start' || label === 'Undo confirm')) ||
       isBookingInstantRevertTransition(booking.status as BookingStatus, status, tableStyle)
     ) {
+      if (booking.status === 'Confirmed' && status === 'Booked') {
+        setSuppressPatchCancelAfterUndoConfirm(true);
+      }
       onStatusAction(status);
       return;
     }
@@ -526,6 +564,24 @@ export function ExpandedBookingContent({
       onStatusAction(status);
     }
   };
+
+  const forwardActionButtonClass = (action: { label: string; target: BookingStatus }) => {
+    const lbl = forwardPrimaryLabel(action.target, action.label);
+    if (lbl === 'Start') {
+      return `${EXP_BOOKING_BTN} ${EXP_BOOKING_ST_FOCUS} font-semibold ${BOOKING_START_PRIMARY_BUTTON_CLASSES}`;
+    }
+    return `${EXP_BOOKING_BTN} ${EXP_BOOKING_ST_FOCUS} font-semibold border border-transparent bg-brand-600 text-white shadow-sm shadow-brand-900/20 hover:bg-brand-700 focus:ring-brand-500/40 active:bg-brand-800`;
+  };
+
+  const revertToolbarButtonClass =
+    revertAction &&
+    booking.status === 'Seated' &&
+    revertAction.target === 'Booked' &&
+    !tableStyle
+      ? `${EXP_BOOKING_BTN} font-semibold ${BOOKING_ATTENDANCE_CONFIRM_SOLID_BUTTON}`
+      : revertAction && booking.status === 'Confirmed' && revertAction.target === 'Booked'
+        ? `${EXP_BOOKING_BTN} font-semibold ${BOOKING_BOOKED_LIGHT_BUTTON}`
+        : EXP_BOOKING_REVERT;
 
   return (
     <div
@@ -689,7 +745,7 @@ export function ExpandedBookingContent({
                 key={action.target}
                 type="button"
                 onClick={() => handleStatusClick(action.target, forwardPrimaryLabel(action.target, action.label))}
-                className={EXP_BOOKING_PRIMARY}
+                className={forwardActionButtonClass(action)}
               >
                 {(action.target === 'Confirmed' || action.target === 'Booked') && (
                   <svg className={EXP_BOOKING_ICO} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
@@ -706,7 +762,7 @@ export function ExpandedBookingContent({
                 type="button"
                 disabled={inlineActionLoading !== null}
                 onClick={() => void patchBookingQuick({ staff_attendance_confirmed: true }, 'staff-attendance')}
-                className={EXP_BOOKING_ATTEND}
+                className={`${EXP_BOOKING_BTN} font-semibold ${BOOKING_ATTENDANCE_CONFIRM_SOLID_BUTTON}`}
               >
                 {inlineActionLoading === 'staff-attendance' ? (
                   <span
@@ -723,10 +779,10 @@ export function ExpandedBookingContent({
                 type="button"
                 disabled={inlineActionLoading !== null}
                 onClick={() => void patchBookingQuick({ staff_attendance_confirmed: false }, 'staff-attendance-cancel')}
-                className={EXP_BOOKING_NEUTRAL}
+                className={`${EXP_BOOKING_BTN} font-semibold ${BOOKING_BOOKED_LIGHT_BUTTON}`}
               >
                 {inlineActionLoading === 'staff-attendance-cancel' ? (
-                  <span className={EXP_BOOKING_SPIN_NA} aria-hidden />
+                  <span className={`${EXP_BOOKING_ICO} animate-spin rounded-full border-2 ${BOOKING_ATTENDANCE_UNDO_SPINNER}`} aria-hidden />
                 ) : null}
                 Cancel confirmation
               </button>
@@ -770,7 +826,7 @@ export function ExpandedBookingContent({
               <button
                 type="button"
                 onClick={() => handleStatusClick(revertAction.target, revertButtonLabel())}
-                className={EXP_BOOKING_REVERT}
+                className={revertToolbarButtonClass}
               >
                 <svg className={EXP_BOOKING_ICO} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M9 15 3 9m0 0 6-6M3 9h12a6 6 0 0 1 0 12h-3" /></svg>
                 {revertButtonLabel()}

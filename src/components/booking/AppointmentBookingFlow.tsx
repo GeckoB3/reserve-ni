@@ -75,6 +75,83 @@ function catalogVariantsForServiceId(catalogStaff: CatalogPractitioner[], servic
   return [];
 }
 
+const STAFF_CUSTOM_DURATION_PRESETS = [15, 30, 45, 60, 75, 90, 105, 120] as const;
+
+function StaffCustomDurationPopover({
+  value,
+  onPresetPick,
+  onOtherMinutesChange,
+  onDone,
+  onReset,
+}: {
+  value: number;
+  onPresetPick: (minutes: number) => void;
+  onOtherMinutesChange: (minutes: number) => void;
+  onDone: () => void;
+  onReset: () => void;
+}) {
+  return (
+    <div
+      className="absolute left-4 top-[calc(100%-0.25rem)] z-20 w-64 rounded-xl border border-slate-200 bg-white p-3 text-left shadow-xl"
+      onClick={(event) => event.stopPropagation()}
+      onMouseDown={(event) => event.stopPropagation()}
+      role="dialog"
+      aria-label="Custom duration"
+    >
+      <p className="text-xs font-semibold text-slate-700">Custom duration</p>
+      <p className="mt-0.5 text-[11px] text-slate-500">Applies only to this booking.</p>
+      <div className="mt-2 grid grid-cols-3 gap-1.5">
+        {STAFF_CUSTOM_DURATION_PRESETS.map((minutes) => (
+          <button
+            key={minutes}
+            type="button"
+            onClick={() => onPresetPick(minutes)}
+            className={`rounded-lg px-2 py-1.5 text-xs font-semibold ${
+              value === minutes
+                ? 'bg-brand-600 text-white'
+                : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+            }`}
+          >
+            {minutes}m
+          </button>
+        ))}
+      </div>
+      <label className="mt-2 block text-[11px] font-semibold text-slate-600">
+        Other minutes
+        <input
+          type="number"
+          min={15}
+          max={840}
+          step={5}
+          value={value}
+          onChange={(event) => {
+            const next = Number(event.target.value);
+            if (!Number.isInteger(next)) return;
+            onOtherMinutesChange(Math.min(840, Math.max(15, next)));
+          }}
+          className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs"
+        />
+      </label>
+      <div className="mt-2 flex gap-2">
+        <button
+          type="button"
+          onClick={onDone}
+          className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700"
+        >
+          Done
+        </button>
+        <button
+          type="button"
+          onClick={onReset}
+          className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+        >
+          Reset
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /** Services + staff from catalog (no date / slots). */
 interface CatalogPractitioner {
   id: string;
@@ -273,6 +350,7 @@ export function AppointmentBookingFlow({
   const [selectedVariantId, setSelectedVariantId] = useState<string | null>(null);
   /** Staff-created appointments can override duration for this booking only. Keyed by parent service id. */
   const [staffDurationOverrides, setStaffDurationOverrides] = useState<Record<string, number>>({});
+  /** Staff service-step (no variants): which service id has the duration popover open. */
   const [durationPopoverServiceId, setDurationPopoverServiceId] = useState<string | null>(null);
   /** Staff variant-step duration editor: which composite override key has its popover open. */
   const [durationPopoverOpenForKey, setDurationPopoverOpenForKey] = useState<string | null>(null);
@@ -352,6 +430,7 @@ export function AppointmentBookingFlow({
       setSelectedVariantId(null);
       setStaffDurationOverrides({});
       setDurationPopoverServiceId(null);
+      setDurationPopoverOpenForKey(null);
       setSelectedTime(null);
       setGuestDetails(null);
       setCreateResult(null);
@@ -1751,151 +1830,129 @@ export function AppointmentBookingFlow({
                 const serviceHasVariants = serviceVariants.length > 0;
                 const displayedDuration = staffDurationOverrides[svc.id] ?? svc.duration_minutes;
                 const durationIsCustom = displayedDuration !== svc.duration_minutes;
-                const showStaffServiceDurationAdjuster = isStaff && !isEdit && !serviceHasVariants;
-                return (
-                  <div key={svc.id} className="relative">
+                const staffDurationOverrideForService = staffDurationOverrides[svc.id] ?? null;
+
+                function navigateFromServiceRow() {
+                  setDurationPopoverOpenForKey(null);
+                  setDurationPopoverServiceId(null);
+                  queuePrefetchForServicePractitioners(svc.id, staffDurationOverrideForService);
+                  setSelectedServiceId(svc.id);
+                  setSelectedVariantId(null);
+                  if (serviceHasVariants) {
+                    setStep('variant');
+                    return;
+                  }
+                  if (isEdit) {
+                    const existingOrFirst =
+                      catalogStaff.find((p) => p.id === selectedPractitionerId && p.services.some((s) => s.id === svc.id)) ??
+                      catalogStaff.find((p) => p.services.some((s) => s.id === svc.id));
+                    setSelectedPractitionerId(existingOrFirst?.id ?? null);
+                    if (existingOrFirst?.id) {
+                      primeSelectedAppointmentCalendar(existingOrFirst.id, svc.id, staffDurationOverrideForService);
+                      setStep('slot');
+                    } else {
+                      setStep('practitioner');
+                    }
+                    return;
+                  }
+                  if (isLockedPractitionerFlow && selectedPractitionerId) {
+                    primeSelectedAppointmentCalendar(selectedPractitionerId, svc.id, staffDurationOverrideForService);
+                  }
+                  setStep(isLockedPractitionerFlow ? 'slot' : 'practitioner');
+                }
+
+                if (!isStaff) {
+                  return (
                     <button
+                      key={svc.id}
                       type="button"
-                      onClick={() => {
-                        queuePrefetchForServicePractitioners(svc.id, displayedDuration);
-                        setSelectedServiceId(svc.id);
-                        setSelectedVariantId(null);
-                        setDurationPopoverServiceId(null);
-                        /** Hop to the variant picker first when this service offers sub-options. */
-                        if (serviceVariants.length > 0) {
-                          setStep('variant');
-                          return;
-                        }
-                        if (isEdit) {
-                          const existingOrFirst =
-                            catalogStaff.find((p) => p.id === selectedPractitionerId && p.services.some((s) => s.id === svc.id)) ??
-                            catalogStaff.find((p) => p.services.some((s) => s.id === svc.id));
-                          setSelectedPractitionerId(existingOrFirst?.id ?? null);
-                          if (existingOrFirst?.id) {
-                            primeSelectedAppointmentCalendar(existingOrFirst.id, svc.id, displayedDuration);
-                            setStep('slot');
-                          } else {
-                            setStep('practitioner');
-                          }
-                          return;
-                        }
-                        if (isLockedPractitionerFlow && selectedPractitionerId) {
-                          primeSelectedAppointmentCalendar(selectedPractitionerId, svc.id, displayedDuration);
-                        }
-                        setStep(isLockedPractitionerFlow ? 'slot' : 'practitioner');
-                      }}
+                      onClick={navigateFromServiceRow}
                       className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-left shadow-sm transition-all hover:border-brand-300 hover:shadow-md active:scale-[0.99]"
                     >
                       <div className="flex items-center justify-between gap-3">
                         <div className="min-w-0">
                           <div className="font-medium text-slate-900">{svc.name}</div>
-                          {!isStaff || isEdit ? (
-                            <div className="mt-0.5 text-xs text-slate-500">{svc.duration_minutes} min</div>
-                          ) : null}
+                          <div className="mt-0.5 text-xs text-slate-500">{svc.duration_minutes} min</div>
                         </div>
                         <div className="flex flex-shrink-0 items-center gap-2">
-                          {showStaffServiceDurationAdjuster ? (
-                            <span
-                              className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold shadow-sm ${
-                                durationIsCustom
-                                  ? 'border-brand-200 bg-brand-50 text-brand-700'
-                                  : 'border-slate-200 bg-slate-50 text-slate-600'
-                              }`}
-                              aria-hidden="true"
-                            >
-                              {displayedDuration} min
-                              <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Z" />
-                              </svg>
-                            </span>
-                          ) : null}
                           <span className="text-sm font-semibold text-brand-600">{formatFromPrice(svc.minPricePence)}</span>
-                          <svg className="h-4 w-4 text-slate-300" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg>
+                          <svg className="h-4 w-4 text-slate-300" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
+                          </svg>
                         </div>
                       </div>
                     </button>
-                    {showStaffServiceDurationAdjuster ? (
+                  );
+                }
+
+                return (
+                  <div key={svc.id} className="relative">
+                    <div className="flex w-full overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition-all hover:border-brand-300 hover:shadow-md active:scale-[0.99]">
                       <button
                         type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          setDurationPopoverServiceId((current) => (current === svc.id ? null : svc.id));
-                        }}
-                        className="absolute right-20 top-1/2 h-7 w-20 -translate-y-1/2 rounded-full focus:outline-none focus:ring-2 focus:ring-brand-500/40"
-                        aria-expanded={durationPopoverServiceId === svc.id}
-                        aria-label={`Change duration for ${svc.name}`}
-                      />
-                    ) : null}
-                    {showStaffServiceDurationAdjuster && durationPopoverServiceId === svc.id ? (
-                      <div
-                        className="absolute left-4 top-[calc(100%-0.25rem)] z-20 w-64 rounded-xl border border-slate-200 bg-white p-3 text-left shadow-xl"
-                        onClick={(event) => event.stopPropagation()}
-                        onMouseDown={(event) => event.stopPropagation()}
+                        onClick={navigateFromServiceRow}
+                        className="min-w-0 flex-1 px-4 py-3.5 text-left transition-colors hover:bg-slate-50/60"
                       >
-                        <p className="text-xs font-semibold text-slate-700">Custom duration</p>
-                        <p className="mt-0.5 text-[11px] text-slate-500">Applies only to this booking.</p>
-                        <div className="mt-2 grid grid-cols-3 gap-1.5">
-                          {[15, 30, 45, 60, 75, 90, 105, 120].map((minutes) => (
-                            <button
-                              key={minutes}
-                              type="button"
-                              onClick={() => {
-                                setStaffDurationOverrides((prev) => ({ ...prev, [svc.id]: minutes }));
-                                setDurationPopoverServiceId(null);
-                              }}
-                              className={`rounded-lg px-2 py-1.5 text-xs font-semibold ${
-                                displayedDuration === minutes
-                                  ? 'bg-brand-600 text-white'
-                                  : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-                              }`}
-                            >
-                              {minutes}m
-                            </button>
-                          ))}
-                        </div>
-                        <label className="mt-2 block text-[11px] font-semibold text-slate-600">
-                          Other minutes
-                          <input
-                            type="number"
-                            min={15}
-                            max={840}
-                            step={5}
-                            value={displayedDuration}
-                            onChange={(event) => {
-                              const value = Number(event.target.value);
-                              if (!Number.isInteger(value)) return;
-                              setStaffDurationOverrides((prev) => ({
-                                ...prev,
-                                [svc.id]: Math.min(840, Math.max(15, value)),
-                              }));
-                            }}
-                            className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs"
-                          />
-                        </label>
-                        <div className="mt-2 flex gap-2">
-                          <button
-                            type="button"
-                            onClick={() => setDurationPopoverServiceId(null)}
-                            className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700"
-                          >
-                            Done
-                          </button>
+                        <div className="font-medium text-slate-900">{svc.name}</div>
+                        {serviceHasVariants ? (
+                          <div className="mt-0.5 text-xs text-slate-500">From ({svc.duration_minutes} min)</div>
+                        ) : null}
+                      </button>
+                      <div className="flex flex-shrink-0 items-center gap-2 border-l border-slate-100 bg-white py-3.5 pl-3 pr-1">
+                        {!serviceHasVariants ? (
                           <button
                             type="button"
                             onClick={() => {
-                              setStaffDurationOverrides((prev) => {
-                                const next = { ...prev };
-                                delete next[svc.id];
-                                return next;
-                              });
-                              setDurationPopoverServiceId(null);
+                              setDurationPopoverOpenForKey(null);
+                              setDurationPopoverServiceId((current) => (current === svc.id ? null : svc.id));
                             }}
-                            className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                            className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold shadow-sm transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500/40 ${
+                              durationIsCustom
+                                ? 'border-brand-200 bg-brand-50 text-brand-700'
+                                : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100'
+                            }`}
+                            aria-expanded={durationPopoverServiceId === svc.id}
+                            aria-haspopup="dialog"
                           >
-                            Reset
+                            {displayedDuration} min
+                            <span className="sr-only">Custom duration</span>
+                            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden="true">
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Z"
+                              />
+                            </svg>
                           </button>
-                        </div>
+                        ) : null}
+                        <span className="text-sm font-semibold text-brand-600">{formatFromPrice(svc.minPricePence)}</span>
                       </div>
+                      <div className="pointer-events-none flex items-center pr-3 text-slate-300">
+                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden="true">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
+                        </svg>
+                      </div>
+                    </div>
+                    {!serviceHasVariants && durationPopoverServiceId === svc.id ? (
+                      <StaffCustomDurationPopover
+                        value={displayedDuration}
+                        onPresetPick={(minutes) => {
+                          setStaffDurationOverrides((prev) => ({ ...prev, [svc.id]: minutes }));
+                          setDurationPopoverServiceId(null);
+                        }}
+                        onOtherMinutesChange={(minutes) => {
+                          setStaffDurationOverrides((prev) => ({ ...prev, [svc.id]: minutes }));
+                        }}
+                        onDone={() => setDurationPopoverServiceId(null)}
+                        onReset={() => {
+                          setStaffDurationOverrides((prev) => {
+                            const next = { ...prev };
+                            delete next[svc.id];
+                            return next;
+                          });
+                          setDurationPopoverServiceId(null);
+                        }}
+                      />
                     ) : null}
                   </div>
                 );
@@ -1911,10 +1968,11 @@ export function AppointmentBookingFlow({
             type="button"
             onClick={() => {
               setSelectedVariantId(null);
+              setDurationPopoverOpenForKey(null);
+              setDurationPopoverServiceId(null);
               if (isLockedPractitionerFlow) {
                 setSelectedServiceId(null);
               }
-              setDurationPopoverServiceId(null);
               setStep('service');
             }}
             className="mb-3 inline-flex items-center gap-1 text-sm text-brand-600 hover:text-brand-700"
@@ -1942,7 +2000,7 @@ export function AppointmentBookingFlow({
 
               const primeDuration = staffDurationOverrides[variantOverrideKey] ?? null;
 
-              if (!isStaff || isEdit) {
+              if (!isStaff) {
                 return (
                   <button
                     key={variant.id}
@@ -1992,141 +2050,92 @@ export function AppointmentBookingFlow({
                 );
               }
 
+              function navigateFromVariantRow() {
+                setDurationPopoverOpenForKey(null);
+                setDurationPopoverServiceId(null);
+                setSelectedVariantId(variant.id);
+                if (
+                  staffCalendarSlotPrefillActive &&
+                  preselectedPractitionerId &&
+                  !isLockedPractitionerFlow &&
+                  selectedServiceId
+                ) {
+                  void continueStaffCalendarSlotPrefill({ serviceId: selectedServiceId, variantId: variant.id });
+                  return;
+                }
+                if (isLockedPractitionerFlow && selectedPractitionerId && selectedServiceId) {
+                  primeSelectedAppointmentCalendar(
+                    selectedPractitionerId,
+                    selectedServiceId,
+                    primeDuration,
+                    variant.id,
+                  );
+                }
+                setStep(isLockedPractitionerFlow ? 'slot' : 'practitioner');
+              }
+
               return (
                 <div key={variant.id} className="relative">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedVariantId(variant.id);
-                      if (
-                        staffCalendarSlotPrefillActive &&
-                        preselectedPractitionerId &&
-                        !isLockedPractitionerFlow &&
-                        selectedServiceId
-                      ) {
-                        void continueStaffCalendarSlotPrefill({ serviceId: selectedServiceId, variantId: variant.id });
-                        return;
-                      }
-                      if (isLockedPractitionerFlow && selectedPractitionerId && selectedServiceId) {
-                        primeSelectedAppointmentCalendar(
-                          selectedPractitionerId,
-                          selectedServiceId,
-                          primeDuration,
-                          variant.id,
-                        );
-                      }
-                      setStep(isLockedPractitionerFlow ? 'slot' : 'practitioner');
-                    }}
-                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-left shadow-sm transition-all hover:border-brand-300 hover:shadow-md active:scale-[0.99]"
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="font-medium text-slate-900">{variant.name}</div>
-                        {variant.description ? (
-                          <div className="mt-0.5 text-xs text-slate-500">{variant.description}</div>
-                        ) : null}
-                      </div>
-                      <div className="flex flex-shrink-0 items-center gap-2">
-                        <span
-                          className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold shadow-sm ${
-                            variantDurationIsCustom
-                              ? 'border-brand-200 bg-brand-50 text-brand-700'
-                              : 'border-slate-200 bg-slate-50 text-slate-600'
-                          }`}
-                          aria-hidden="true"
-                        >
-                          {variantDisplayedDuration} min
-                          <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Z" />
-                          </svg>
-                        </span>
-                        <span className="text-sm font-semibold text-brand-600">{formatPrice(variant.price_pence)}</span>
-                        <svg className="h-4 w-4 text-slate-300" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg>
-                      </div>
+                  <div className="flex w-full overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition-all hover:border-brand-300 hover:shadow-md active:scale-[0.99]">
+                    <button type="button" onClick={navigateFromVariantRow} className="min-w-0 flex-1 px-4 py-3.5 text-left transition-colors hover:bg-slate-50/60">
+                      <div className="font-medium text-slate-900">{variant.name}</div>
+                      {variant.description ? <div className="mt-0.5 text-xs text-slate-500">{variant.description}</div> : null}
+                    </button>
+                    <div className="flex flex-shrink-0 items-center gap-2 border-l border-slate-100 bg-white py-3.5 pl-3 pr-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDurationPopoverServiceId(null);
+                          setDurationPopoverOpenForKey((current) =>
+                            current === variantOverrideKey ? null : variantOverrideKey,
+                          );
+                        }}
+                        className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold shadow-sm transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500/40 ${
+                          variantDurationIsCustom
+                            ? 'border-brand-200 bg-brand-50 text-brand-700'
+                            : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100'
+                        }`}
+                        aria-expanded={durationPopoverOpenForKey === variantOverrideKey}
+                        aria-haspopup="dialog"
+                      >
+                        {variantDisplayedDuration} min
+                        <span className="sr-only">Custom duration</span>
+                        <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden="true">
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Z"
+                          />
+                        </svg>
+                      </button>
+                      <span className="text-sm font-semibold text-brand-600">{formatPrice(variant.price_pence)}</span>
                     </div>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setDurationPopoverOpenForKey((current) =>
-                        current === variantOverrideKey ? null : variantOverrideKey,
-                      );
-                    }}
-                    className="absolute right-28 top-1/2 h-7 w-[5.75rem] -translate-y-1/2 rounded-full focus:outline-none focus:ring-2 focus:ring-brand-500/40"
-                    aria-expanded={durationPopoverOpenForKey === variantOverrideKey}
-                    aria-label={`Change duration for ${variant.name}`}
-                  />
+                    <div className="pointer-events-none flex items-center pr-3 text-slate-300">
+                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden="true">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
+                      </svg>
+                    </div>
+                  </div>
                   {durationPopoverOpenForKey === variantOverrideKey ? (
-                    <div
-                      className="absolute left-4 top-[calc(100%-0.25rem)] z-20 w-64 rounded-xl border border-slate-200 bg-white p-3 text-left shadow-xl"
-                      onClick={(event) => event.stopPropagation()}
-                      onMouseDown={(event) => event.stopPropagation()}
-                    >
-                      <p className="text-xs font-semibold text-slate-700">Custom duration</p>
-                      <p className="mt-0.5 text-[11px] text-slate-500">Applies only to this booking.</p>
-                      <div className="mt-2 grid grid-cols-3 gap-1.5">
-                        {[15, 30, 45, 60, 75, 90, 105, 120].map((minutes) => (
-                          <button
-                            key={minutes}
-                            type="button"
-                            onClick={() => {
-                              setStaffDurationOverrides((prev) => ({ ...prev, [variantOverrideKey]: minutes }));
-                              setDurationPopoverOpenForKey(null);
-                            }}
-                            className={`rounded-lg px-2 py-1.5 text-xs font-semibold ${
-                              variantDisplayedDuration === minutes
-                                ? 'bg-brand-600 text-white'
-                                : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-                            }`}
-                          >
-                            {minutes}m
-                          </button>
-                        ))}
-                      </div>
-                      <label className="mt-2 block text-[11px] font-semibold text-slate-600">
-                        Other minutes
-                        <input
-                          type="number"
-                          min={15}
-                          max={840}
-                          step={5}
-                          value={variantDisplayedDuration}
-                          onChange={(event) => {
-                            const value = Number(event.target.value);
-                            if (!Number.isInteger(value)) return;
-                            setStaffDurationOverrides((prev) => ({
-                              ...prev,
-                              [variantOverrideKey]: Math.min(840, Math.max(15, value)),
-                            }));
-                          }}
-                          className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs"
-                        />
-                      </label>
-                      <div className="mt-2 flex gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setDurationPopoverOpenForKey(null)}
-                          className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700"
-                        >
-                          Done
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setStaffDurationOverrides((prev) => {
-                              const next = { ...prev };
-                              delete next[variantOverrideKey];
-                              return next;
-                            });
-                            setDurationPopoverOpenForKey(null);
-                          }}
-                          className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50"
-                        >
-                          Reset
-                        </button>
-                      </div>
-                    </div>
+                    <StaffCustomDurationPopover
+                      value={variantDisplayedDuration}
+                      onPresetPick={(minutes) => {
+                        setStaffDurationOverrides((prev) => ({ ...prev, [variantOverrideKey]: minutes }));
+                        setDurationPopoverOpenForKey(null);
+                      }}
+                      onOtherMinutesChange={(minutes) => {
+                        setStaffDurationOverrides((prev) => ({ ...prev, [variantOverrideKey]: minutes }));
+                      }}
+                      onDone={() => setDurationPopoverOpenForKey(null)}
+                      onReset={() => {
+                        setStaffDurationOverrides((prev) => {
+                          const next = { ...prev };
+                          delete next[variantOverrideKey];
+                          return next;
+                        });
+                        setDurationPopoverOpenForKey(null);
+                      }}
+                    />
                   ) : null}
                 </div>
               );
@@ -2150,6 +2159,7 @@ export function AppointmentBookingFlow({
               setSelectedServiceId(null);
               setSelectedVariantId(null);
               setDurationPopoverServiceId(null);
+              setDurationPopoverOpenForKey(null);
               setSelectedPractitionerId(null);
               setStep('service');
             }}
@@ -2232,6 +2242,7 @@ export function AppointmentBookingFlow({
                 setSelectedServiceId(null);
                 setSelectedVariantId(null);
                 setDurationPopoverServiceId(null);
+                setDurationPopoverOpenForKey(null);
                 setStep('service');
               } else {
                 setSelectedPractitionerId(null);
