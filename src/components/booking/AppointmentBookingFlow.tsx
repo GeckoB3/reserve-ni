@@ -62,6 +62,19 @@ interface CatalogVariant {
   sort_order: number;
 }
 
+/** Staff-only booking duration overrides: parent service id if no variant; composite key when a variant is chosen. */
+function staffDurationOverrideKey(serviceId: string, variantId: string | null): string {
+  return variantId ? `${serviceId}:${variantId}` : serviceId;
+}
+
+function catalogVariantsForServiceId(catalogStaff: CatalogPractitioner[], serviceId: string): CatalogVariant[] {
+  for (const p of catalogStaff) {
+    const offer = p.services.find((s) => s.id === serviceId);
+    if (offer?.variants && offer.variants.length > 0) return offer.variants;
+  }
+  return [];
+}
+
 /** Services + staff from catalog (no date / slots). */
 interface CatalogPractitioner {
   id: string;
@@ -222,11 +235,29 @@ export function AppointmentBookingFlow({
   const isLockedPractitionerFlow = Boolean(
     lockedPractitioner?.id && lockedPractitioner?.bookingSlug,
   );
+  /** Staff opened the modal from the dashboard calendar empty-slot menu with date, time, and column (practitioner) set. */
+  const staffCalendarSlotPrefillActive = useMemo(() => {
+    if (!isStaff || isStaffWalkInAppointment || isEdit || Boolean(staffRebookBootstrap?.appointment)) return false;
+    if (isLockedPractitionerFlow) return false;
+    const d = initialDate?.trim();
+    const t = initialTime?.trim();
+    const p = preselectedPractitionerId?.trim();
+    return Boolean(d && t && p);
+  }, [
+    isStaff,
+    isStaffWalkInAppointment,
+    isEdit,
+    staffRebookBootstrap?.appointment,
+    isLockedPractitionerFlow,
+    initialDate,
+    initialTime,
+    preselectedPractitionerId,
+  ]);
   const singleFlowSteps: Step[] = isLockedPractitionerFlow ? SINGLE_STEPS_LOCKED : SINGLE_STEPS;
 
   // Shared state
   const [step, setStep] = useState<Step>(() =>
-    editBooking ? 'service' : isLockedPractitionerFlow ? 'service' : 'mode_choice',
+    editBooking ? 'service' : isLockedPractitionerFlow ? 'service' : isStaff ? 'service' : 'mode_choice',
   );
   const [date, setDate] = useState(() => editBooking?.booking_date ?? initialDate ?? todayStr());
   const [catalogStaff, setCatalogStaff] = useState<CatalogPractitioner[]>([]);
@@ -240,9 +271,10 @@ export function AppointmentBookingFlow({
   const [selectedServiceId, setSelectedServiceId] = useState<string | null>(() => editBooking?.service_id ?? null);
   /** When the chosen service has variants, this is the picked variant id; null otherwise. */
   const [selectedVariantId, setSelectedVariantId] = useState<string | null>(null);
-  /** Staff-created appointments can override duration for this booking only. Keyed by parent service id. */
+  /** Staff-created appointments can override duration for this booking only (see `staffDurationOverrideKey`). */
   const [staffDurationOverrides, setStaffDurationOverrides] = useState<Record<string, number>>({});
-  const [durationPopoverServiceId, setDurationPopoverServiceId] = useState<string | null>(null);
+  /** Which override row has the duration editor open (`staffDurationOverrideKey` value). */
+  const [durationPopoverOpenForKey, setDurationPopoverOpenForKey] = useState<string | null>(null);
   const [selectedPractitionerId, setSelectedPractitionerId] = useState<string | null>(() =>
     editBooking?.practitioner_id ?? (lockedPractitioner?.id && lockedPractitioner?.bookingSlug ? lockedPractitioner.id : null),
   );
@@ -318,7 +350,7 @@ export function AppointmentBookingFlow({
       setSelectedServiceId(null);
       setSelectedVariantId(null);
       setStaffDurationOverrides({});
-      setDurationPopoverServiceId(null);
+      setDurationPopoverOpenForKey(null);
       setSelectedTime(null);
       setGuestDetails(null);
       setCreateResult(null);
@@ -334,13 +366,13 @@ export function AppointmentBookingFlow({
         setStep('service');
         setSelectedPractitionerId(lockedPractitioner.id);
       } else {
-        setStep('mode_choice');
+        setStep(isStaff ? 'service' : 'mode_choice');
         setSelectedPractitionerId(null);
       }
     }
     window.addEventListener(APPOINTMENT_BOOKING_RESET_EVENT, onReset);
     return () => window.removeEventListener(APPOINTMENT_BOOKING_RESET_EVENT, onReset);
-  }, [lockedPractitioner?.id, lockedPractitioner?.bookingSlug]);
+  }, [lockedPractitioner?.id, lockedPractitioner?.bookingSlug, isStaff]);
 
   // Build phantom bookings from already-selected group people
   const phantomBookings = useMemo(() => {
@@ -617,7 +649,10 @@ export function AppointmentBookingFlow({
     let durationMinutesParam: number | null = null;
     if (appt.durationMinutes != null && appt.durationMinutes !== naturalDuration) {
       durationMinutesParam = appt.durationMinutes;
-      setStaffDurationOverrides((prev) => ({ ...prev, [appt.serviceId]: appt.durationMinutes! }));
+      setStaffDurationOverrides((prev) => ({
+        ...prev,
+        [staffDurationOverrideKey(appt.serviceId, variantId)]: appt.durationMinutes!,
+      }));
     }
 
     staffRebookApplyRef.current = true;
@@ -638,7 +673,8 @@ export function AppointmentBookingFlow({
     const svc = isGroup ? groupServiceId : selectedServiceId;
     const prac = isGroup ? groupPractitionerId : selectedPractitionerId;
     const variantId = isGroup ? null : selectedVariantId;
-    const durationMinutes = !isGroup && svc ? staffDurationOverrides[svc] ?? null : null;
+    const durationMinutes =
+      !isGroup && svc ? staffDurationOverrides[staffDurationOverrideKey(svc, variantId)] ?? null : null;
     if (!svc || !prac) return;
     fetchAvailability({ serviceId: svc, practitionerId: prac, variantId, durationMinutes });
   }, [
@@ -663,7 +699,8 @@ export function AppointmentBookingFlow({
     const tasks: Array<{ practitionerId: string; serviceId: string; durationMinutes?: number | null }> = [];
 
     if (step === 'practitioner' && selectedServiceId) {
-      const durationMinutes = staffDurationOverrides[selectedServiceId] ?? null;
+      const durationMinutes =
+        staffDurationOverrides[staffDurationOverrideKey(selectedServiceId, selectedVariantId)] ?? null;
       for (const p of catalogStaff) {
         if (p.services.some((s) => s.id === selectedServiceId)) {
           tasks.push({ practitionerId: p.id, serviceId: selectedServiceId, durationMinutes });
@@ -673,10 +710,13 @@ export function AppointmentBookingFlow({
       const p = catalogStaff.find((c) => c.id === lockedPractitioner.id);
       if (p) {
         for (const s of p.services) {
+          const hasVariants = Boolean(s.variants && s.variants.length > 0);
           tasks.push({
             practitionerId: p.id,
             serviceId: s.id,
-            durationMinutes: staffDurationOverrides[s.id] ?? null,
+            durationMinutes: hasVariants
+              ? null
+              : staffDurationOverrides[staffDurationOverrideKey(s.id, null)] ?? null,
           });
         }
       }
@@ -696,6 +736,7 @@ export function AppointmentBookingFlow({
   }, [
     step,
     selectedServiceId,
+    selectedVariantId,
     staffDurationOverrides,
     groupServiceId,
     isLockedPractitionerFlow,
@@ -716,7 +757,8 @@ export function AppointmentBookingFlow({
     const svc = isGroup ? groupServiceId : selectedServiceId;
     const prac = isGroup ? groupPractitionerId : selectedPractitionerId;
     const variantId = isGroup ? null : selectedVariantId;
-    const durationMinutes = !isGroup && svc ? staffDurationOverrides[svc] ?? null : null;
+    const durationMinutes =
+      !isGroup && svc ? staffDurationOverrides[staffDurationOverrideKey(svc, variantId)] ?? null : null;
     if (!svc || !prac) return;
 
     const key = appointmentCalendarCacheKey(prac, svc, calendarMonth.year, calendarMonth.month, variantId, durationMinutes);
@@ -827,7 +869,12 @@ export function AppointmentBookingFlow({
   useEffect(() => {
     if (step !== 'service' || catalogLoading || isLockedPractitionerFlow || !onlyListedServiceId) return;
     const { year, month } = calendarMonth;
-    const durationMinutes = staffDurationOverrides[onlyListedServiceId] ?? null;
+    const onlySvcVariants =
+      onlyListedServiceId ? catalogVariantsForServiceId(catalogStaff, onlyListedServiceId) : [];
+    const durationMinutes =
+      onlySvcVariants.length > 0
+        ? null
+        : staffDurationOverrides[staffDurationOverrideKey(onlyListedServiceId!, null)] ?? null;
     const tasks: Array<{ practitionerId: string; serviceId: string; durationMinutes?: number | null }> = [];
     for (const p of catalogStaff) {
       if (p.services.some((s) => s.id === onlyListedServiceId)) {
@@ -891,24 +938,26 @@ export function AppointmentBookingFlow({
   const selectedServiceForPractitioner =
     selectedPrac?.services.find((s) => s.id === selectedServiceId) ?? selectedService;
   const staffCustomDurationMinutes =
-    isStaff && selectedServiceId ? staffDurationOverrides[selectedServiceId] ?? null : null;
+    isStaff && selectedServiceId
+      ? staffDurationOverrides[staffDurationOverrideKey(selectedServiceId, selectedVariantId)] ?? null
+      : null;
   /** Variants the customer can pick from for the currently selected service (active only). */
   const variantsForSelectedService = useMemo<CatalogVariant[]>(() => {
     if (!selectedServiceId) return [];
-    for (const p of catalogStaff) {
-      const offer = p.services.find((s) => s.id === selectedServiceId);
-      if (offer?.variants && offer.variants.length > 0) return offer.variants;
-    }
-    return [];
+    return catalogVariantsForServiceId(catalogStaff, selectedServiceId);
   }, [catalogStaff, selectedServiceId]);
   const serviceHasVariants = variantsForSelectedService.length > 0;
   const selectedVariant = useMemo<CatalogVariant | null>(() => {
     if (!selectedVariantId) return null;
     return variantsForSelectedService.find((v) => v.id === selectedVariantId) ?? null;
   }, [variantsForSelectedService, selectedVariantId]);
-  const serviceSelectionDurationMinutes = selectedServiceId
-    ? staffDurationOverrides[selectedServiceId] ?? selectedService?.duration_minutes ?? null
-    : null;
+  const serviceSelectionDurationMinutes =
+    selectedServiceId != null
+      ? staffDurationOverrides[staffDurationOverrideKey(selectedServiceId, selectedVariantId)] ??
+        selectedVariant?.duration_minutes ??
+        selectedService?.duration_minutes ??
+        null
+      : null;
   /**
    * Practitioner offer with variant overrides applied. Used everywhere price / duration / deposit
    * needs to reflect the chosen sub-option (summary copy, online charge, end-time previews).
@@ -966,7 +1015,8 @@ export function AppointmentBookingFlow({
   // ── Single booking handlers ──
 
   const validateMultiServiceChain = useCallback(
-    async (chain: MultiServiceSegment[]): Promise<string | null> => {
+    async (chain: MultiServiceSegment[], bookingDateOverride?: string): Promise<string | null> => {
+      const booking_date = bookingDateOverride ?? date;
       const phantoms: Array<{
         practitioner_id: string;
         start_time: string;
@@ -979,7 +1029,7 @@ export function AppointmentBookingFlow({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             venue_id: venue.id,
-            booking_date: date,
+            booking_date,
             practitioner_id: seg.practitionerId,
             service_id: seg.serviceId,
             ...(seg.serviceVariantId ? { variant_id: seg.serviceVariantId } : {}),
@@ -1001,6 +1051,116 @@ export function AppointmentBookingFlow({
       return null;
     },
     [venue.id, date],
+  );
+
+  const continueStaffCalendarSlotPrefill = useCallback(
+    async (opts: { serviceId: string; variantId: string | null }) => {
+      const bookingDate = initialDate!.trim();
+      const timeHm = initialTime!.trim().slice(0, 5);
+      const practitionerId = preselectedPractitionerId!.trim();
+
+      const practitioner = catalogStaff.find((c) => c.id === practitionerId);
+      const baseOffer = practitioner?.services.find((s) => s.id === opts.serviceId);
+
+      const primeCal = (durationForPrime: number | null) => {
+        primeSelectedAppointmentCalendar(practitionerId, opts.serviceId, durationForPrime, opts.variantId);
+      };
+
+      const goToSlotWithMessage = (message: string, durationForPrime: number | null) => {
+        setSelectedServiceId(opts.serviceId);
+        setSelectedVariantId(opts.variantId);
+        setSelectedPractitionerId(practitionerId);
+        setDate(bookingDate);
+        setSelectedTime(timeHm);
+        primeCal(durationForPrime);
+        setMultiServiceSegments(null);
+        setAddingExtraService(false);
+        setError(message);
+        setStep('slot');
+      };
+
+      if (!practitioner || !baseOffer) {
+        goToSlotWithMessage(
+          'This service is not available with the calendar column you selected. Choose a date and time below.',
+          staffDurationOverrides[staffDurationOverrideKey(opts.serviceId, opts.variantId)] ?? null,
+        );
+        return;
+      }
+
+      let effectiveName = baseOffer.name;
+      let durationMinutes = baseOffer.duration_minutes;
+      let bufferMinutes = baseOffer.buffer_minutes ?? 0;
+      let pricePence = baseOffer.price_pence;
+      let depositPence = baseOffer.deposit_pence ?? null;
+      const paymentRequirement = baseOffer.payment_requirement;
+
+      if (opts.variantId) {
+        const v = baseOffer.variants?.find((x) => x.id === opts.variantId);
+        if (!v) {
+          goToSlotWithMessage(
+            'That option is not valid for this service. Choose a date and time below.',
+            staffDurationOverrides[staffDurationOverrideKey(opts.serviceId, opts.variantId)] ?? null,
+          );
+          return;
+        }
+        effectiveName = `${baseOffer.name} - ${v.name}`;
+        durationMinutes = v.duration_minutes;
+        bufferMinutes = v.buffer_minutes ?? bufferMinutes;
+        pricePence = v.price_pence;
+        depositPence = v.deposit_pence ?? depositPence ?? null;
+      }
+
+      const staffOv = staffDurationOverrides[staffDurationOverrideKey(opts.serviceId, opts.variantId)];
+      if (staffOv != null) {
+        durationMinutes = staffOv;
+      }
+
+      const firstOnline = onlineChargeFromCatalogOffer({
+        price_pence: pricePence,
+        deposit_pence: depositPence,
+        payment_requirement: paymentRequirement,
+      });
+
+      const segment: MultiServiceSegment = {
+        serviceId: opts.serviceId,
+        serviceVariantId: opts.variantId,
+        serviceName: effectiveName,
+        practitionerId,
+        practitionerName: practitioner.name,
+        startTime: timeHm,
+        durationMinutes,
+        bufferMinutes,
+        pricePence,
+        depositPence: firstOnline?.amountPence ?? 0,
+        onlineChargeLabel: firstOnline?.chargeLabel,
+      };
+
+      const err = await validateMultiServiceChain([segment], bookingDate);
+      if (err) {
+        goToSlotWithMessage(`${err} Pick another date or time using the calendar below.`, staffOv ?? durationMinutes);
+        return;
+      }
+
+      setSelectedServiceId(opts.serviceId);
+      setSelectedVariantId(opts.variantId);
+      setSelectedPractitionerId(practitionerId);
+      setDate(bookingDate);
+      setSelectedTime(timeHm);
+      primeCal(staffOv ?? durationMinutes);
+      setMultiServiceSegments([segment]);
+      setAddingExtraService(false);
+      setError(null);
+      setStep('multi_service');
+    },
+    [
+      initialDate,
+      initialTime,
+      preselectedPractitionerId,
+      catalogStaff,
+      primeSelectedAppointmentCalendar,
+      validateMultiServiceChain,
+      staffDurationOverrides,
+    ],
   );
 
   const handlePickAdditionalService = useCallback(
@@ -1524,7 +1684,7 @@ export function AppointmentBookingFlow({
       {/* ════════════════════════════════════════════════
           MODE CHOICE: Book for myself vs Group
           ════════════════════════════════════════════════ */}
-      {step === 'mode_choice' && !isLockedPractitionerFlow && !isEdit && (
+      {step === 'mode_choice' && !isLockedPractitionerFlow && !isEdit && !isStaff && (
         <div>
           <h2 className="mb-2 text-lg font-semibold text-slate-900">How would you like to book?</h2>
           <p className="mb-5 text-sm text-slate-500">Choose a single appointment or a group booking for several people.</p>
@@ -1569,7 +1729,7 @@ export function AppointmentBookingFlow({
 
       {step === 'service' && (
         <div>
-          {!isLockedPractitionerFlow && !isEdit && (
+          {!isLockedPractitionerFlow && !isEdit && !isStaff && (
             <button type="button" onClick={() => { setStep('mode_choice'); }} className="mb-3 inline-flex items-center gap-1 text-sm text-brand-600 hover:text-brand-700">
               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>
               Back
@@ -1591,26 +1751,33 @@ export function AppointmentBookingFlow({
           ) : (
             <div className="space-y-2">
               {servicesWithFromPrice.map((svc) => {
-                const displayedDuration = staffDurationOverrides[svc.id] ?? svc.duration_minutes;
-                const durationIsCustom = displayedDuration !== svc.duration_minutes;
+                const variantsForSvc = catalogVariantsForServiceId(catalogStaff, svc.id);
+                const svcHasVariants = variantsForSvc.length > 0;
+                const serviceOverrideKey = staffDurationOverrideKey(svc.id, null);
+                const displayedDuration = svcHasVariants
+                  ? svc.duration_minutes
+                  : staffDurationOverrides[serviceOverrideKey] ?? svc.duration_minutes;
+                const durationIsCustom = !svcHasVariants && displayedDuration !== svc.duration_minutes;
+                const prefetchDuration = svcHasVariants ? null : displayedDuration;
+
                 return (
                   <div key={svc.id} className="relative">
                     <button
                       type="button"
                       onClick={() => {
-                        queuePrefetchForServicePractitioners(svc.id, displayedDuration);
+                        if (svcHasVariants) {
+                          setStaffDurationOverrides((prev) => {
+                            if (!prev[svc.id]) return prev;
+                            const next = { ...prev };
+                            delete next[svc.id];
+                            return next;
+                          });
+                        }
+                        queuePrefetchForServicePractitioners(svc.id, prefetchDuration);
                         setSelectedServiceId(svc.id);
                         setSelectedVariantId(null);
-                        setDurationPopoverServiceId(null);
-                        /** Hop to the variant picker first when this service offers sub-options. */
-                        const variantsForSvc = (() => {
-                          for (const p of catalogStaff) {
-                            const offer = p.services.find((s) => s.id === svc.id);
-                            if (offer?.variants && offer.variants.length > 0) return offer.variants;
-                          }
-                          return [];
-                        })();
-                        if (variantsForSvc.length > 0) {
+                        setDurationPopoverOpenForKey(null);
+                        if (svcHasVariants) {
                           setStep('variant');
                           return;
                         }
@@ -1625,6 +1792,14 @@ export function AppointmentBookingFlow({
                           } else {
                             setStep('practitioner');
                           }
+                          return;
+                        }
+                        if (
+                          staffCalendarSlotPrefillActive &&
+                          preselectedPractitionerId &&
+                          !isLockedPractitionerFlow
+                        ) {
+                          void continueStaffCalendarSlotPrefill({ serviceId: svc.id, variantId: null });
                           return;
                         }
                         if (isLockedPractitionerFlow && selectedPractitionerId) {
@@ -1642,7 +1817,7 @@ export function AppointmentBookingFlow({
                           ) : null}
                         </div>
                         <div className="flex flex-shrink-0 items-center gap-2">
-                          {isStaff && !isEdit ? (
+                          {isStaff && !isEdit && !svcHasVariants ? (
                             <span
                               className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold shadow-sm ${
                                 durationIsCustom
@@ -1662,19 +1837,21 @@ export function AppointmentBookingFlow({
                         </div>
                       </div>
                     </button>
-                    {isStaff && !isEdit ? (
+                    {isStaff && !isEdit && !svcHasVariants ? (
                       <button
                         type="button"
                         onClick={(event) => {
                           event.stopPropagation();
-                          setDurationPopoverServiceId((current) => (current === svc.id ? null : svc.id));
+                          setDurationPopoverOpenForKey((current) =>
+                            current === serviceOverrideKey ? null : serviceOverrideKey,
+                          );
                         }}
                         className="absolute right-20 top-1/2 h-7 w-20 -translate-y-1/2 rounded-full focus:outline-none focus:ring-2 focus:ring-brand-500/40"
-                        aria-expanded={durationPopoverServiceId === svc.id}
+                        aria-expanded={durationPopoverOpenForKey === serviceOverrideKey}
                         aria-label={`Change duration for ${svc.name}`}
                       />
                     ) : null}
-                    {isStaff && !isEdit && durationPopoverServiceId === svc.id ? (
+                    {isStaff && !isEdit && !svcHasVariants && durationPopoverOpenForKey === serviceOverrideKey ? (
                       <div
                         className="absolute left-4 top-[calc(100%-0.25rem)] z-20 w-64 rounded-xl border border-slate-200 bg-white p-3 text-left shadow-xl"
                         onClick={(event) => event.stopPropagation()}
@@ -1688,8 +1865,8 @@ export function AppointmentBookingFlow({
                               key={minutes}
                               type="button"
                               onClick={() => {
-                                setStaffDurationOverrides((prev) => ({ ...prev, [svc.id]: minutes }));
-                                setDurationPopoverServiceId(null);
+                                setStaffDurationOverrides((prev) => ({ ...prev, [serviceOverrideKey]: minutes }));
+                                setDurationPopoverOpenForKey(null);
                               }}
                               className={`rounded-lg px-2 py-1.5 text-xs font-semibold ${
                                 displayedDuration === minutes
@@ -1714,7 +1891,7 @@ export function AppointmentBookingFlow({
                               if (!Number.isInteger(value)) return;
                               setStaffDurationOverrides((prev) => ({
                                 ...prev,
-                                [svc.id]: Math.min(840, Math.max(15, value)),
+                                [serviceOverrideKey]: Math.min(840, Math.max(15, value)),
                               }));
                             }}
                             className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs"
@@ -1723,7 +1900,7 @@ export function AppointmentBookingFlow({
                         <div className="mt-2 flex gap-2">
                           <button
                             type="button"
-                            onClick={() => setDurationPopoverServiceId(null)}
+                            onClick={() => setDurationPopoverOpenForKey(null)}
                             className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700"
                           >
                             Done
@@ -1733,10 +1910,10 @@ export function AppointmentBookingFlow({
                             onClick={() => {
                               setStaffDurationOverrides((prev) => {
                                 const next = { ...prev };
-                                delete next[svc.id];
+                                delete next[serviceOverrideKey];
                                 return next;
                               });
-                              setDurationPopoverServiceId(null);
+                              setDurationPopoverOpenForKey(null);
                             }}
                             className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50"
                           >
@@ -1762,7 +1939,7 @@ export function AppointmentBookingFlow({
               if (isLockedPractitionerFlow) {
                 setSelectedServiceId(null);
               }
-              setDurationPopoverServiceId(null);
+              setDurationPopoverOpenForKey(null);
               setStep('service');
             }}
             className="mb-3 inline-flex items-center gap-1 text-sm text-brand-600 hover:text-brand-700"
@@ -1781,39 +1958,198 @@ export function AppointmentBookingFlow({
             This service has a few variations to choose from. Pick one to continue.
           </p>
           <div className="space-y-2">
-            {variantsForSelectedService.map((variant) => (
-              <button
-                key={variant.id}
-                type="button"
-                onClick={() => {
-                  setSelectedVariantId(variant.id);
-                  if (isLockedPractitionerFlow && selectedPractitionerId && selectedServiceId) {
-                    primeSelectedAppointmentCalendar(
-                      selectedPractitionerId,
-                      selectedServiceId,
-                      staffDurationOverrides[selectedServiceId] ?? null,
-                      variant.id,
-                    );
-                  }
-                  setStep(isLockedPractitionerFlow ? 'slot' : 'practitioner');
-                }}
-                className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-left shadow-sm transition-all hover:border-brand-300 hover:shadow-md active:scale-[0.99]"
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="font-medium text-slate-900">{variant.name}</div>
-                    <div className="mt-0.5 text-xs text-slate-500">
-                      {variant.duration_minutes} min
-                      {variant.description ? ` · ${variant.description}` : ''}
+            {selectedServiceId
+              ? variantsForSelectedService.map((variant) => {
+                  const variantOverrideKey = staffDurationOverrideKey(selectedServiceId, variant.id);
+              const variantDisplayedDuration =
+                staffDurationOverrides[variantOverrideKey] ?? variant.duration_minutes;
+              const variantDurationIsCustom = variantDisplayedDuration !== variant.duration_minutes;
+
+              if (!isStaff || isEdit) {
+                return (
+                  <button
+                    key={variant.id}
+                    type="button"
+                    onClick={() => {
+                      setSelectedVariantId(variant.id);
+                      if (
+                        staffCalendarSlotPrefillActive &&
+                        preselectedPractitionerId &&
+                        !isLockedPractitionerFlow &&
+                        selectedServiceId
+                      ) {
+                        void continueStaffCalendarSlotPrefill({ serviceId: selectedServiceId, variantId: variant.id });
+                        return;
+                      }
+                      if (isLockedPractitionerFlow && selectedPractitionerId && selectedServiceId) {
+                        primeSelectedAppointmentCalendar(
+                          selectedPractitionerId,
+                          selectedServiceId,
+                          staffDurationOverrides[variantOverrideKey] ?? null,
+                          variant.id,
+                        );
+                      }
+                      setStep(isLockedPractitionerFlow ? 'slot' : 'practitioner');
+                    }}
+                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-left shadow-sm transition-all hover:border-brand-300 hover:shadow-md active:scale-[0.99]"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="font-medium text-slate-900">{variant.name}</div>
+                        <div className="mt-0.5 text-xs text-slate-500">
+                          {variant.duration_minutes} min
+                          {variant.description ? ` · ${variant.description}` : ''}
+                        </div>
+                      </div>
+                      <div className="flex flex-shrink-0 items-center gap-2">
+                        <span className="text-sm font-semibold text-brand-600">{formatPrice(variant.price_pence)}</span>
+                        <svg className="h-4 w-4 text-slate-300" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg>
+                      </div>
                     </div>
-                  </div>
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    <span className="text-sm font-semibold text-brand-600">{formatPrice(variant.price_pence)}</span>
-                    <svg className="h-4 w-4 text-slate-300" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg>
-                  </div>
+                  </button>
+                );
+              }
+
+              return (
+                <div key={variant.id} className="relative">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedVariantId(variant.id);
+                      if (
+                        staffCalendarSlotPrefillActive &&
+                        preselectedPractitionerId &&
+                        !isLockedPractitionerFlow &&
+                        selectedServiceId
+                      ) {
+                        void continueStaffCalendarSlotPrefill({ serviceId: selectedServiceId, variantId: variant.id });
+                        return;
+                      }
+                      if (isLockedPractitionerFlow && selectedPractitionerId && selectedServiceId) {
+                        primeSelectedAppointmentCalendar(
+                          selectedPractitionerId,
+                          selectedServiceId,
+                          staffDurationOverrides[variantOverrideKey] ?? null,
+                          variant.id,
+                        );
+                      }
+                      setStep(isLockedPractitionerFlow ? 'slot' : 'practitioner');
+                    }}
+                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-left shadow-sm transition-all hover:border-brand-300 hover:shadow-md active:scale-[0.99]"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="font-medium text-slate-900">{variant.name}</div>
+                        {variant.description ? (
+                          <div className="mt-0.5 text-xs text-slate-500">{variant.description}</div>
+                        ) : null}
+                      </div>
+                      <div className="flex flex-shrink-0 items-center gap-2">
+                        <span
+                          className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold shadow-sm ${
+                            variantDurationIsCustom
+                              ? 'border-brand-200 bg-brand-50 text-brand-700'
+                              : 'border-slate-200 bg-slate-50 text-slate-600'
+                          }`}
+                          aria-hidden="true"
+                        >
+                          {variantDisplayedDuration} min
+                          <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Z" />
+                          </svg>
+                        </span>
+                        <span className="text-sm font-semibold text-brand-600">{formatPrice(variant.price_pence)}</span>
+                        <svg className="h-4 w-4 text-slate-300" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg>
+                      </div>
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setDurationPopoverOpenForKey((current) =>
+                        current === variantOverrideKey ? null : variantOverrideKey,
+                      );
+                    }}
+                    className="absolute right-28 top-1/2 h-7 w-[5.75rem] -translate-y-1/2 rounded-full focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+                    aria-expanded={durationPopoverOpenForKey === variantOverrideKey}
+                    aria-label={`Change duration for ${variant.name}`}
+                  />
+                  {durationPopoverOpenForKey === variantOverrideKey ? (
+                    <div
+                      className="absolute left-4 top-[calc(100%-0.25rem)] z-20 w-64 rounded-xl border border-slate-200 bg-white p-3 text-left shadow-xl"
+                      onClick={(event) => event.stopPropagation()}
+                      onMouseDown={(event) => event.stopPropagation()}
+                    >
+                      <p className="text-xs font-semibold text-slate-700">Custom duration</p>
+                      <p className="mt-0.5 text-[11px] text-slate-500">Applies only to this booking.</p>
+                      <div className="mt-2 grid grid-cols-3 gap-1.5">
+                        {[15, 30, 45, 60, 75, 90, 105, 120].map((minutes) => (
+                          <button
+                            key={minutes}
+                            type="button"
+                            onClick={() => {
+                              setStaffDurationOverrides((prev) => ({ ...prev, [variantOverrideKey]: minutes }));
+                              setDurationPopoverOpenForKey(null);
+                            }}
+                            className={`rounded-lg px-2 py-1.5 text-xs font-semibold ${
+                              variantDisplayedDuration === minutes
+                                ? 'bg-brand-600 text-white'
+                                : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                            }`}
+                          >
+                            {minutes}m
+                          </button>
+                        ))}
+                      </div>
+                      <label className="mt-2 block text-[11px] font-semibold text-slate-600">
+                        Other minutes
+                        <input
+                          type="number"
+                          min={15}
+                          max={840}
+                          step={5}
+                          value={variantDisplayedDuration}
+                          onChange={(event) => {
+                            const value = Number(event.target.value);
+                            if (!Number.isInteger(value)) return;
+                            setStaffDurationOverrides((prev) => ({
+                              ...prev,
+                              [variantOverrideKey]: Math.min(840, Math.max(15, value)),
+                            }));
+                          }}
+                          className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs"
+                        />
+                      </label>
+                      <div className="mt-2 flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setDurationPopoverOpenForKey(null)}
+                          className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700"
+                        >
+                          Done
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setStaffDurationOverrides((prev) => {
+                              const next = { ...prev };
+                              delete next[variantOverrideKey];
+                              return next;
+                            });
+                            setDurationPopoverOpenForKey(null);
+                          }}
+                          className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                        >
+                          Reset
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
-              </button>
-            ))}
+              );
+            })
+              : null}
           </div>
         </div>
       )}
@@ -1832,7 +2168,7 @@ export function AppointmentBookingFlow({
               }
               setSelectedServiceId(null);
               setSelectedVariantId(null);
-              setDurationPopoverServiceId(null);
+              setDurationPopoverOpenForKey(null);
               setSelectedPractitionerId(null);
               setStep('service');
             }}
@@ -1872,7 +2208,7 @@ export function AppointmentBookingFlow({
                         primeSelectedAppointmentCalendar(
                           prac.id,
                           selectedServiceId,
-                          staffDurationOverrides[selectedServiceId] ?? null,
+                          staffDurationOverrides[staffDurationOverrideKey(selectedServiceId, selectedVariantId)] ?? null,
                         );
                       }
                       setSelectedPractitionerId(prac.id);
@@ -1912,7 +2248,7 @@ export function AppointmentBookingFlow({
                 }
                 setSelectedServiceId(null);
                 setSelectedVariantId(null);
-                setDurationPopoverServiceId(null);
+                setDurationPopoverOpenForKey(null);
                 setStep('service');
               } else {
                 setSelectedPractitionerId(null);
@@ -2357,7 +2693,7 @@ export function AppointmentBookingFlow({
 
       {step === 'group_review' && (
         <div>
-          <button onClick={() => { if (groupPeople.length === 0) { setStep('mode_choice'); } else { /* stay on review */ } }} className={`mb-3 inline-flex items-center gap-1 text-sm text-brand-600 hover:text-brand-700 ${groupPeople.length > 0 ? 'invisible' : ''}`}>
+          <button onClick={() => { if (groupPeople.length === 0) { setStep(isStaff ? 'service' : 'mode_choice'); } else { /* stay on review */ } }} className={`mb-3 inline-flex items-center gap-1 text-sm text-brand-600 hover:text-brand-700 ${groupPeople.length > 0 ? 'invisible' : ''}`}>
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>
             Back
           </button>
@@ -2434,7 +2770,7 @@ export function AppointmentBookingFlow({
           {groupPeople.length >= 1 && (
             <div className="mt-4 flex gap-3">
               <button
-                onClick={() => { setGroupPeople([]); setStep('mode_choice'); }}
+                onClick={() => { setGroupPeople([]); setStep(isStaff ? 'service' : 'mode_choice'); }}
                 className="flex-1 rounded-xl border border-slate-300 px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50"
               >
                 Cancel
@@ -2448,7 +2784,7 @@ export function AppointmentBookingFlow({
             </div>
           )}
           {groupPeople.length === 0 && (
-            <button onClick={() => setStep('mode_choice')} className="mt-4 w-full rounded-xl border border-slate-300 px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50">
+            <button onClick={() => setStep(isStaff ? 'service' : 'mode_choice')} className="mt-4 w-full rounded-xl border border-slate-300 px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50">
               Back
             </button>
           )}

@@ -1510,6 +1510,10 @@ export function BookingDetailPanel({
                   }}
                   listRefreshKey={guestHistoryListRefresh}
                   rebookGuestPrefill={guestHistoryRebookPrefill}
+                  onStaffBookingCreated={() => {
+                    setGuestHistoryListRefresh((k) => k + 1);
+                    void load();
+                  }}
                 />
               </div>
             ) : null}
