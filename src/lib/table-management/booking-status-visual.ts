@@ -95,6 +95,13 @@ export const BOOKING_ATTENDANCE_CONFIRM_SPINNER = 'border-white/35 border-t-whit
 export const BOOKING_ATTENDANCE_UNDO_OUTLINE_BUTTON =
   'border border-[#1E40AF] bg-white text-[#1E40AF] shadow-sm hover:bg-[#EFF6FF] focus:ring-[#1E40AF]/35';
 
+/**
+ * Light blue surface matching the **Booked** status pill (`bookingStatusVisualForKey('Booked')`).
+ * Used for undo-confirm style actions in dense toolbars.
+ */
+export const BOOKING_BOOKED_LIGHT_BUTTON =
+  'border border-[#BFDBFE] bg-[#EFF6FF] text-[#1E3A8A] shadow-sm hover:bg-[#DBEAFE] focus:ring-[#93C5FD]/40';
+
 export const BOOKING_ATTENDANCE_UNDO_SPINNER = 'border-[#1E40AF]/30 border-t-[#1E40AF]';
 
 /** Non-table primary “Start” (→ Seated); matches Walk-in toolbar (`OperationsWorkspaceToolbar` / `ViewToolbar`). */
