@@ -790,6 +790,12 @@ export function AppointmentBookingsDashboard({
     return groups;
   }, [sortedBookings, viewMode]);
 
+  const sortedDayEntries = useMemo(() => {
+    if (!groupedByDate) return [];
+    const dayOrder = sortKey === 'date' && sortDir === 'desc' ? -1 : 1;
+    return Object.entries(groupedByDate).sort(([a], [b]) => a.localeCompare(b) * dayOrder);
+  }, [groupedByDate, sortKey, sortDir]);
+
   const stats = useMemo(() => {
     const total = statsBookings.length;
     const confirmed = statsBookings.filter(isAttendanceConfirmed).length;
@@ -1662,9 +1668,15 @@ export function AppointmentBookingsDashboard({
         renderAppointmentCards(sortedBookings)
       ) : (
         <div className="space-y-4">
-          {Object.entries(groupedByDate ?? {})
-            .sort(([a], [b]) => a.localeCompare(b))
-            .map(([date, dayBookings]) => (
+          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm shadow-slate-900/5">
+            <div className="flex flex-col gap-2 border-b border-slate-200/90 bg-slate-50 px-3 py-2 sm:flex-row sm:items-center sm:justify-end sm:gap-3 sm:px-4">
+              <SortControl />
+              <span className="shrink-0 text-[11px] font-semibold tabular-nums text-slate-500 sm:text-xs">
+                {sortedBookings.length} {sortedBookings.length === 1 ? 'booking' : 'bookings'}
+              </span>
+            </div>
+          </div>
+          {sortedDayEntries.map(([date, dayBookings]) => (
               <section
                 key={date}
                 className="space-y-2"
