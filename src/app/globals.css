@@ -339,12 +339,7 @@ button, a, input, select, textarea {
 }
 
 .appointment-public .ap-accent-bar {
-  background: linear-gradient(
-    90deg,
-    var(--ap-accent) 0%,
-    color-mix(in srgb, var(--ap-accent) 72%, white) 55%,
-    color-mix(in srgb, var(--ap-accent) 38%, white) 100%
-  );
+  background-color: var(--ap-accent);
 }
 
 .appointment-public .ap-progress-active,
