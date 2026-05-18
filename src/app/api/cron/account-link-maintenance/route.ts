@@ -12,6 +12,7 @@ import {
   PENDING_REQUEST_EXPIRY_DAYS,
   SUSPENDED_LINK_EXPIRY_DAYS,
 } from '@/lib/linked-accounts/types';
+import { reconcileCollectivesAfterLinkChange } from '@/lib/linked-accounts/collectives';
 
 interface VenueState {
   id: string;
@@ -40,6 +41,9 @@ export async function GET(request: NextRequest) {
     terminated_ineligible: 0,
     errors: 0,
   };
+
+  /** Venues whose links left `accepted` this run — their collectives need re-checking (§7.5). */
+  const collectiveAffectedVenueIds = new Set<string>();
 
   const venueCache = new Map<string, VenueState | null>();
   async function getVenue(id: string): Promise<VenueState | null> {
@@ -197,6 +201,8 @@ export async function GET(request: NextRequest) {
               pending_change: null,
             })
             .eq('id', link.id);
+          collectiveAffectedVenueIds.add(link.venue_low_id as string);
+          collectiveAffectedVenueIds.add(link.venue_high_id as string);
           results.terminated_ineligible++;
           continue;
         }
@@ -208,6 +214,8 @@ export async function GET(request: NextRequest) {
             .from('account_links')
             .update({ status: 'suspended', suspended_at: new Date().toISOString() })
             .eq('id', link.id);
+          collectiveAffectedVenueIds.add(link.venue_low_id as string);
+          collectiveAffectedVenueIds.add(link.venue_high_id as string);
           await Promise.allSettled([
             notifyLinkSuspended(admin, link.venue_low_id as string, lapsed.name),
             notifyLinkSuspended(admin, link.venue_high_id as string, lapsed.name),
@@ -265,6 +273,8 @@ export async function GET(request: NextRequest) {
               pending_change: null,
             })
             .eq('id', link.id);
+          collectiveAffectedVenueIds.add(link.venue_low_id as string);
+          collectiveAffectedVenueIds.add(link.venue_high_id as string);
           results.expired_suspended++;
         }
       } catch (err) {
@@ -275,6 +285,16 @@ export async function GET(request: NextRequest) {
   } catch (err) {
     console.error('[account-link-maintenance] resume step failed:', err);
     results.errors++;
+  }
+
+  // ---- 4. Reconcile collectives whose links left 'accepted' (§7.5) -----
+  if (collectiveAffectedVenueIds.size > 0) {
+    try {
+      await reconcileCollectivesAfterLinkChange(admin, [...collectiveAffectedVenueIds]);
+    } catch (err) {
+      console.error('[account-link-maintenance] collective reconcile failed:', err);
+      results.errors++;
+    }
   }
 
   return NextResponse.json({ ok: true, ...results });

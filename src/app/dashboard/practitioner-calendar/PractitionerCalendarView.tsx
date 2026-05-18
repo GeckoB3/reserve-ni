@@ -35,6 +35,11 @@ import { ResourceBookingFlow } from '@/components/booking/ResourceBookingFlow';
 import { CalendarStaffBookingModal } from '@/app/dashboard/practitioner-calendar/CalendarStaffBookingModal';
 import { CalendarColumnsChecklist } from '@/app/dashboard/practitioner-calendar/CalendarColumnsFilter';
 import {
+  EditLinkedBookingModal,
+  CreateLinkedBookingModal,
+} from '@/components/linked-accounts/LinkedCalendarView';
+import type { LinkedVenueCalendar, LinkedBooking } from '@/lib/linked-accounts/calendar';
+import {
   BookingDetailPanel,
   type BookingDetailPanelSnapshot,
 } from '@/app/dashboard/bookings/BookingDetailPanel';
@@ -120,6 +125,29 @@ interface Practitioner {
 interface CalendarVariantRow {
   id: string;
   processing_time_blocks?: ProcessingTimeBlock[];
+}
+
+/**
+ * A read-only practitioner column belonging to a *linked* venue (§8.2). Linked
+ * columns are kept entirely separate from the native `Practitioner` pipeline —
+ * no droppables, drag, resource logic or availability maths touch them — so the
+ * core calendar is unaffected. The `key` is namespaced to avoid colliding with
+ * a native column id.
+ */
+interface LinkedColumn {
+  key: string;
+  venueId: string;
+  venueName: string;
+  linkId: string;
+  practitionerId: string;
+  practitionerName: string;
+  practitionerActive: boolean;
+  visibility: LinkedVenueCalendar['visibility'];
+  action: LinkedVenueCalendar['action'];
+}
+
+function linkedColumnKey(venueId: string, practitionerId: string): string {
+  return `linked:${venueId}:${practitionerId}`;
 }
 
 interface AppointmentService {
@@ -279,6 +307,8 @@ interface PractitionerCalendarPreferences {
   weekStart?: string;
   monthAnchor?: string;
   visibleCalendarIdsState?: string[] | null;
+  /** Linked-venue columns the user has opted into (§8.2). Default: none. */
+  visibleLinkedColumnIds?: string[];
   filterStatus?: string;
   startHourOverride?: number | null;
   endHourOverride?: number | null;
@@ -304,6 +334,13 @@ function isPractitionerCalendarPreferences(value: unknown): value is Practitione
   if (value.monthAnchor !== undefined && (typeof value.monthAnchor !== 'string' || !ISO_DATE_RE.test(value.monthAnchor))) return false;
   if (value.visibleCalendarIdsState !== undefined && value.visibleCalendarIdsState !== null) {
     if (!Array.isArray(value.visibleCalendarIdsState) || !value.visibleCalendarIdsState.every((id) => typeof id === 'string' && UUID_RE.test(id))) return false;
+  }
+  if (value.visibleLinkedColumnIds !== undefined) {
+    if (
+      !Array.isArray(value.visibleLinkedColumnIds) ||
+      !value.visibleLinkedColumnIds.every((id) => typeof id === 'string' && id.startsWith('linked:'))
+    )
+      return false;
   }
   /**
    * Accept any string here; unknown values (e.g. legacy `Cancelled`) are dropped
@@ -1429,6 +1466,110 @@ const DraggableBookingShell = memo(function DraggableBookingShell({
   );
 });
 
+function linkedTimeToMinutes(time: string): number {
+  const [hh, mm] = (time ?? '').split(':');
+  return (parseInt(hh, 10) || 0) * 60 + (parseInt(mm, 10) || 0);
+}
+
+function linkedSlotTop(time: string, startHour: number): number {
+  return ((linkedTimeToMinutes(time) - startHour * 60) / SLOT_MINUTES) * SLOT_HEIGHT;
+}
+
+function linkedBlockHeight(start: string, end: string | null): number {
+  if (!end) return SLOT_HEIGHT;
+  const d = linkedTimeToMinutes(end) - linkedTimeToMinutes(start);
+  return Math.max((d / SLOT_MINUTES) * SLOT_HEIGHT, SLOT_HEIGHT * 0.6);
+}
+
+function linkedBookingIsClickable(column: LinkedColumn, b: LinkedBooking): boolean {
+  return (
+    column.visibility === 'full_details' &&
+    b.editable &&
+    b.status !== 'Cancelled'
+  );
+}
+
+/**
+ * One read-only day-grid column for a linked venue's practitioner (§8.2).
+ * Deliberately self-contained: no droppables, no drag, no resource maths — the
+ * native calendar pipeline never sees this. Bookings render desaturated; only
+ * `full_details` + editable links are clickable.
+ */
+const LinkedDayColumn = memo(function LinkedDayColumn({
+  column,
+  bookings,
+  startHour,
+  totalSlots,
+  onBookingClick,
+}: {
+  column: LinkedColumn;
+  bookings: LinkedBooking[];
+  startHour: number;
+  totalSlots: number;
+  onBookingClick: (b: LinkedBooking) => void;
+}) {
+  const timeOnly = column.visibility === 'time_only';
+  return (
+    <div className="min-w-[min(16rem,calc(100vw-5.5rem))] flex-1 border-r border-slate-300 last:border-r-0 sm:min-w-[240px]">
+      <div className="relative bg-slate-50/50" style={{ height: totalSlots * SLOT_HEIGHT }}>
+        {Array.from({ length: totalSlots }, (_, i) => (
+          <div
+            key={i}
+            className="absolute left-0 w-full border-t border-slate-100"
+            style={{ top: i * SLOT_HEIGHT }}
+            aria-hidden
+          />
+        ))}
+        {bookings.map((b) => {
+          const top = linkedSlotTop(b.bookingTime, startHour);
+          const height = linkedBlockHeight(b.bookingTime, b.bookingEndTime);
+          const clickable = linkedBookingIsClickable(column, b);
+          const timeLabel = `${b.bookingTime.slice(0, 5)}${
+            b.bookingEndTime ? `–${b.bookingEndTime.slice(0, 5)}` : ''
+          }`;
+          const detail = timeOnly
+            ? `${column.venueName} — busy`
+            : b.guestName ?? b.serviceName ?? 'Booking';
+          const inner = (
+            <div
+              className="flex h-full min-h-0 w-full flex-col gap-0.5 overflow-hidden rounded-lg border border-slate-300 bg-white/70 px-1.5 py-1 text-left text-[10px] text-slate-500 saturate-50"
+              style={{ borderLeftWidth: 3, borderLeftColor: '#94a3b8' }}
+            >
+              <span className="font-semibold tabular-nums text-slate-600">{timeLabel}</span>
+              <span className="truncate">{detail}</span>
+              {!timeOnly ? (
+                <span className="mt-auto text-[9px] uppercase tracking-wide text-slate-400">
+                  {b.status}
+                </span>
+              ) : null}
+            </div>
+          );
+          return (
+            <div
+              key={b.id}
+              className="absolute left-1 right-1 z-[15]"
+              style={{ top, height }}
+            >
+              {clickable ? (
+                <button
+                  type="button"
+                  onClick={() => onBookingClick(b)}
+                  className="block h-full w-full text-left transition hover:saturate-100 hover:opacity-90"
+                  title={`Edit in ${column.venueName}`}
+                >
+                  {inner}
+                </button>
+              ) : (
+                inner
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+});
+
 export function PractitionerCalendarView({
   venueId,
   currency = 'GBP',
@@ -1437,12 +1578,15 @@ export function PractitionerCalendarView({
   bookingModel = 'unified_scheduling',
   enabledModels = [],
   calendarTodayIso,
+  linkFeature = false,
 }: {
   venueId: string;
   currency?: string;
   defaultPractitionerFilter?: 'all' | string;
   /** Bookable calendars this staff user manages (unified scheduling). */
   linkedPractitionerIds?: string[];
+  /** True when the venue is eligible for Linked Accounts (§8.2 grid columns). */
+  linkFeature?: boolean;
   /** Primary bookable model (for merged schedule feeds §4.2). */
   bookingModel?: BookingModel;
   /** Secondary models; used to show Events / Classes lanes on the day grid. */
@@ -1491,6 +1635,14 @@ export function PractitionerCalendarView({
   const [visibleCalendarIdsState, setVisibleCalendarIdsState] = useState<string[] | null>(() =>
     defaultPractitionerFilter === 'all' ? null : [defaultPractitionerFilter],
   );
+  /** Linked-venue calendars (§8.2). Adjacent to the native pipeline, never merged. */
+  const [linkedVenues, setLinkedVenues] = useState<LinkedVenueCalendar[]>([]);
+  /** Linked columns the user has opted into. Default: none (opt-in). */
+  const [visibleLinkedColumnIds, setVisibleLinkedColumnIds] = useState<string[]>([]);
+  const [linkedEditing, setLinkedEditing] = useState<
+    { column: LinkedColumn; booking: LinkedBooking } | null
+  >(null);
+  const [linkedCreating, setLinkedCreating] = useState<LinkedVenueCalendar | null>(null);
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [staffBookingModal, setStaffBookingModal] = useState<null | 'new' | 'walk-in'>(null);
@@ -1786,6 +1938,9 @@ export function PractitionerCalendarView({
     if (remembered.visibleCalendarIdsState !== undefined) {
       setVisibleCalendarIdsState(remembered.visibleCalendarIdsState);
     }
+    if (remembered.visibleLinkedColumnIds !== undefined) {
+      setVisibleLinkedColumnIds(remembered.visibleLinkedColumnIds);
+    }
     if (
       remembered.filterStatus &&
       CALENDAR_STATUS_FILTERS.some((s) => s.value === remembered.filterStatus)
@@ -1811,6 +1966,7 @@ export function PractitionerCalendarView({
       weekStart,
       monthAnchor,
       visibleCalendarIdsState,
+      visibleLinkedColumnIds,
       filterStatus,
       startHourOverride,
       endHourOverride,
@@ -1823,6 +1979,7 @@ export function PractitionerCalendarView({
     weekStart,
     monthAnchor,
     visibleCalendarIdsState,
+    visibleLinkedColumnIds,
     filterStatus,
     startHourOverride,
     endHourOverride,
@@ -1940,6 +2097,36 @@ export function PractitionerCalendarView({
   useEffect(() => {
     void fetchData();
   }, [fetchData]);
+
+  /**
+   * Linked-venue calendars (§8.2) are loaded in a fully isolated effect: a
+   * failure here never affects the core calendar — it just leaves the linked
+   * data empty. Keyed off the same date range so linked data follows the
+   * page's day/week selection automatically.
+   */
+  const loadLinkedData = useCallback(async () => {
+    if (!linkFeature) {
+      setLinkedVenues([]);
+      return;
+    }
+    try {
+      const { from, to } = listFromTo;
+      const params = from === to ? `date=${from}` : `from=${from}&to=${to}`;
+      const res = await fetch(`/api/venue/linked-calendar?${params}`);
+      if (!res.ok) {
+        setLinkedVenues([]);
+        return;
+      }
+      const json = (await res.json()) as { venues?: LinkedVenueCalendar[] };
+      setLinkedVenues(json.venues ?? []);
+    } catch {
+      setLinkedVenues([]);
+    }
+  }, [linkFeature, listFromTo]);
+
+  useEffect(() => {
+    void loadLinkedData();
+  }, [loadLinkedData]);
 
   useEffect(() => {
     if (!showResourceBooking || resourceBookingVenue) return;
@@ -2062,6 +2249,50 @@ export function PractitionerCalendarView({
     const allowed = new Set(calendarFilterIds);
     return columnPractitioners.filter((p) => allowed.has(p.id));
   }, [columnPractitioners, calendarFilterIds]);
+
+  /** Every practitioner column exposed by a linked venue (§8.2). */
+  const linkedColumns = useMemo<LinkedColumn[]>(() => {
+    const out: LinkedColumn[] = [];
+    for (const v of linkedVenues) {
+      for (const p of v.practitioners) {
+        out.push({
+          key: linkedColumnKey(v.venueId, p.id),
+          venueId: v.venueId,
+          venueName: v.venueName,
+          linkId: v.linkId,
+          practitionerId: p.id,
+          practitionerName: p.name,
+          practitionerActive: p.isActive,
+          visibility: v.visibility,
+          action: v.action,
+        });
+      }
+    }
+    return out;
+  }, [linkedVenues]);
+
+  /** Linked columns the user has switched on — these render on the grid. */
+  const visibleLinkedColumns = useMemo(
+    () => linkedColumns.filter((c) => visibleLinkedColumnIds.includes(c.key)),
+    [linkedColumns, visibleLinkedColumnIds],
+  );
+
+  const linkedVenueById = useMemo(() => {
+    const m = new Map<string, LinkedVenueCalendar>();
+    for (const v of linkedVenues) m.set(v.venueId, v);
+    return m;
+  }, [linkedVenues]);
+
+  const linkedBookingsFor = useCallback(
+    (column: LinkedColumn, dayDate: string): LinkedBooking[] => {
+      const venue = linkedVenueById.get(column.venueId);
+      if (!venue) return [];
+      return venue.bookings.filter(
+        (b) => b.practitionerId === column.practitionerId && b.bookingDate === dayDate,
+      );
+    },
+    [linkedVenueById],
+  );
 
   useEffect(() => {
     const root = timelineRootRef.current;
@@ -2760,7 +2991,10 @@ export function PractitionerCalendarView({
   const bookedCount = bookingsForToolbarStats.filter((b) => b.status === 'Booked').length;
   const completedCount = bookingsForToolbarStats.filter((b) => b.status === 'Completed').length;
 
-  const calendarFilterCount = (calendarFilterIds === null ? 0 : 1) + (filterStatus !== 'all' ? 1 : 0);
+  const calendarFilterCount =
+    (calendarFilterIds === null ? 0 : 1) +
+    (filterStatus !== 'all' ? 1 : 0) +
+    (visibleLinkedColumnIds.length > 0 ? 1 : 0);
   const calendarControlsLabel = calendarFilterCount > 0 ? `Filter (${calendarFilterCount})` : 'Filter';
   const calendarSummaryContent = (
     <div
@@ -2799,6 +3033,56 @@ export function PractitionerCalendarView({
         />
       </div>
 
+      {linkedColumns.length > 0 ? (
+        <div>
+          <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Linked venues
+          </p>
+          <div className="max-h-56 space-y-2 overflow-y-auto pr-1">
+            {[
+              ...new Map(linkedColumns.map((c) => [c.venueId, c.venueName])).entries(),
+            ].map(([venueId, venueName]) => (
+              <div key={venueId}>
+                <p className="px-1 py-0.5 text-[11px] font-semibold text-slate-600">
+                  {venueName}
+                </p>
+                <div className="space-y-0.5">
+                  {linkedColumns
+                    .filter((c) => c.venueId === venueId)
+                    .map((c) => {
+                      const checked = visibleLinkedColumnIds.includes(c.key);
+                      return (
+                        <label
+                          key={c.key}
+                          className="flex cursor-pointer items-center gap-2 rounded-lg px-1 py-1.5 text-sm text-slate-800"
+                        >
+                          <input
+                            type="checkbox"
+                            className="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                            checked={checked}
+                            onChange={(e) => {
+                              setVisibleLinkedColumnIds((cur) => {
+                                const next = new Set(cur);
+                                if (e.target.checked) next.add(c.key);
+                                else next.delete(c.key);
+                                return [...next];
+                              });
+                            }}
+                          />
+                          <span className="truncate">
+                            {c.practitionerName}
+                            {c.practitionerActive ? '' : ' (inactive)'}
+                          </span>
+                        </label>
+                      );
+                    })}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
       <div>
         <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">Status</p>
         <div className="flex flex-wrap gap-1.5">
@@ -2824,6 +3108,7 @@ export function PractitionerCalendarView({
           type="button"
           onClick={() => {
             setVisibleCalendarIdsState(null);
+            setVisibleLinkedColumnIds([]);
             setFilterStatus('all');
           }}
           className="text-xs font-semibold text-brand-600 hover:text-brand-700 hover:underline"
@@ -3159,6 +3444,55 @@ export function PractitionerCalendarView({
                     })}
                   </tr>
                 ))}
+                {visibleLinkedColumns.map((col) => (
+                  <tr key={col.key} className="border-b border-slate-100 bg-slate-50/40">
+                    <td className="sticky left-0 bg-slate-50/95 px-3 py-2 shadow-[4px_0_14px_rgba(15,23,42,0.035)]">
+                      <span className="font-semibold text-slate-600">{col.practitionerName}</span>
+                      <span className="mt-0.5 block text-[10px] font-medium text-slate-400">
+                        Linked · {col.venueName}
+                      </span>
+                    </td>
+                    {weekDays.map((d) => {
+                      const dayBookings = linkedBookingsFor(col, d);
+                      return (
+                        <td key={d} className="border-l border-slate-200 align-top px-1 py-2">
+                          <div className="flex min-h-[80px] flex-col gap-1">
+                            {dayBookings.map((b) => {
+                              const clickable = linkedBookingIsClickable(col, b);
+                              const detail =
+                                col.visibility === 'time_only'
+                                  ? `${col.venueName} — busy`
+                                  : b.guestName ?? b.serviceName ?? 'Booking';
+                              const inner = (
+                                <div
+                                  className="rounded-lg border border-slate-300 bg-white/70 px-2 py-1 text-left text-[11px] text-slate-500 saturate-50"
+                                  style={{ borderLeftWidth: 3, borderLeftColor: '#94a3b8' }}
+                                >
+                                  <div className="font-semibold tabular-nums text-slate-600">
+                                    {b.bookingTime.slice(0, 5)}
+                                  </div>
+                                  <div className="truncate">{detail}</div>
+                                </div>
+                              );
+                              return clickable ? (
+                                <button
+                                  key={b.id}
+                                  type="button"
+                                  onClick={() => setLinkedEditing({ column: col, booking: b })}
+                                  className="block w-full text-left transition hover:opacity-90"
+                                >
+                                  {inner}
+                                </button>
+                              ) : (
+                                <div key={b.id}>{inner}</div>
+                              );
+                            })}
+                          </div>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
                 {showWeekStripRow ? (
                   <WeekScheduleCdeStrip
                     weekDays={weekDays}
@@ -3265,6 +3599,35 @@ export function PractitionerCalendarView({
                       <span className="text-center text-[11px] leading-tight text-slate-500">—</span>
                     </div>
                   ) : null}
+                  {visibleLinkedColumns.map((col) => (
+                    <div
+                      key={`hdr-${col.key}`}
+                      className="flex min-h-[58px] min-w-[min(16rem,calc(100vw-5.5rem))] flex-1 flex-col items-center justify-center gap-0.5 bg-slate-50/70 px-3 py-1.5 sm:min-w-[240px]"
+                    >
+                      <span
+                        className="truncate text-center text-sm font-semibold text-slate-600"
+                        title={`${col.practitionerName} · ${col.venueName}`}
+                      >
+                        {col.practitionerName}
+                      </span>
+                      <span className="inline-flex max-w-full items-center gap-1 rounded-full bg-slate-200/70 px-2 py-0.5 text-[10px] font-semibold text-slate-500">
+                        <span className="h-1.5 w-1.5 rounded-full bg-slate-400" aria-hidden />
+                        <span className="truncate">Linked · {col.venueName}</span>
+                      </span>
+                      {col.action === 'create_edit_cancel' ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const v = linkedVenueById.get(col.venueId);
+                            if (v) setLinkedCreating(v);
+                          }}
+                          className="mt-0.5 text-[10px] font-semibold text-brand-600 hover:underline"
+                        >
+                          + New booking
+                        </button>
+                      ) : null}
+                    </div>
+                  ))}
                 </div>
                 <div className="flex w-full min-w-0 border-l border-slate-300">
               {filteredPractitioners.map((prac) => {
@@ -3878,6 +4241,18 @@ export function PractitionerCalendarView({
                   ) : null}
                 </>
               ) : null}
+              {viewMode === 'day'
+                ? visibleLinkedColumns.map((col) => (
+                    <LinkedDayColumn
+                      key={col.key}
+                      column={col}
+                      bookings={linkedBookingsFor(col, date)}
+                      startHour={startHour}
+                      totalSlots={TOTAL_SLOTS}
+                      onBookingClick={(b) => setLinkedEditing({ column: col, booking: b })}
+                    />
+                  ))
+                : null}
             </div>
             </div>
             </div>
@@ -4174,6 +4549,31 @@ export function PractitionerCalendarView({
             )}
           </div>
         </div>
+      ) : null}
+
+      {linkedEditing ? (
+        <EditLinkedBookingModal
+          venueName={linkedEditing.column.venueName}
+          booking={linkedEditing.booking}
+          canCancel={linkedEditing.column.action === 'create_edit_cancel'}
+          onClose={() => setLinkedEditing(null)}
+          onSaved={() => {
+            setLinkedEditing(null);
+            void loadLinkedData();
+          }}
+        />
+      ) : null}
+
+      {linkedCreating ? (
+        <CreateLinkedBookingModal
+          venue={linkedCreating}
+          date={viewMode === 'day' ? date : weekStart}
+          onClose={() => setLinkedCreating(null)}
+          onSaved={() => {
+            setLinkedCreating(null);
+            void loadLinkedData();
+          }}
+        />
       ) : null}
     </div>
   );

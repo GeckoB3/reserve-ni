@@ -7,6 +7,7 @@ import { recordReadAudit } from '@/lib/linked-accounts/audit';
 import type {
   LinkedBooking,
   LinkedPractitioner,
+  LinkedService,
   LinkedVenueCalendar,
 } from '@/lib/linked-accounts/calendar';
 
@@ -82,6 +83,22 @@ export async function GET(request: NextRequest) {
         name: (p.name as string) ?? 'Calendar',
         isActive: (p.is_active as boolean) ?? true,
       }));
+
+      // Services — only meaningful to full_details viewers (used by the
+      // cross-venue "new booking" form when the link allows creating).
+      let services: LinkedService[] = [];
+      if (fullDetails) {
+        const { data: serviceRows } = await admin
+          .from('appointment_services')
+          .select('id, name')
+          .eq('venue_id', access.venueId)
+          .eq('is_active', true)
+          .order('name', { ascending: true });
+        services = (serviceRows ?? []).map((s) => ({
+          id: s.id as string,
+          name: (s.name as string) ?? 'Service',
+        }));
+      }
 
       const { data: bookingRows } = await admin
         .from('bookings')
@@ -163,6 +180,7 @@ export async function GET(request: NextRequest) {
         visibility: access.grant.calendar,
         action: access.grant.act,
         practitioners,
+        services,
         bookings,
       });
 

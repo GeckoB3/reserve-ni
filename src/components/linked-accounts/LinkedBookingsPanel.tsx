@@ -19,6 +19,7 @@ interface FlatLinkedBooking extends LinkedBooking {
   venueId: string;
   venueName: string;
   visibility: LinkedVenueCalendar['visibility'];
+  action: LinkedVenueCalendar['action'];
 }
 
 function fmtTime(t: string): string {
@@ -77,7 +78,13 @@ export function LinkedBookingsPanel({
     const flat: FlatLinkedBooking[] = [];
     for (const v of venues) {
       for (const b of v.bookings) {
-        flat.push({ ...b, venueId: v.venueId, venueName: v.venueName, visibility: v.visibility });
+        flat.push({
+          ...b,
+          venueId: v.venueId,
+          venueName: v.venueName,
+          visibility: v.visibility,
+          action: v.action,
+        });
       }
     }
     flat.sort((a, b) => {
@@ -175,6 +182,7 @@ export function LinkedBookingsPanel({
         <EditLinkedBookingModal
           venueName={editing.venueName}
           booking={editing}
+          canCancel={editing.action === 'create_edit_cancel'}
           onClose={() => setEditing(null)}
           onSaved={async () => {
             setEditing(null);

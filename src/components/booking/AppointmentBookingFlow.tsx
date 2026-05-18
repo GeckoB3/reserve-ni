@@ -233,6 +233,8 @@ interface AppointmentBookingFlowProps {
   accentColour?: string;
   /** From /book/{venue}/{practitioner-slug}: skip staff step; catalog filtered */
   lockedPractitioner?: { id: string; name: string; bookingSlug: string };
+  /** §7.7: set when this flow is mounted inside a venue collective page. */
+  collectiveId?: string;
   bookingAudience?: BookingFlowAudience;
   onBookingCreated?: () => void;
   initialDate?: string;
@@ -292,6 +294,7 @@ export function AppointmentBookingFlow({
   onHeightChange,
   accentColour,
   lockedPractitioner,
+  collectiveId,
   bookingAudience = 'public',
   onBookingCreated,
   initialDate,
@@ -1324,6 +1327,7 @@ export function AppointmentBookingFlow({
                 ...(s.serviceVariantId ? { service_variant_id: s.serviceVariantId } : {}),
               })),
               marketing_consent: details.marketing_consent,
+              collective_id: collectiveId,
             }),
           });
           const data = await res.json();
@@ -1416,6 +1420,7 @@ export function AppointmentBookingFlow({
             dietary_notes: details.dietary_notes,
             occasion: details.occasion,
             marketing_consent: details.marketing_consent,
+            collective_id: collectiveId,
           }),
         });
         const data = await res.json();
@@ -1454,6 +1459,7 @@ export function AppointmentBookingFlow({
       isStaffWalkInAppointment,
       selectedServiceForPractitioner,
       onBookingCreated,
+      collectiveId,
     ],
   );
 

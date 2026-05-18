@@ -12,7 +12,6 @@ import {
 } from '@/lib/booking/active-models';
 import { isVenueScheduleCalendarEligible } from '@/lib/booking/schedule-calendar-eligibility';
 import { formatIsoDateInTimeZone } from '@/lib/date/format-iso-date-in-timezone';
-import { LinkedCalendarView } from '@/components/linked-accounts/LinkedCalendarView';
 import { isLinkFeatureVenue } from '@/lib/linked-accounts/eligibility';
 
 export default async function CalendarPage() {
@@ -90,12 +89,8 @@ export default async function CalendarPage() {
             bookingModel={bookingModel}
             enabledModels={enabledModels}
             calendarTodayIso={calendarTodayIso}
+            linkFeature={linkFeature}
           />
-          {linkFeature ? (
-            <section className="mt-6">
-              <LinkedCalendarView hideWhenEmpty title="Linked calendars" />
-            </section>
-          ) : null}
         </div>
       </div>
     </ToastProvider>

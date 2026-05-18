@@ -21,6 +21,8 @@ interface Props {
   /** Embed only: notifies parent iframe to remeasure (no intrinsic height payload). */
   onHeightChange?: () => void;
   accentColour?: string;
+  /** §7.7: set when this flow is mounted inside a venue collective page. */
+  collectiveId?: string;
 }
 
 export function BookPublicBookingFlow({
@@ -29,6 +31,7 @@ export function BookPublicBookingFlow({
   embed,
   onHeightChange,
   accentColour,
+  collectiveId,
 }: Props) {
   const router = useRouter();
   const pathname = usePathname();
@@ -134,6 +137,7 @@ export function BookPublicBookingFlow({
         embed={embed}
         onHeightChange={onHeightChange}
         accentColour={accentColour}
+        collectiveId={collectiveId}
       />
     </div>
   );

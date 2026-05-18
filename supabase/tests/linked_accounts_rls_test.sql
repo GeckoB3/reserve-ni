@@ -16,7 +16,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 
-SELECT plan(14);
+SELECT plan(21);
 
 -- =============================================================================
 -- Fixtures — seeded as the (superuser) session role, which bypasses RLS.
@@ -57,18 +57,19 @@ VALUES
 
 INSERT INTO bookings
   (id, venue_id, guest_id, booking_date, booking_time, booking_end_time,
-   party_size, status, source, practitioner_id, appointment_service_id, booking_model)
+   party_size, status, source, practitioner_id, appointment_service_id, booking_model,
+   special_requests, dietary_notes)
 VALUES
   ('00000000-0000-0000-0000-0000000000a5',
    '00000000-0000-0000-0000-0000000000a1', '00000000-0000-0000-0000-0000000000a2',
    '2026-06-01', '10:00', '10:30', 1, 'Confirmed', 'online',
    '00000000-0000-0000-0000-0000000000a3', '00000000-0000-0000-0000-0000000000a4',
-   'practitioner_appointment'),
+   'practitioner_appointment', 'Wheelchair access please', 'Nut allergy'),
   ('00000000-0000-0000-0000-0000000000b5',
    '00000000-0000-0000-0000-0000000000b1', '00000000-0000-0000-0000-0000000000b2',
    '2026-06-01', '11:00', '11:30', 1, 'Confirmed', 'online',
    '00000000-0000-0000-0000-0000000000b3', '00000000-0000-0000-0000-0000000000b4',
-   'practitioner_appointment');
+   'practitioner_appointment', NULL, NULL);
 
 -- Accepted link, full mutual access (full_details / pii / edit_existing).
 INSERT INTO account_links
@@ -147,7 +148,7 @@ SELECT is(
   1, 'Reducing act to none leaves full_details calendar visibility intact');
 
 -- =============================================================================
--- Test 8-10 — time_only hides PII entirely and the anonymised view nulls it.
+-- Test 8-13 — time_only hides PII entirely and the anonymised view nulls it.
 -- =============================================================================
 
 RESET ROLE;
@@ -172,10 +173,31 @@ SELECT is(
   NULL::uuid,
   'bookings_linked_anonymised nulls guest_id for time_only viewers');
 
+-- The anonymised view must also null service and free-text PII columns, even
+-- though the underlying booking row carries real values for them.
+SELECT is(
+  (SELECT appointment_service_id FROM bookings_linked_anonymised
+   WHERE id = '00000000-0000-0000-0000-0000000000a5'),
+  NULL::uuid,
+  'bookings_linked_anonymised nulls appointment_service_id for time_only viewers');
+
+SELECT is(
+  (SELECT special_requests FROM bookings_linked_anonymised
+   WHERE id = '00000000-0000-0000-0000-0000000000a5'),
+  NULL::text,
+  'bookings_linked_anonymised nulls special_requests for time_only viewers');
+
+SELECT is(
+  (SELECT dietary_notes FROM bookings_linked_anonymised
+   WHERE id = '00000000-0000-0000-0000-0000000000a5'),
+  NULL::text,
+  'bookings_linked_anonymised nulls dietary_notes for time_only viewers');
+
 -- =============================================================================
--- Test 11-12 — severance: a non-accepted link cuts off all cross-venue reads.
+-- Test 14-19 — severance: any non-accepted status cuts off cross-venue reads.
 -- =============================================================================
 
+-- revoked
 RESET ROLE;
 UPDATE account_links SET status = 'revoked', terminated_at = now()
 WHERE id = '00000000-0000-0000-0000-0000000000c1';
@@ -191,8 +213,52 @@ SELECT is(
   (SELECT count(*) FROM guests WHERE venue_id = '00000000-0000-0000-0000-0000000000a1')::int,
   0, 'Revoking a link immediately denies venue B staff all venue A guests');
 
+-- expired
+RESET ROLE;
+UPDATE account_links SET status = 'expired'
+WHERE id = '00000000-0000-0000-0000-0000000000c1';
+
+SET LOCAL ROLE authenticated;
+SET LOCAL request.jwt.claims TO '{"role":"authenticated","email":"admin-b@rls.test"}';
+SELECT is(
+  (SELECT count(*) FROM bookings WHERE venue_id = '00000000-0000-0000-0000-0000000000a1')::int,
+  0, 'An expired link denies venue B staff all venue A bookings');
+
+-- suspended (subscription lapse) — visibility must also be cut, not retained
+RESET ROLE;
+UPDATE account_links SET status = 'suspended'
+WHERE id = '00000000-0000-0000-0000-0000000000c1';
+
+SET LOCAL ROLE authenticated;
+SET LOCAL request.jwt.claims TO '{"role":"authenticated","email":"admin-b@rls.test"}';
+SELECT is(
+  (SELECT count(*) FROM bookings WHERE venue_id = '00000000-0000-0000-0000-0000000000a1')::int,
+  0, 'A suspended link denies venue B staff all venue A bookings');
+
+-- rejected
+RESET ROLE;
+UPDATE account_links SET status = 'rejected'
+WHERE id = '00000000-0000-0000-0000-0000000000c1';
+
+SET LOCAL ROLE authenticated;
+SET LOCAL request.jwt.claims TO '{"role":"authenticated","email":"admin-b@rls.test"}';
+SELECT is(
+  (SELECT count(*) FROM bookings WHERE venue_id = '00000000-0000-0000-0000-0000000000a1')::int,
+  0, 'A rejected link denies venue B staff all venue A bookings');
+
+-- pending (never accepted) — a request grants nothing until accepted
+RESET ROLE;
+UPDATE account_links SET status = 'pending', terminated_at = NULL
+WHERE id = '00000000-0000-0000-0000-0000000000c1';
+
+SET LOCAL ROLE authenticated;
+SET LOCAL request.jwt.claims TO '{"role":"authenticated","email":"admin-b@rls.test"}';
+SELECT is(
+  (SELECT count(*) FROM bookings WHERE venue_id = '00000000-0000-0000-0000-0000000000a1')::int,
+  0, 'A pending (unaccepted) link grants venue B staff no venue A visibility');
+
 -- =============================================================================
--- Test 13-14 — INSERT requires create_edit_cancel specifically.
+-- Test 20-21 — INSERT requires create_edit_cancel specifically.
 -- =============================================================================
 
 RESET ROLE;
