@@ -41,6 +41,7 @@ import {
   AppointmentBackLink,
   appointmentProgressPhase,
   appointmentTimeSlotClass,
+  APPOINTMENT_TIME_SLOTS_GRID_CLASS,
   APPOINTMENT_DETAILS_SUBMIT_CLASS,
   APPOINTMENT_DETAILS_INPUT_CLASS,
 } from './appointment-public-ui';
@@ -1673,14 +1674,15 @@ export function AppointmentBookingFlow({
           section.slots.length > 0 ? (
             <div key={section.label}>
               <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">{section.label}</p>
-              <div className="flex flex-wrap gap-2">
+              <div className={APPOINTMENT_TIME_SLOTS_GRID_CLASS}>
                 {section.slots.map((slot) => (
                   <button
                     key={slot.start_time}
+                    type="button"
                     onClick={() => onSelect(slot.start_time)}
                     className={appointmentTimeSlotClass(false, isPublicGuest)}
                   >
-                    {slot.start_time}
+                    {slot.start_time.slice(0, 5)}
                   </button>
                 ))}
               </div>

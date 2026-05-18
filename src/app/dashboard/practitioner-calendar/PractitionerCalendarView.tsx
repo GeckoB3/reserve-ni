@@ -286,6 +286,15 @@ function columnIdForBlock(bl: CalendarBlock): string | null {
   return bl.calendar_id ?? bl.practitioner_id ?? null;
 }
 
+/** Manual blocks staff can drag, resize, and edit (not class-tied blocks). */
+function isManualEditableBlock(bl: CalendarBlock): boolean {
+  return bl.block_type !== 'class_session' && !bl.class_instance_id;
+}
+
+function blockDurationMinutes(bl: CalendarBlock): number {
+  return minutesBetweenStartAndEnd(bl.start_time, bl.end_time);
+}
+
 /** Aligns with dashboard/bookings filters: Confirmed = `bookings.status = 'Confirmed'` (set via guest/staff attendance confirm); Started = status Seated. */
 function bookingMatchesCalendarStatusFilter(b: Booking, filterKey: string): boolean {
   if (filterKey === 'all') return true;
@@ -1322,6 +1331,7 @@ function slotOccupied(
   eventColumnBlocks: ScheduleBlockDTO[] = [],
   resourceParentById: Map<string, string>,
   excludeBookingId?: string | null,
+  excludeBlockId?: string | null,
   options?: { ignoreBookings?: boolean },
 ): boolean {
   if (!options?.ignoreBookings) {
@@ -1335,6 +1345,7 @@ function slotOccupied(
     }
   }
   for (const bl of blocks) {
+    if (excludeBlockId && bl.id === excludeBlockId) continue;
     if (columnIdForBlock(bl) !== pracId || bl.block_date !== dateStr) continue;
     const b0 = timeToMinutes(bl.start_time);
     const b1 = b0 + minutesBetweenStartAndEnd(bl.start_time, bl.end_time);
@@ -1368,7 +1379,11 @@ function appointmentWindowCollides(
   classScheduleBlocks: ScheduleBlockDTO[],
   eventColumnBlocks: ScheduleBlockDTO[],
   resourceParentById: Map<string, string>,
-  options?: { ignoreBookings?: boolean; candidatePractitionerBusy?: Array<{ start: number; end: number }> | null },
+  options?: {
+    ignoreBookings?: boolean;
+    excludeBlockId?: string;
+    candidatePractitionerBusy?: Array<{ start: number; end: number }> | null;
+  },
 ): boolean {
   if (endMin <= startMin) return true;
   const candIntervals =
@@ -1389,6 +1404,7 @@ function appointmentWindowCollides(
     }
   }
   for (const bl of blocks) {
+    if (options?.excludeBlockId && bl.id === options.excludeBlockId) continue;
     if (columnIdForBlock(bl) !== pracId || bl.block_date !== dateStr) continue;
     const b0 = timeToMinutes(bl.start_time);
     const b1 = b0 + minutesBetweenStartAndEnd(bl.start_time, bl.end_time);
@@ -1548,6 +1564,73 @@ const DraggableBookingShell = memo(function DraggableBookingShell({
     : { listeners: undefined, attributes: undefined, setActivatorNodeRef: () => {} };
   return (
     <div ref={setNodeRef} className="absolute" style={style}>
+      {children(handleProps)}
+    </div>
+  );
+});
+
+function DragBlockPreview({
+  block,
+  movePreview,
+}: {
+  block: CalendarBlock;
+  movePreview?: { label: string; invalid: boolean } | null;
+}) {
+  const label = block.reason?.trim() ? `Blocked: ${block.reason}` : 'Blocked';
+  return (
+    <div
+      className="flex max-w-[min(90vw,16rem)] flex-col overflow-hidden rounded-lg border-2 border-dashed border-slate-400 bg-slate-200/95 shadow-2xl shadow-slate-900/15"
+      style={{ borderLeftWidth: 4, borderLeftColor: '#94a3b8' }}
+    >
+      {movePreview ? (
+        <div
+          className={`border-b border-black/10 px-2 py-1 text-center text-[10px] font-bold leading-snug ${
+            movePreview.invalid ? 'bg-red-600 text-white' : 'bg-slate-900 text-white'
+          }`}
+          aria-live="polite"
+        >
+          <span className="line-clamp-3">{movePreview.label}</span>
+        </div>
+      ) : null}
+      <div className="px-2.5 py-1.5 text-xs font-semibold text-slate-800">{label}</div>
+    </div>
+  );
+}
+
+const DraggableBlockShell = memo(function DraggableBlockShell({
+  block,
+  top,
+  height,
+  heightExtraPx = 0,
+  canDrag,
+  children,
+}: {
+  block: CalendarBlock;
+  top: number;
+  height: number;
+  heightExtraPx?: number;
+  canDrag: boolean;
+  children: (handle: DraggableHandleProps) => ReactNode;
+}) {
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, isDragging } = useDraggable({
+    id: `block-${block.id}`,
+    disabled: !canDrag,
+    data: { block },
+  });
+  const totalHeight = Math.max(SLOT_HEIGHT * 0.5, height + heightExtraPx);
+  const style = {
+    top,
+    height: totalHeight,
+    transform: CSS.Translate.toString(transform),
+    zIndex: isDragging ? 50 : 15,
+    opacity: isDragging ? 0.85 : 1,
+    pointerEvents: isDragging ? 'none' : undefined,
+  } as CSSProperties;
+  const handleProps: DraggableHandleProps = canDrag
+    ? { listeners, attributes, setActivatorNodeRef }
+    : { listeners: undefined, attributes: undefined, setActivatorNodeRef: () => {} };
+  return (
+    <div ref={setNodeRef} className="absolute left-1 right-1" style={style}>
       {children(handleProps)}
     </div>
   );
@@ -1789,6 +1872,8 @@ export function PractitionerCalendarView({
   const [dragBooking, setDragBooking] = useState<Booking | null>(null);
   /** While dragging, droppable occupancy ignores this booking so slots under it stay valid targets. */
   const [dragExcludeBookingId, setDragExcludeBookingId] = useState<string | null>(null);
+  const [dragBlock, setDragBlock] = useState<CalendarBlock | null>(null);
+  const [dragExcludeBlockId, setDragExcludeBlockId] = useState<string | null>(null);
   const [calendarDragPreview, setCalendarDragPreview] = useState<{ label: string; invalid: boolean } | null>(null);
   const [calendarDragTarget, setCalendarDragTarget] = useState<{
     pracId: string;
@@ -1799,7 +1884,12 @@ export function PractitionerCalendarView({
   const calendarDragTargetRef = useRef<typeof calendarDragTarget>(null);
   const [resizeVisual, setResizeVisual] = useState<{ bookingId: string; deltaYPx: number } | null>(null);
   const [resizePreviewEnd, setResizePreviewEnd] = useState<{ bookingId: string; endHm: string } | null>(null);
+  const [blockResizeVisual, setBlockResizeVisual] = useState<{ blockId: string; deltaYPx: number } | null>(null);
+  const [blockResizePreviewEnd, setBlockResizePreviewEnd] = useState<{ blockId: string; endHm: string } | null>(
+    null,
+  );
   const justResizedBookingIdRef = useRef<string | null>(null);
+  const justResizedBlockIdRef = useRef<string | null>(null);
   const [flashIds, setFlashIds] = useState<Set<string>>(() => new Set());
   const [quickActionId, setQuickActionId] = useState<string | null>(null);
   /** Single-step undo for drag-move and duration resize on the day/week grid. */
@@ -2649,7 +2739,7 @@ export function PractitionerCalendarView({
   }
 
   function openEditBlockModal(bl: CalendarBlock) {
-    if (bl.block_type === 'class_session') {
+    if (!isManualEditableBlock(bl)) {
       return;
     }
     const colId = columnIdForBlock(bl);
@@ -2679,6 +2769,7 @@ export function PractitionerCalendarView({
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
+            start_time: blockModal.startTime,
             end_time: blockModal.endTime,
             reason: blockModal.reason.trim() || null,
           }),
@@ -2712,6 +2803,81 @@ export function PractitionerCalendarView({
       addToast(blockModal.blockId ? 'Could not update block' : 'Could not create block', 'error');
     } finally {
       setBlockSaving(false);
+    }
+  }
+
+  const patchBlockResize = useCallback(
+    async (block: CalendarBlock, newEndHm: string) => {
+      const prev = { ...block };
+      const startHm = block.start_time.slice(0, 5);
+      if (timeToMinutes(newEndHm) <= timeToMinutes(startHm)) return;
+      setBlocks((rows) =>
+        rows.map((bl) => (bl.id === block.id ? { ...bl, end_time: newEndHm } : bl)),
+      );
+      try {
+        const res = await fetch(`/api/venue/practitioner-calendar-blocks/${block.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ end_time: newEndHm }),
+        });
+        if (!res.ok) {
+          const j = await res.json().catch(() => ({}));
+          addToast((j as { error?: string }).error ?? 'Could not update block duration', 'error');
+          setBlocks((rows) => rows.map((bl) => (bl.id === prev.id ? prev : bl)));
+        } else {
+          void fetchData({ silent: true });
+        }
+      } catch {
+        addToast('Could not update block duration', 'error');
+        setBlocks((rows) => rows.map((bl) => (bl.id === prev.id ? prev : bl)));
+      }
+    },
+    [addToast, fetchData],
+  );
+
+  async function patchBlockMove(block: CalendarBlock, newDate: string, newStart: string, newColId: string) {
+    const prev = { ...block };
+    const duration = blockDurationMinutes(block);
+    const newEnd = minutesToTime(timeToMinutes(newStart) + duration);
+    const colId = columnIdForBlock(block);
+    setBlocks((rows) =>
+      rows.map((bl) => {
+        if (bl.id !== block.id) return bl;
+        const next: CalendarBlock = {
+          ...bl,
+          block_date: newDate,
+          start_time: newStart,
+          end_time: newEnd,
+        };
+        if (bl.calendar_id) next.calendar_id = newColId;
+        else next.practitioner_id = newColId;
+        return next;
+      }),
+    );
+    try {
+      const res = await fetch(`/api/venue/practitioner-calendar-blocks/${block.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          block_date: newDate,
+          start_time: newStart,
+          end_time: newEnd,
+          practitioner_id: newColId,
+        }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        addToast((j as { error?: string }).error ?? 'Could not move block', 'error');
+        setBlocks((rows) => rows.map((bl) => (bl.id === prev.id ? prev : bl)));
+        return;
+      }
+      if (colId !== newColId || block.block_date !== newDate) {
+        addToast('Block moved', 'success');
+      }
+      void fetchData({ silent: true });
+    } catch {
+      addToast('Could not move block', 'error');
+      setBlocks((rows) => rows.map((bl) => (bl.id === prev.id ? prev : bl)));
     }
   }
 
@@ -2931,6 +3097,8 @@ export function PractitionerCalendarView({
   function clearCalendarDragUi() {
     setDragBooking(null);
     setDragExcludeBookingId(null);
+    setDragBlock(null);
+    setDragExcludeBlockId(null);
     setCalendarDragPreview(null);
     setCalendarDragTarget(null);
     calendarDragTargetRef.current = null;
@@ -2960,14 +3128,75 @@ export function PractitionerCalendarView({
 
   function handleDragStart(e: DragStartEvent) {
     const b = e.active.data.current?.booking as Booking | undefined;
-    setDragBooking(b ?? null);
-    setDragExcludeBookingId(b?.id ?? null);
+    const bl = e.active.data.current?.block as CalendarBlock | undefined;
+    if (b) {
+      setDragBooking(b);
+      setDragExcludeBookingId(b.id);
+      setDragBlock(null);
+      setDragExcludeBlockId(null);
+    } else if (bl) {
+      setDragBlock(bl);
+      setDragExcludeBlockId(bl.id);
+      setDragBooking(null);
+      setDragExcludeBookingId(null);
+    } else {
+      setDragBooking(null);
+      setDragExcludeBookingId(null);
+      setDragBlock(null);
+      setDragExcludeBlockId(null);
+    }
   }
 
   function handleDragMove(e: DragMoveEvent) {
     const b = e.active.data.current?.booking as Booking | undefined;
+    const bl = e.active.data.current?.block as CalendarBlock | undefined;
     const over = e.over;
-    if (!b || !over?.data?.current) {
+    if ((!b && !bl) || !over?.data?.current) {
+      setCalendarDragPreview(null);
+      setCalendarDragTarget(null);
+      return;
+    }
+    if (bl) {
+      const { pracId, dateStr } = over.data.current as {
+        pracId: string;
+        dateStr: string;
+        slotStartMins: number;
+      };
+      const originalStartMins = timeToMinutes(bl.start_time.slice(0, 5));
+      const deltaMinutes = snapCalendarMoveMinutes((e.delta.y / SLOT_HEIGHT) * SLOT_MINUTES);
+      const targetStartMins = originalStartMins + deltaMinutes;
+      const duration = blockDurationMinutes(bl);
+      const endMin = targetStartMins + duration;
+      const dayStartMin = startHour * 60;
+      const dayEndMin = endHour * 60;
+      const pracClassBlocks = classBlocksForGrid.filter((cbl) => cbl.calendar_id === pracId && cbl.date === dateStr);
+      const pracEventBlocks = eventBlocksForGrid.filter((cbl) => cbl.calendar_id === pracId && cbl.date === dateStr);
+      const invalid =
+        targetStartMins < dayStartMin ||
+        endMin > dayEndMin ||
+        appointmentWindowCollides(
+          targetStartMins,
+          endMin,
+          pracId,
+          dateStr,
+          undefined,
+          bookings,
+          blocks,
+          serviceMap,
+          pracClassBlocks,
+          pracEventBlocks,
+          resourceParentById,
+          { ignoreBookings: true, excludeBlockId: bl.id },
+        );
+      const pracName = filteredPractitioners.find((p) => p.id === pracId)?.name ?? 'Staff';
+      const timeLabel = minutesToTime(targetStartMins);
+      const sameColumn = columnIdForBlock(bl) === pracId && bl.block_date === dateStr;
+      const label = sameColumn ? `Move to ${timeLabel}` : `Move to ${pracName} · ${timeLabel}`;
+      setCalendarDragPreview({ label, invalid });
+      setCalendarDragTarget({ pracId, startMin: targetStartMins, endMin, invalid });
+      return;
+    }
+    if (!b) {
       setCalendarDragPreview(null);
       setCalendarDragTarget(null);
       return;
@@ -3018,10 +3247,11 @@ export function PractitionerCalendarView({
 
   function handleDragEnd(e: DragEndEvent) {
     const b = e.active.data.current?.booking as Booking | undefined;
+    const bl = e.active.data.current?.block as CalendarBlock | undefined;
     const over = e.over;
     const target = calendarDragTargetRef.current;
     clearCalendarDragUi();
-    if (!b || !over?.data?.current) return;
+    if ((!b && !bl) || !over?.data?.current) return;
     if (target?.invalid) {
       addToast('That time is not available', 'error');
       return;
@@ -3033,6 +3263,18 @@ export function PractitionerCalendarView({
     };
     const targetStartMins = target?.startMin ?? slotStartMins;
     const newTime = minutesToTime(targetStartMins);
+    if (bl) {
+      if (
+        bl.block_date === dateStr &&
+        columnIdForBlock(bl) === pracId &&
+        bl.start_time.slice(0, 5) === newTime
+      ) {
+        return;
+      }
+      void patchBlockMove(bl, dateStr, newTime, pracId);
+      return;
+    }
+    if (!b) return;
     if (
       b.booking_date === dateStr &&
       resolveBookingColumnId(b, resourceParentById) === pracId &&
@@ -3129,6 +3371,89 @@ export function PractitionerCalendarView({
       window.addEventListener('pointercancel', finish);
     },
     [endHour, patchBookingResize, serviceMap],
+  );
+
+  const beginBlockResize = useCallback(
+    (block: CalendarBlock) => (downEvent: ReactPointerEvent<HTMLSpanElement>) => {
+      if (!isManualEditableBlock(block)) return;
+      downEvent.stopPropagation();
+      downEvent.preventDefault();
+      if (downEvent.pointerType === 'mouse' && downEvent.button !== 0) return;
+
+      const pointerId = downEvent.pointerId;
+      const startY = downEvent.clientY;
+      const startM = timeToMinutes(block.start_time.slice(0, 5));
+      const endM0 = startM + blockDurationMinutes(block);
+      const minEnd = startM + SLOT_MINUTES;
+      const gridEndMax = endHour * 60;
+      const target = downEvent.currentTarget;
+
+      setBlockResizeVisual({ blockId: block.id, deltaYPx: 0 });
+      setBlockResizePreviewEnd({ blockId: block.id, endHm: minutesToTime(endM0) });
+
+      const deltaYMin = ((minEnd - endM0) / SLOT_MINUTES) * SLOT_HEIGHT;
+      const deltaYMax = ((gridEndMax - endM0) / SLOT_MINUTES) * SLOT_HEIGHT;
+
+      const clampDeltaY = (clientY: number) => {
+        const raw = clientY - startY;
+        return Math.max(deltaYMin, Math.min(deltaYMax, raw));
+      };
+
+      const endMinutesFromClientY = (clientY: number) => {
+        const dY = clampDeltaY(clientY);
+        return endM0 + (dY / SLOT_HEIGHT) * SLOT_MINUTES;
+      };
+
+      const applyFromClientY = (clientY: number) => {
+        const dY = clampDeltaY(clientY);
+        const endFloat = endM0 + (dY / SLOT_HEIGHT) * SLOT_MINUTES;
+        setBlockResizeVisual({ blockId: block.id, deltaYPx: dY });
+        setBlockResizePreviewEnd({
+          blockId: block.id,
+          endHm: minutesToTime(Math.round(endFloat)),
+        });
+      };
+
+      try {
+        target.setPointerCapture(pointerId);
+      } catch {
+        /* ignore */
+      }
+
+      const onMove = (ev: globalThis.PointerEvent) => {
+        if (ev.pointerId !== pointerId) return;
+        ev.preventDefault();
+        applyFromClientY(ev.clientY);
+      };
+
+      const finish = (ev: globalThis.PointerEvent) => {
+        if (ev.pointerId !== pointerId) return;
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', finish);
+        window.removeEventListener('pointercancel', finish);
+        try {
+          target.releasePointerCapture(pointerId);
+        } catch {
+          /* ignore */
+        }
+        const endFloat = endMinutesFromClientY(ev.clientY);
+        const committedEndMin = Math.min(gridEndMax, Math.max(minEnd, Math.round(endFloat)));
+        const endStr = minutesToTime(committedEndMin);
+        setBlockResizeVisual(null);
+        setBlockResizePreviewEnd(null);
+        if (committedEndMin === endM0) return;
+        justResizedBlockIdRef.current = block.id;
+        window.setTimeout(() => {
+          if (justResizedBlockIdRef.current === block.id) justResizedBlockIdRef.current = null;
+        }, 220);
+        void patchBlockResize(block, endStr);
+      };
+
+      window.addEventListener('pointermove', onMove, { passive: false });
+      window.addEventListener('pointerup', finish);
+      window.addEventListener('pointercancel', finish);
+    },
+    [endHour, patchBlockResize],
   );
 
   const timeLabels = Array.from({ length: TOTAL_SLOTS + 1 }, (_, i) => {
@@ -3957,6 +4282,7 @@ export function PractitionerCalendarView({
                           pracEventBlocks,
                           resourceParentById,
                           dragExcludeBookingId,
+                          dragExcludeBlockId,
                           { ignoreBookings: dragBooking != null },
                         );
                         const dropId = `drop-${prac.id}-${date}-${slotStartMins}`;
@@ -4011,38 +4337,96 @@ export function PractitionerCalendarView({
 
                       {pracBlocks.map((bl) => {
                         const top = slotTop(bl.start_time);
-                        const h = Math.max(
+                        const baseH = Math.max(
                           (minutesBetweenStartAndEnd(bl.start_time, bl.end_time) / SLOT_MINUTES) * SLOT_HEIGHT,
                           SLOT_HEIGHT * 0.5,
                         );
-                        const label = `Blocked${bl.reason ? `: ${bl.reason}` : ''}`;
-                        const shellClass =
-                          'absolute left-1 right-1 z-[15] block cursor-pointer overflow-hidden rounded-lg border border-slate-300 bg-slate-200/90 px-1.5 py-1 text-left text-[10px] font-semibold text-slate-700 shadow-sm hover:bg-slate-300/90';
-                        const shellStyle = {
-                          top,
-                          height: h,
-                          borderLeftWidth: 3,
-                          borderLeftColor: '#94a3b8',
-                        } as const;
-                        const body = (
-                          <>
-                            <span className="line-clamp-3">{label}</span>
-                            <span className="mt-0.5 block font-normal text-[9px] opacity-90">
-                              {bl.start_time.slice(0, 5)} – {bl.end_time.slice(0, 5)}
-                            </span>
-                          </>
-                        );
+                        const canDrag = isManualEditableBlock(bl);
+                        const resizeExtra =
+                          blockResizeVisual?.blockId === bl.id ? blockResizeVisual.deltaYPx : 0;
+                        const displayEndHm =
+                          blockResizePreviewEnd?.blockId === bl.id
+                            ? blockResizePreviewEnd.endHm
+                            : bl.end_time.slice(0, 5);
                         return (
-                          <button
+                          <DraggableBlockShell
                             key={bl.id}
-                            type="button"
-                            onClick={() => openEditBlockModal(bl)}
-                            className={shellClass}
-                            style={shellStyle}
-                            title="Click to edit block"
+                            block={bl}
+                            top={top}
+                            height={baseH}
+                            heightExtraPx={resizeExtra}
+                            canDrag={canDrag}
                           >
-                            {body}
-                          </button>
+                            {(handle) => (
+                              <div
+                                className="group relative flex h-full min-h-0 flex-row overflow-hidden rounded-lg border border-slate-300 bg-slate-200/90 text-left shadow-sm hover:bg-slate-300/90"
+                                style={{ borderLeftWidth: 3, borderLeftColor: '#94a3b8' }}
+                              >
+                                {canDrag && handle.listeners && handle.attributes ? (
+                                  <button
+                                    ref={handle.setActivatorNodeRef}
+                                    type="button"
+                                    data-no-calendar-pan="true"
+                                    className="relative z-[2] shrink-0 cursor-grab touch-none bg-black/[0.06] px-0.5 text-[10px] text-slate-500 transition hover:bg-black/[0.1] active:cursor-grabbing"
+                                    style={{
+                                      width: BOOKING_DRAG_HANDLE_WIDTH_DEFAULT_PX,
+                                      minWidth: BOOKING_DRAG_HANDLE_WIDTH_DEFAULT_PX,
+                                    }}
+                                    aria-label="Drag to move block"
+                                    {...handle.listeners}
+                                    {...handle.attributes}
+                                  >
+                                    ⋮⋮
+                                  </button>
+                                ) : null}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (justResizedBlockIdRef.current === bl.id) return;
+                                    openEditBlockModal(bl);
+                                  }}
+                                  className={`flex min-h-0 min-w-0 flex-1 flex-col justify-start overflow-hidden px-2.5 py-2 text-left ${
+                                    canDrag ? 'pb-[19px]' : ''
+                                  }`}
+                                  title="Click to edit block"
+                                >
+                                  <span className="truncate text-[13px] font-extrabold tracking-tight text-slate-900">
+                                    Blocked
+                                  </span>
+                                  {bl.reason ? (
+                                    <span className="mt-0.5 block truncate text-[11px] font-medium leading-snug text-slate-600/90">
+                                      {bl.reason}
+                                    </span>
+                                  ) : null}
+                                  <span className="mt-0.5 block text-[11px] font-medium leading-snug tabular-nums text-slate-600/90">
+                                    {bl.start_time.slice(0, 5)} – {displayEndHm}
+                                  </span>
+                                </button>
+                                {canDrag ? (
+                                  <>
+                                    {blockResizePreviewEnd?.blockId === bl.id ? (
+                                      <span
+                                        className="pointer-events-none absolute left-1/2 z-20 max-w-[calc(100%-0.5rem)] -translate-x-1/2 truncate rounded-md bg-slate-900 px-2 py-0.5 text-center text-[10px] font-bold tabular-nums text-white shadow-md"
+                                        style={{ bottom: BOOKING_RESERVE_ABOVE_RESIZE_PX }}
+                                      >
+                                        Until {blockResizePreviewEnd.endHm}
+                                      </span>
+                                    ) : null}
+                                    <span
+                                      role="separator"
+                                      aria-orientation="horizontal"
+                                      aria-label="Drag to change block duration"
+                                      data-no-calendar-pan="true"
+                                      className="absolute bottom-0 left-0 right-0 z-40 cursor-ns-resize touch-none rounded-b-lg border-t border-white/50 bg-black/[0.08] hover:bg-black/[0.14] active:bg-black/20"
+                                      style={{ height: BOOKING_RESIZE_HANDLE_HEIGHT_PX }}
+                                      onPointerDown={beginBlockResize(bl)}
+                                      onMouseDown={(e) => e.stopPropagation()}
+                                    />
+                                  </>
+                                ) : null}
+                              </div>
+                            )}
+                          </DraggableBlockShell>
                         );
                       })}
 
@@ -4535,6 +4919,8 @@ export function PractitionerCalendarView({
           <DragOverlay dropAnimation={null}>
             {dragBooking ? (
               <DragBookingPreview booking={dragBooking} movePreview={calendarDragPreview} />
+            ) : dragBlock ? (
+              <DragBlockPreview block={dragBlock} movePreview={calendarDragPreview} />
             ) : null}
           </DragOverlay>
         </DndContext>
@@ -4611,10 +4997,7 @@ export function PractitionerCalendarView({
             <h3 id="block-modal-title" className="text-base font-semibold text-slate-900">
               {blockModal.blockId ? 'Edit block' : 'Block time'}
             </h3>
-            <p className="mt-1 text-xs text-slate-500">
-              {blockModal.dateStr} · {blockModal.startTime} – {blockModal.endTime}
-              {blockModal.blockId ? ' (start time is fixed; adjust end time below)' : ''}
-            </p>
+            <p className="mt-1 text-xs text-slate-500">{blockModal.dateStr}</p>
             {(() => {
               const durationMins = timeToMinutes(blockModal.endTime) - timeToMinutes(blockModal.startTime);
               if (durationMins <= 0) {
@@ -4632,6 +5015,15 @@ export function PractitionerCalendarView({
               );
             })()}
             <div className="mt-4 space-y-3">
+              <div>
+                <label className="text-xs font-medium text-slate-600">Start time</label>
+                <input
+                  type="time"
+                  value={blockModal.startTime}
+                  onChange={(e) => setBlockModal((m) => (m ? { ...m, startTime: e.target.value } : m))}
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                />
+              </div>
               <div>
                 <label className="text-xs font-medium text-slate-600">End time</label>
                 <input

@@ -214,9 +214,22 @@ export function AppointmentSummaryStrip({ children }: { children: ReactNode }) {
   return <div className="ap-summary-strip mb-5 text-sm">{children}</div>;
 }
 
-/** Tailwind classes for staff/dashboard appointment slot buttons (outside `.appointment-public`). */
+/**
+ * Shared responsive grid for appointment time pickers (staff + public).
+ * Matches `.appointment-public .ap-time-slot` sizing via equal-width cells.
+ */
+export const APPOINTMENT_TIME_SLOTS_GRID_CLASS =
+  'grid grid-cols-4 gap-1.5 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-7 xl:grid-cols-8';
+
+/** @deprecated Use {@link APPOINTMENT_TIME_SLOTS_GRID_CLASS}. */
+export const APPOINTMENT_STAFF_TIME_SLOTS_GRID_CLASS = APPOINTMENT_TIME_SLOTS_GRID_CLASS;
+
+/**
+ * Staff/dashboard slot button — same padding, radius, and type scale as `.ap-time-slot`
+ * in globals.css (outside `.appointment-public` we mirror with Tailwind + brand hover).
+ */
 export const APPOINTMENT_STAFF_TIME_SLOT_CLASS =
-  'rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition-all hover:border-brand-300 hover:text-brand-600 hover:shadow active:scale-95';
+  'w-full min-w-0 rounded-[0.625rem] border border-slate-200 bg-white px-2 py-2.5 text-center text-sm font-semibold tabular-nums text-slate-700 shadow-sm transition-[border-color,color,box-shadow,transform] duration-150 hover:border-brand-300 hover:text-brand-600 hover:shadow-md active:scale-[0.97]';
 
 export function appointmentTimeSlotClass(selected = false, isPublic = true): string {
   if (!isPublic) {
