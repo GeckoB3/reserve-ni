@@ -29,7 +29,7 @@ export function pickInfoRowCount(contentHeightPx: number, itemCount: 4 | 5 = 5):
   return Math.min(raw, itemCount);
 }
 
-const INFO_GAP_PX = 6;
+const INFO_GAP_PX = 8;
 const MIN_NAME_INLINE_PX = 72;
 const DEFAULT_WIDTHS: Record<InfoKey, number> = {
   name: 112,
@@ -61,8 +61,8 @@ export interface BookingCardInfoProps {
 
 function metaTextClass(micro: boolean): string {
   return micro
-    ? 'text-[9px] font-medium leading-snug text-slate-600/90'
-    : 'text-[10px] font-medium leading-snug text-slate-600/90';
+    ? 'text-[10px] font-medium leading-snug text-slate-600/90'
+    : 'text-[11px] font-medium leading-snug text-slate-600/90';
 }
 
 export function groupInfoRows(rowCount: number, hideName: boolean): InfoKey[][] {
@@ -252,7 +252,7 @@ export function BookingCardInfo({
 
   return (
     <div ref={containerRef} className="@container relative min-w-0 w-full max-w-full">
-      <div className="pointer-events-none invisible absolute left-0 top-0 flex h-0 max-w-none gap-x-1.5 overflow-hidden whitespace-nowrap">
+      <div className="pointer-events-none invisible absolute left-0 top-0 flex h-0 max-w-none gap-x-2 overflow-hidden whitespace-nowrap">
         <div ref={nameRef} className="flex items-center gap-1.5 text-[13px] font-extrabold tracking-tight">
           <span>{name}</span>
           {nameAccessory ? <span>{nameAccessory}</span> : null}
@@ -276,12 +276,12 @@ export function BookingCardInfo({
           </span>
         ) : null}
       </div>
-      <div className="flex min-h-0 min-w-0 max-w-full flex-col gap-y-0.5">
+      <div className="flex min-h-0 min-w-0 max-w-full flex-col gap-y-1">
         {visibleRows.map((row, idx) => (
           <div
             key={`${idx}-${row.join('-')}`}
             className={`flex min-h-0 min-w-0 w-full items-center overflow-hidden ${
-              row.length === 1 ? '' : 'gap-x-1.5'
+              row.length === 1 ? '' : 'gap-x-2'
             }`}
           >
             {row.map((key) => renderField(key, row.length === 1))}

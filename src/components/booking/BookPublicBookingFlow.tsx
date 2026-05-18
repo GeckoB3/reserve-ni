@@ -102,7 +102,7 @@ export function BookPublicBookingFlow({
 
   return (
     <div
-      className={`${embed ? 'space-y-4' : 'space-y-6'} ${appointmentTabs ? 'appointment-public' : ''}`.trim()}
+      className={`w-full min-w-0 ${embed ? 'space-y-3' : 'space-y-6'} ${appointmentTabs ? 'appointment-public' : ''}`.trim()}
       style={appointmentTabs ? appointmentAccentStyle(accentColour) : undefined}
     >
       {tabs.length > 1 && (

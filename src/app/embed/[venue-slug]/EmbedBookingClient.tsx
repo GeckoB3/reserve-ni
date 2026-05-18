@@ -80,17 +80,10 @@ export function EmbedBookingClient({
     ? ({ '--accent': `#${accentColour.replace(/^#/, '')}` } as React.CSSProperties)
     : undefined;
 
-  const isAppointment =
-    venue.booking_model === 'practitioner_appointment' || venue.booking_model === 'unified_scheduling';
-
   return (
     <main
       ref={contentRef}
-      className={
-        isAppointment
-          ? 'bg-gradient-to-b from-slate-50/90 to-white px-3 pb-4 pt-3 sm:px-4'
-          : 'bg-white px-4 pb-4 pt-4'
-      }
+      className="w-full min-w-0 bg-white px-2 pb-3 pt-2 sm:px-3"
       style={accentStyle}
     >
       <BookPublicBookingFlow

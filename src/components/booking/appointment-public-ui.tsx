@@ -47,21 +47,32 @@ export const AppointmentPublicShell = forwardRef<
     className?: string;
   }
 >(function AppointmentPublicShell({ children, accentColour, embed = false, className = '' }, ref) {
+  const accentStyle = appointmentAccentStyle(accentColour);
+
+  if (embed) {
+    return (
+      <div
+        ref={ref}
+        className={`${APPOINTMENT_PUBLIC_ROOT_CLASS} relative w-full min-w-0 ${className}`.trim()}
+        style={accentStyle}
+      >
+        <div className="w-full min-w-0 overflow-visible rounded-xl border border-slate-200/90 bg-white shadow-sm ring-1 ring-slate-900/[0.04]">
+          <div className="ap-accent-bar h-1 w-full rounded-t-[11px]" />
+          <div className="px-3 py-4 sm:px-4 sm:py-5">{children}</div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       ref={ref}
       className={`${APPOINTMENT_PUBLIC_ROOT_CLASS} relative mx-auto w-full max-w-lg ${className}`.trim()}
-      style={appointmentAccentStyle(accentColour)}
+      style={accentStyle}
     >
-      <div
-        className={
-          embed
-            ? 'overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-[0_8px_30px_rgba(15,23,42,0.08)] ring-1 ring-slate-900/[0.04]'
-            : 'overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-[var(--ds-shadow-elevated)] ring-1 ring-slate-900/[0.03]'
-        }
-      >
+      <div className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-[var(--ds-shadow-elevated)] ring-1 ring-slate-900/[0.03]">
         <div className="ap-accent-bar h-1 w-full" />
-        <div className={embed ? 'px-4 py-5 sm:px-5 sm:py-6' : 'px-5 py-6 sm:px-6 sm:py-7'}>{children}</div>
+        <div className="px-5 py-6 sm:px-6 sm:py-7">{children}</div>
       </div>
     </div>
   );
@@ -203,7 +214,14 @@ export function AppointmentSummaryStrip({ children }: { children: ReactNode }) {
   return <div className="ap-summary-strip mb-5 text-sm">{children}</div>;
 }
 
-export function appointmentTimeSlotClass(selected = false): string {
+/** Tailwind classes for staff/dashboard appointment slot buttons (outside `.appointment-public`). */
+export const APPOINTMENT_STAFF_TIME_SLOT_CLASS =
+  'rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition-all hover:border-brand-300 hover:text-brand-600 hover:shadow active:scale-95';
+
+export function appointmentTimeSlotClass(selected = false, isPublic = true): string {
+  if (!isPublic) {
+    return APPOINTMENT_STAFF_TIME_SLOT_CLASS;
+  }
   return selected ? 'ap-time-slot ap-time-slot-selected' : 'ap-time-slot';
 }
 

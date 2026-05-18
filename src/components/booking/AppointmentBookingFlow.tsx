@@ -437,6 +437,11 @@ export function AppointmentBookingFlow({
   }, [onHeightChange]);
 
   useEffect(() => {
+    if (!onHeightChange) return;
+    onHeightChange();
+  }, [step, onHeightChange]);
+
+  useEffect(() => {
     function onReset() {
       setDate(todayStr());
       setSlotPractitioners([]);
@@ -1673,7 +1678,7 @@ export function AppointmentBookingFlow({
                   <button
                     key={slot.start_time}
                     onClick={() => onSelect(slot.start_time)}
-                    className={appointmentTimeSlotClass()}
+                    className={appointmentTimeSlotClass(false, isPublicGuest)}
                   >
                     {slot.start_time}
                   </button>

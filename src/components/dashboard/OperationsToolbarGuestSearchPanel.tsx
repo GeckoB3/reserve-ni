@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { DashboardStaffBookingModal } from '@/components/booking/DashboardStaffBookingModal';
 import {
   buildToolbarBookBootstrap,
@@ -100,6 +100,7 @@ export function OperationsToolbarGuestSearchPanel({
   onBookingCreated,
 }: OperationsToolbarGuestSearchPanelProps) {
   const inputId = useId();
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const venue = useDashboardToolbarVenue();
   const { warmGuestDetail } = useDashboardDetailCache();
 
@@ -138,6 +139,13 @@ export function OperationsToolbarGuestSearchPanel({
     [warmGuestDetail],
   );
 
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      searchInputRef.current?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, []);
+
   return (
     <div className="space-y-2.5">
       <label htmlFor={inputId} className="text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -150,6 +158,7 @@ export function OperationsToolbarGuestSearchPanel({
           </svg>
         </div>
         <input
+          ref={searchInputRef}
           id={inputId}
           type="search"
           value={query}

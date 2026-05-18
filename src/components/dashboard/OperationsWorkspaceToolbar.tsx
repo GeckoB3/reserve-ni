@@ -310,22 +310,39 @@ export function OperationsWorkspaceToolbar({
 
   useEffect(() => {
     if (open === 'none') return;
+    let cancelled = false;
     const t = window.setTimeout(() => {
+      if (cancelled) return;
+      if (open === 'search') {
+        const focusSearchField = () => {
+          const panel = document.getElementById(`${baseId}-search-panel`);
+          const input = panel?.querySelector<HTMLInputElement>('input[type="search"]');
+          input?.focus();
+          return Boolean(input);
+        };
+        if (!focusSearchField()) {
+          requestAnimationFrame(() => {
+            if (!cancelled) focusSearchField();
+          });
+        }
+        return;
+      }
       const container = inlineDateOpen
         ? datePopoverRef.current
         : inlineInfoOpen
           ? infoPopoverRef.current
           : inlineControlsOpen
             ? controlsPopoverRef.current
-            : inlineSearchOpen
-              ? searchPopoverRef.current
-              : inlineTimelineOpen
-                ? timelinePopoverRef.current
-                : sheetRef.current;
+            : inlineTimelineOpen
+              ? timelinePopoverRef.current
+              : sheetRef.current;
       container?.querySelector<HTMLElement>('button, [href], input, select, textarea')?.focus();
     }, 0);
-    return () => window.clearTimeout(t);
-  }, [open, inlineInfoOpen, inlineDateOpen, inlineControlsOpen, inlineSearchOpen, inlineTimelineOpen]);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(t);
+    };
+  }, [open, inlineInfoOpen, inlineDateOpen, inlineControlsOpen, inlineSearchOpen, inlineTimelineOpen, baseId]);
 
   useEffect(() => {
     if (!inlineInfoOpen && !inlineDateOpen && !inlineControlsOpen && !inlineSearchOpen && !inlineTimelineOpen) return;
