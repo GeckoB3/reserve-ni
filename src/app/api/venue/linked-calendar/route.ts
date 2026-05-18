@@ -120,12 +120,16 @@ export async function GET(request: NextRequest) {
         }));
       }
 
+      // Cancelled bookings are excluded: a cancelled slot is free, so it must
+      // never render as "busy" on a time_only link or clutter a full_details
+      // grid. No-Show rows are kept — that time was still reserved.
       const { data: bookingRows } = await admin
         .from('bookings')
         .select(
           'id, practitioner_id, calendar_id, appointment_service_id, guest_id, booking_date, booking_time, booking_end_time, status',
         )
         .eq('venue_id', access.venueId)
+        .neq('status', 'Cancelled')
         .gte('booking_date', rangeFrom)
         .lte('booking_date', rangeTo);
 
@@ -143,11 +147,11 @@ export async function GET(request: NextRequest) {
           ),
         ];
         if (serviceIds.length > 0) {
-          const { data: services } = await admin
+          const { data: serviceRows } = await admin
             .from('appointment_services')
             .select('id, name')
             .in('id', serviceIds);
-          for (const s of services ?? []) {
+          for (const s of serviceRows ?? []) {
             serviceNames[s.id as string] = (s.name as string) ?? 'Service';
           }
         }

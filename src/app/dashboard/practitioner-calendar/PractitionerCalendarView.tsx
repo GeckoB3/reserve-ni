@@ -37,6 +37,7 @@ import { CalendarColumnsChecklist } from '@/app/dashboard/practitioner-calendar/
 import {
   EditLinkedBookingModal,
   CreateLinkedBookingModal,
+  LinkedBookingDetailModal,
 } from '@/components/linked-accounts/LinkedCalendarView';
 import type { LinkedVenueCalendar, LinkedBooking } from '@/lib/linked-accounts/calendar';
 import {
@@ -1569,18 +1570,18 @@ const LinkedDayColumn = memo(function LinkedDayColumn({
               className="absolute left-1 right-1 z-[15]"
               style={{ top, height }}
             >
-              {clickable ? (
-                <button
-                  type="button"
-                  onClick={() => onBookingClick(b)}
-                  className="block h-full w-full text-left transition hover:saturate-100 hover:opacity-90"
-                  title={`Edit in ${column.venueName}`}
-                >
-                  {inner}
-                </button>
-              ) : (
-                inner
-              )}
+              <button
+                type="button"
+                onClick={() => onBookingClick(b)}
+                className="block h-full w-full text-left transition hover:saturate-100 hover:opacity-90"
+                title={
+                  clickable
+                    ? `Edit in ${column.venueName}`
+                    : `View detail · ${column.venueName}`
+                }
+              >
+                {inner}
+              </button>
             </div>
           );
         })}
@@ -1659,6 +1660,9 @@ export function PractitionerCalendarView({
   /** Linked columns the user has opted into. Default: none (opt-in). */
   const [visibleLinkedColumnIds, setVisibleLinkedColumnIds] = useState<string[]>([]);
   const [linkedEditing, setLinkedEditing] = useState<
+    { column: LinkedColumn; booking: LinkedBooking } | null
+  >(null);
+  const [linkedViewing, setLinkedViewing] = useState<
     { column: LinkedColumn; booking: LinkedBooking } | null
   >(null);
   const [linkedCreating, setLinkedCreating] = useState<
@@ -2314,6 +2318,19 @@ export function PractitionerCalendarView({
     },
     [linkedVenueById],
   );
+
+  /**
+   * A click on any linked booking opens the edit modal when the grant allows
+   * it, or a read-only detail modal otherwise (§4.3) — so the grid never
+   * swallows a click silently.
+   */
+  const openLinkedBooking = useCallback((column: LinkedColumn, booking: LinkedBooking) => {
+    if (linkedBookingIsClickable(column, booking)) {
+      setLinkedEditing({ column, booking });
+    } else {
+      setLinkedViewing({ column, booking });
+    }
+  }, []);
 
   useEffect(() => {
     const root = timelineRootRef.current;
@@ -3544,17 +3561,20 @@ export function PractitionerCalendarView({
                                   ) : null}
                                 </div>
                               );
-                              return clickable ? (
+                              return (
                                 <button
                                   key={b.id}
                                   type="button"
-                                  onClick={() => setLinkedEditing({ column: col, booking: b })}
+                                  onClick={() => openLinkedBooking(col, b)}
                                   className="block w-full text-left transition hover:opacity-90"
+                                  title={
+                                    clickable
+                                      ? `Edit in ${col.venueName}`
+                                      : `View detail · ${col.venueName}`
+                                  }
                                 >
                                   {inner}
                                 </button>
-                              ) : (
-                                <div key={b.id}>{inner}</div>
                               );
                             })}
                           </div>
@@ -4323,7 +4343,7 @@ export function PractitionerCalendarView({
                       bookings={linkedBookingsFor(col, date)}
                       startHour={startHour}
                       totalSlots={TOTAL_SLOTS}
-                      onBookingClick={(b) => setLinkedEditing({ column: col, booking: b })}
+                      onBookingClick={(b) => openLinkedBooking(col, b)}
                       onCreateAt={
                         col.action === 'create_edit_cancel'
                           ? (time) => {
@@ -4648,6 +4668,15 @@ export function PractitionerCalendarView({
             setLinkedEditing(null);
             void loadLinkedData();
           }}
+        />
+      ) : null}
+
+      {linkedViewing ? (
+        <LinkedBookingDetailModal
+          venueName={linkedViewing.column.venueName}
+          visibility={linkedViewing.column.visibility}
+          booking={linkedViewing.booking}
+          onClose={() => setLinkedViewing(null)}
         />
       ) : null}
 

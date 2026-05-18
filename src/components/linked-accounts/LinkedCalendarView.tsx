@@ -463,6 +463,82 @@ export function EditLinkedBookingModal({
   );
 }
 
+/**
+ * Read-only detail for a linked-venue booking the viewer cannot edit — a
+ * `time_only` link, or a `full_details` link granting `act = none` (§4.3).
+ * Carries no edit controls; it exists so a click on the calendar grid always
+ * does something rather than silently nothing.
+ */
+export function LinkedBookingDetailModal({
+  venueName,
+  visibility,
+  booking,
+  onClose,
+}: {
+  venueName: string;
+  visibility: LinkedVenueCalendar['visibility'];
+  booking: LinkedBooking;
+  onClose: () => void;
+}) {
+  const timeOnly = visibility === 'time_only';
+  const timeLabel = booking.bookingEndTime
+    ? `${fmtTime(booking.bookingTime)}–${fmtTime(booking.bookingEndTime)}`
+    : fmtTime(booking.bookingTime);
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={`Booking in ${venueName}`}
+      description="Read-only — this link does not grant you permission to edit this booking."
+    >
+      <div className="space-y-3">
+        <dl className="space-y-2 text-sm">
+          <div className="flex justify-between gap-3">
+            <dt className="font-medium text-slate-500">Date</dt>
+            <dd className="text-slate-800">{booking.bookingDate}</dd>
+          </div>
+          <div className="flex justify-between gap-3">
+            <dt className="font-medium text-slate-500">Time</dt>
+            <dd className="tabular-nums text-slate-800">{timeLabel}</dd>
+          </div>
+          <div className="flex items-center justify-between gap-3">
+            <dt className="font-medium text-slate-500">Status</dt>
+            <dd>
+              <Pill variant={statusVariant(booking.status)} size="sm">
+                {booking.status}
+              </Pill>
+            </dd>
+          </div>
+          {!timeOnly ? (
+            <>
+              <div className="flex justify-between gap-3">
+                <dt className="font-medium text-slate-500">Client</dt>
+                <dd className="text-slate-800">{booking.guestName ?? '—'}</dd>
+              </div>
+              <div className="flex justify-between gap-3">
+                <dt className="font-medium text-slate-500">Service</dt>
+                <dd className="text-slate-800">{booking.serviceName ?? '—'}</dd>
+              </div>
+            </>
+          ) : null}
+        </dl>
+        {timeOnly ? (
+          <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
+            {venueName} shares time blocks only. Client and service detail are not visible on
+            this link.
+          </p>
+        ) : null}
+        <div className="flex justify-end">
+          <button type="button" className={btnSecondary} onClick={onClose}>
+            Close
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 interface GuestOption {
   id: string;
   name: string;
