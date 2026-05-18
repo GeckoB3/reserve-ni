@@ -69,6 +69,7 @@ export function LinkedAccountsSection({ venueName }: { venueName: string }) {
   const [reviewLink, setReviewLink] = useState<AccountLinkView | null>(null);
   const [editLink, setEditLink] = useState<AccountLinkView | null>(null);
   const [reduceLink, setReduceLink] = useState<AccountLinkView | null>(null);
+  const [unlinkConfirmLink, setUnlinkConfirmLink] = useState<AccountLinkView | null>(null);
   const [auditLink, setAuditLink] = useState<AccountLinkView | null>(null);
 
   const load = useCallback(async () => {
@@ -89,6 +90,26 @@ export function LinkedAccountsSection({ venueName }: { venueName: string }) {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const performUnlink = async (link: AccountLinkView) => {
+    setBusy(true);
+    setActionError(null);
+    try {
+      const res = await fetch(`/api/venue/account-links/${link.id}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) {
+        const j = await res.json();
+        throw new Error(j.error ?? 'Failed to unlink.');
+      }
+      setUnlinkConfirmLink(null);
+      await load();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to unlink.');
+    } finally {
+      setBusy(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -192,29 +213,9 @@ export function LinkedAccountsSection({ venueName }: { venueName: string }) {
                   setActionError(null);
                   setReduceLink(link);
                 }}
-                onUnlink={async () => {
-                  if (
-                    !window.confirm(
-                      `Unlink from ${link.otherVenue.name}? Cross-venue access stops immediately for both venues.`,
-                    )
-                  )
-                    return;
-                  setBusy(true);
+                onUnlink={() => {
                   setActionError(null);
-                  try {
-                    const res = await fetch(`/api/venue/account-links/${link.id}`, {
-                      method: 'DELETE',
-                    });
-                    if (!res.ok) {
-                      const j = await res.json();
-                      throw new Error(j.error ?? 'Failed to unlink.');
-                    }
-                    await load();
-                  } catch (err) {
-                    setActionError(err instanceof Error ? err.message : 'Failed to unlink.');
-                  } finally {
-                    setBusy(false);
-                  }
+                  setUnlinkConfirmLink(link);
                 }}
                 onRespondChange={async (accept: boolean) => {
                   setBusy(true);
@@ -477,7 +478,48 @@ export function LinkedAccountsSection({ venueName }: { venueName: string }) {
           onClose={() => setAuditLink(null)}
         />
       ) : null}
+
+      {unlinkConfirmLink ? (
+        <UnlinkConfirmModal
+          link={unlinkConfirmLink}
+          busy={busy}
+          onClose={() => setUnlinkConfirmLink(null)}
+          onConfirm={() => void performUnlink(unlinkConfirmLink)}
+        />
+      ) : null}
     </div>
+  );
+}
+
+function UnlinkConfirmModal({
+  link,
+  busy,
+  onClose,
+  onConfirm,
+}: {
+  link: AccountLinkView;
+  busy: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      busy={busy}
+      title={`Unlink from ${link.otherVenue.name}?`}
+      description="Cross-venue access stops immediately for both venues. To link again later, send a new request from either venue."
+      maxWidth="max-w-md"
+    >
+      <div className="flex flex-wrap justify-end gap-2">
+        <button type="button" className={btnSecondary} disabled={busy} onClick={onClose}>
+          Cancel
+        </button>
+        <button type="button" className={btnDanger} disabled={busy} onClick={onConfirm}>
+          {busy ? 'Unlinking…' : 'Unlink'}
+        </button>
+      </div>
+    </Modal>
   );
 }
 

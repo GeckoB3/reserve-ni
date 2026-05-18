@@ -328,3 +328,128 @@ button, a, input, select, textarea {
   background-color: rgb(254 252 232);
   color: rgb(113 63 18);
 }
+
+/* Public appointment booking — hosted page + embed widget */
+.appointment-public {
+  --ap-accent: var(--accent, #4e6b78);
+  --ap-accent-hover: color-mix(in srgb, var(--ap-accent) 88%, #0f172a);
+  --ap-accent-soft: color-mix(in srgb, var(--ap-accent) 11%, white);
+  --ap-accent-border: color-mix(in srgb, var(--ap-accent) 24%, white);
+  --ap-accent-muted: color-mix(in srgb, var(--ap-accent) 65%, white);
+}
+
+.appointment-public .ap-accent-bar {
+  background: linear-gradient(
+    90deg,
+    var(--ap-accent) 0%,
+    color-mix(in srgb, var(--ap-accent) 72%, white) 55%,
+    color-mix(in srgb, var(--ap-accent) 38%, white) 100%
+  );
+}
+
+.appointment-public .ap-progress-active,
+.appointment-public .ap-progress-done {
+  background-color: var(--ap-accent);
+}
+
+.appointment-public .ap-progress-track-active {
+  background-color: var(--ap-accent-muted);
+}
+
+.appointment-public .ap-back-link {
+  color: var(--ap-accent);
+}
+.appointment-public .ap-back-link:hover {
+  color: var(--ap-accent-hover);
+}
+
+.appointment-public .ap-choice-card {
+  border-radius: 1rem;
+  border: 1px solid rgb(226 232 240);
+  background: white;
+  padding: 1.125rem 1.25rem;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.04);
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.15s ease;
+}
+.appointment-public .ap-choice-card:hover {
+  border-color: var(--ap-accent-border);
+  box-shadow: 0 8px 24px rgb(15 23 42 / 0.08);
+}
+.appointment-public .ap-choice-card:active {
+  transform: scale(0.995);
+}
+
+.appointment-public .ap-choice-icon {
+  background: var(--ap-accent-soft);
+  color: var(--ap-accent);
+}
+
+.appointment-public .ap-summary-strip {
+  border-radius: 0.875rem;
+  border: 1px solid var(--ap-accent-border);
+  background: color-mix(in srgb, var(--ap-accent) 7%, white);
+  padding: 0.625rem 1rem;
+  color: color-mix(in srgb, var(--ap-accent) 55%, #0f172a);
+}
+
+.appointment-public .ap-time-slot {
+  border-radius: 0.625rem;
+  border: 1px solid rgb(226 232 240);
+  background: white;
+  padding: 0.625rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: rgb(51 65 85);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.04);
+  transition:
+    border-color 0.15s ease,
+    color 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.1s ease;
+}
+.appointment-public .ap-time-slot:hover {
+  border-color: var(--ap-accent-border);
+  color: var(--ap-accent);
+  box-shadow: 0 4px 12px rgb(15 23 42 / 0.06);
+}
+.appointment-public .ap-time-slot:active {
+  transform: scale(0.97);
+}
+.appointment-public .ap-time-slot-selected {
+  border-color: var(--ap-accent);
+  background: var(--ap-accent-soft);
+  color: var(--ap-accent);
+}
+
+.appointment-public .ap-btn-primary {
+  background-color: var(--ap-accent);
+  color: white;
+  box-shadow: 0 1px 3px rgb(15 23 42 / 0.12);
+}
+.appointment-public .ap-btn-primary:hover:not(:disabled) {
+  background-color: var(--ap-accent-hover);
+}
+
+.appointment-public .ap-input-focus:focus {
+  border-color: var(--ap-accent);
+  outline: none;
+  box-shadow: 0 0 0 1px var(--ap-accent);
+}
+
+.appointment-public .ap-cal-selected {
+  background-color: var(--ap-accent) !important;
+  color: white !important;
+  box-shadow:
+    0 0 0 2px white,
+    0 0 0 4px var(--ap-accent),
+    0 1px 3px rgb(15 23 42 / 0.12);
+}
+
+.appointment-public .ap-tab-active {
+  background-color: var(--ap-accent);
+  color: white;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.08);
+}

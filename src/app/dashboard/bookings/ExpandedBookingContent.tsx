@@ -804,6 +804,44 @@ export function ExpandedBookingContent({
             </div>
           </div>
           <div className="mt-2 grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+            <div className="min-w-0 rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
+              <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Email</p>
+              {guestEmail ? (
+                <a
+                  href={`mailto:${guestEmail}`}
+                  className="block min-w-0 break-words text-xs font-bold leading-snug text-slate-800 [overflow-wrap:anywhere] hover:text-brand-700"
+                >
+                  {guestEmail}
+                </a>
+              ) : (
+                <p className="text-xs font-bold leading-snug text-slate-400">Not provided</p>
+              )}
+            </div>
+            <div className="min-w-0 rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
+              <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Telephone</p>
+              {guestPhone ? (
+                <a
+                  href={`tel:${guestPhone}`}
+                  className="block min-w-0 break-words text-xs font-bold leading-snug text-slate-800 tabular-nums [overflow-wrap:anywhere] hover:text-brand-700"
+                >
+                  {guestPhone}
+                </a>
+              ) : (
+                <p className="text-xs font-bold leading-snug text-slate-400">Not provided</p>
+              )}
+            </div>
+            <div className="min-w-0 rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
+              <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Previous visit</p>
+              <p className="truncate text-xs font-bold leading-snug text-slate-800">
+                {previousVisitDate ? formatDateNice(previousVisitDate) : 'None yet'}
+              </p>
+            </div>
+            <div className="min-w-0 rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
+              <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Visits</p>
+              <p className="truncate text-xs font-bold leading-snug text-slate-800">
+                {visitCount > 0 ? `${visitCount} visit${visitCount === 1 ? '' : 's'}` : 'First visit'}
+              </p>
+            </div>
             {tableStyle ? (
               <div className={`rounded-lg border px-2 py-1.5 ${tableNames.length > 0 ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'}`}>
                 <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Table</p>
@@ -1049,55 +1087,17 @@ export function ExpandedBookingContent({
       {profileGuestId ? (
         <details className={bookingExpandAccordionDetailsClass}>
           <summary className={bookingExpandAccordionSummaryClass}>
-            <span>Guest profile and notes</span>
+            <span>Notes</span>
             <span className="text-[11px] font-medium text-slate-400 group-open:hidden">
               {guestProfileAndNotesCount > 0
                 ? `${guestProfileAndNotesCount} item${guestProfileAndNotesCount === 1 ? '' : 's'}`
-                : 'Profile and booking notes'}
+                : 'Tags and booking notes'}
             </span>
             <svg className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-open:rotate-180" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
             </svg>
           </summary>
           <div className={`${bookingExpandAccordionBodyClass} space-y-2`}>
-            <div className="grid gap-1.5 [grid-template-columns:repeat(auto-fit,minmax(min(100%,11.5rem),1fr))]">
-              <div className="min-w-0 rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
-                <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Name</p>
-                <p className="break-words text-xs font-bold leading-snug text-slate-800">{guestName}</p>
-              </div>
-              <div className="min-w-0 rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
-                <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Email</p>
-                {guestEmail ? (
-                  <a href={`mailto:${guestEmail}`} className="block min-w-0 text-xs font-bold leading-snug text-slate-800 break-words [overflow-wrap:anywhere] hover:text-brand-700">
-                    {guestEmail}
-                  </a>
-                ) : (
-                  <p className="break-words text-xs font-bold leading-snug text-slate-400">Not provided</p>
-                )}
-              </div>
-              <div className="min-w-0 rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
-                <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Telephone</p>
-                {guestPhone ? (
-                  <a href={`tel:${guestPhone}`} className="block min-w-0 break-words text-xs font-bold leading-snug text-slate-800 [overflow-wrap:anywhere] hover:text-brand-700">
-                    {guestPhone}
-                  </a>
-                ) : (
-                  <p className="break-words text-xs font-bold leading-snug text-slate-400">Not provided</p>
-                )}
-              </div>
-              <div className="min-w-0 rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
-                <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Previous visit</p>
-                <p className="break-words text-xs font-bold leading-snug text-slate-800">
-                  {previousVisitDate ? formatDateNice(previousVisitDate) : 'None yet'}
-                </p>
-              </div>
-              <div className="min-w-0 rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
-                <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Visits</p>
-                <p className="break-words text-xs font-bold leading-snug text-slate-800">
-                  {visitCount > 0 ? `${visitCount} visit${visitCount === 1 ? '' : 's'}` : 'First visit'}
-                </p>
-              </div>
-            </div>
             <GuestTagEditor
               tags={Array.isArray(activeDetail?.guest?.tags) ? activeDetail!.guest!.tags : []}
               venueId={venueId}
@@ -1297,7 +1297,7 @@ export function ExpandedBookingContent({
       {!profileGuestId ? (
       <details className={bookingExpandAccordionDetailsClass}>
         <summary className={bookingExpandAccordionSummaryClass}>
-          <span>Notes and preferences</span>
+          <span>Notes</span>
           <span className="text-[11px] font-medium text-slate-400 group-open:hidden">
             {[booking.dietary_notes, booking.occasion, activeDetail?.special_requests, activeDetail?.internal_notes].filter(Boolean).length || 'None'}
           </span>

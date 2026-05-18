@@ -98,6 +98,7 @@ import { ScheduleFeedColumn } from './ScheduleFeedColumn';
 import { WeekScheduleCdeStrip } from './WeekScheduleCdeStrip';
 import { MonthScheduleGrid } from './MonthScheduleGrid';
 import { PractitionerCalendarToolbar } from './PractitionerCalendarToolbar';
+import { OperationsToolbarGuestSearchPanel } from '@/components/dashboard/OperationsToolbarGuestSearchPanel';
 import { BookingCardInfo } from './BookingCardInfo';
 import { formatPhoneForDisplay } from '@/lib/phone/e164';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
@@ -1759,6 +1760,7 @@ export function PractitionerCalendarView({
     { venue: LinkedVenueCalendar; practitionerId?: string; time?: string } | null
   >(null);
   const [filterStatus, setFilterStatus] = useState<string>('all');
+  const [guestToolbarSearchQuery, setGuestToolbarSearchQuery] = useState('');
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [staffBookingModal, setStaffBookingModal] = useState<null | 'new' | 'walk-in'>(null);
   const [showResourceBooking, setShowResourceBooking] = useState(false);
@@ -3484,6 +3486,21 @@ export function PractitionerCalendarView({
             pending: scheduleUndoPending,
             onUndo: () => void undoLastScheduleEdit(),
           }}
+          searchActive={guestToolbarSearchQuery.trim().length > 0}
+          searchAriaLabel="Search contacts"
+          searchPanel={(
+            <OperationsToolbarGuestSearchPanel
+              onQueryChange={setGuestToolbarSearchQuery}
+              initialDate={viewMode === 'day' ? date : undefined}
+              preselectedPractitionerId={
+                calendarFilterIds?.length === 1 ? calendarFilterIds[0] : undefined
+              }
+              onBookingCreated={() => {
+                void fetchData();
+                void loadLinkedData();
+              }}
+            />
+          )}
         />
       </div>
 

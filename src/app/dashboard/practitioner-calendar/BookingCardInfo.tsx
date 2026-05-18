@@ -11,10 +11,10 @@ import {
 /**
  * Vertical layout tiers for booking info (full card: name + 4 meta fields).
  *
- * Calendar priority: **name → time → status → service → phone** (most useful when space is tight).
+ * Calendar priority: **name → service → phone → time → status** (most useful when space is tight).
  *
  * - **Shortest (`1`)** — one horizontal line; narrow widths drop lowest-priority fields first.
- * - **Tallest (`5`)** — one field per row (name, time, pill, service, phone).
+ * - **Tallest (`5`)** — one field per row (name, service, phone, time, status).
  * - **Between** — fields merge upward from the bottom as height increases.
  *
  * @param itemCount `5` = full booking; `4` = multi-service segment (no name row).
@@ -40,7 +40,7 @@ const DEFAULT_WIDTHS: Record<InfoKey, number> = {
 };
 
 /** Inline packing order — earlier keys win when horizontal space is limited. */
-export const INLINE_INFO_FIELD_ORDER: InfoKey[] = ['name', 'time', 'pill', 'service', 'phone'];
+export const INLINE_INFO_FIELD_ORDER: InfoKey[] = ['name', 'service', 'phone', 'time', 'pill'];
 
 type InfoKey = 'name' | 'service' | 'phone' | 'time' | 'pill';
 type WidthMap = Partial<Record<InfoKey, number>>;
@@ -65,22 +65,18 @@ function metaTextClass(micro: boolean): string {
     : 'text-[10px] font-medium leading-snug text-slate-600/90';
 }
 
-function timeChipClass(): string {
-  return 'inline-flex shrink-0 items-center rounded-full bg-white/60 px-1.5 py-0.5 text-[10px] font-bold tabular-nums text-slate-700 shadow-sm ring-1 ring-black/5';
-}
-
 export function groupInfoRows(rowCount: number, hideName: boolean): InfoKey[][] {
   if (hideName) {
-    if (rowCount <= 1) return [['time', 'pill', 'service', 'phone']];
-    if (rowCount === 2) return [['time', 'pill'], ['service', 'phone']];
-    if (rowCount === 3) return [['time', 'pill'], ['service'], ['phone']];
-    return [['time'], ['pill'], ['service'], ['phone']];
+    if (rowCount <= 1) return [['service', 'phone', 'time', 'pill']];
+    if (rowCount === 2) return [['service', 'phone'], ['time', 'pill']];
+    if (rowCount === 3) return [['service'], ['phone'], ['time', 'pill']];
+    return [['service'], ['phone'], ['time'], ['pill']];
   }
   if (rowCount <= 1) return [INLINE_INFO_FIELD_ORDER];
-  if (rowCount === 2) return [['name'], ['time', 'pill', 'service', 'phone']];
-  if (rowCount === 3) return [['name'], ['time', 'pill'], ['service', 'phone']];
-  if (rowCount === 4) return [['name'], ['time', 'pill'], ['service'], ['phone']];
-  return [['name'], ['time'], ['pill'], ['service'], ['phone']];
+  if (rowCount === 2) return [['name'], ['service', 'phone', 'time', 'pill']];
+  if (rowCount === 3) return [['name'], ['service', 'phone'], ['time', 'pill']];
+  if (rowCount === 4) return [['name'], ['service'], ['phone'], ['time', 'pill']];
+  return [['name'], ['service'], ['phone'], ['time'], ['pill']];
 }
 
 export function pickVisibleInfoRows({
@@ -232,14 +228,21 @@ export function BookingCardInfo({
     }
     if (key === 'time') {
       return (
-        <span key="time" className={timeChipClass()} title={timeRange}>
+        <span
+          key="time"
+          className={`${dedicated ? 'block w-full' : 'inline-flex max-w-full shrink'} min-w-0 truncate tabular-nums ${mt}`}
+          title={timeRange}
+        >
           {timeRange}
         </span>
       );
     }
     if (key === 'pill' && pill) {
       return (
-        <span key="pill" className="min-w-0 max-w-full shrink-0">
+        <span
+          key="pill"
+          className={`${dedicated ? 'flex w-full min-w-0' : 'inline-flex min-w-0 max-w-full shrink-0'} items-center`}
+        >
           {pill}
         </span>
       );
@@ -264,7 +267,7 @@ export function BookingCardInfo({
             {phone}
           </span>
         ) : null}
-        <span ref={timeRef} className={timeChipClass()}>
+        <span ref={timeRef} className={`tabular-nums ${mt}`}>
           {timeRange}
         </span>
         {pill ? (

@@ -24,6 +24,7 @@ import { DashboardListSkeleton } from '@/components/ui/dashboard/DashboardSkelet
 import { Pill } from '@/components/ui/dashboard/Pill';
 import type { ViewToolbarSummary } from '@/components/dashboard/ViewToolbar';
 import { OperationsWorkspaceToolbar } from '@/components/dashboard/OperationsWorkspaceToolbar';
+import { OperationsToolbarGuestSearchPanel } from '@/components/dashboard/OperationsToolbarGuestSearchPanel';
 import { ClampedFixedDropdown } from '@/components/ui/ClampedFixedDropdown';
 import { ContactDetailPanel } from '@/components/dashboard/contacts/ContactDetailPanel';
 import { MergeContactsModal } from '@/components/dashboard/contacts/MergeContactsModal';
@@ -1551,41 +1552,13 @@ export function ContactsDashboard({
             searchActive={search.trim().length > 0}
             searchAriaLabel="Search contacts"
             searchPanel={(
-              <div className="space-y-2">
-                <label htmlFor="contacts-toolbar-search" className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Search
-                </label>
-                <div className="relative">
-                  <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-                    <svg className="h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" aria-hidden>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
-                    </svg>
-                  </div>
-                  <input
-                    id="contacts-toolbar-search"
-                    type="text"
-                    value={search}
-                    onChange={(e) => {
-                      setSearch(e.target.value);
-                      setPage(0);
-                    }}
-                    placeholder="Name, email, or phone"
-                    className="w-full rounded-xl border border-slate-200 bg-slate-50/60 py-2 pl-9 pr-3 text-sm placeholder:text-slate-400 focus:border-brand-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-100"
-                  />
-                </div>
-                {search.trim() ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSearch('');
-                      setPage(0);
-                    }}
-                    className="text-xs font-semibold text-brand-600 hover:text-brand-700 hover:underline"
-                  >
-                    Clear search
-                  </button>
-                ) : null}
-              </div>
+              <OperationsToolbarGuestSearchPanel
+                onQueryChange={(q) => {
+                  setSearch(q);
+                  setPage(0);
+                }}
+                onBookingCreated={() => void loadList()}
+              />
             )}
             toolbarTools={contactsToolbarTools}
             trailingActions={(

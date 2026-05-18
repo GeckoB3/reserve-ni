@@ -532,11 +532,11 @@ export function OperationsWorkspaceToolbar({
             horizontalCenter={compact}
             gapPx={4}
             align="end"
-            maxWidthPx={352}
+            maxWidthPx={400}
             id={`${baseId}-search-panel`}
             onDismiss={close}
             aria-label={searchAriaLabel}
-            className="animate-fade-in z-50 rounded-xl border border-slate-200 bg-white p-3 text-left shadow-xl shadow-slate-900/10 ring-1 ring-slate-100"
+            className="animate-fade-in z-50 w-[min(100vw-2rem,24rem)] rounded-xl border border-slate-200 bg-white p-3 text-left shadow-xl shadow-slate-900/10 ring-1 ring-slate-100"
           >
             {searchPanel}
           </ClampedFixedDropdown>

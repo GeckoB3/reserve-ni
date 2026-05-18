@@ -8,6 +8,8 @@ import { Pill } from '@/components/ui/dashboard/Pill';
 import { SessionTimeoutGuard } from '@/components/SessionTimeoutGuard';
 import { DashboardSWRProvider } from '@/components/providers/DashboardSWRProvider';
 import { DashboardDetailCacheProvider } from '@/components/providers/DashboardDetailCacheProvider';
+import { DashboardToolbarVenueProvider } from '@/components/dashboard/toolbar-guest-search/DashboardToolbarVenueProvider';
+import { mergeVenueTerminology } from '@/lib/dashboard/merge-venue-terminology';
 import {
   DashboardVenueBootstrapProvider,
   type DashboardVenueBootstrapValue,
@@ -265,7 +267,32 @@ export default async function DashboardLayout({ children }: { children: React.Re
         <StaffRebookBootstrapRouteCleanup />
         <DashboardVenueBootstrapProvider value={venueBootstrap}>
           <DashboardSWRProvider>
-            <DashboardDetailCacheProvider>{children}</DashboardDetailCacheProvider>
+            <DashboardDetailCacheProvider>
+              <DashboardToolbarVenueProvider
+                value={
+                  venueId && venueBootstrap
+                    ? (() => {
+                        const terminology = mergeVenueTerminology(bookingModel, venueTerminology);
+                        return {
+                          venueId,
+                          bookingModel,
+                          enabledModels,
+                          currency: venueBootstrap.currency,
+                          venueTimezone: venueBootstrap.timezone,
+                          tableManagementEnabled,
+                          isAdmin,
+                          terminology,
+                          clientLower: terminology.client.toLowerCase(),
+                          clientWord: terminology.client,
+                          bookingWord: terminology.booking,
+                        };
+                      })()
+                    : null
+                }
+              >
+                {children}
+              </DashboardToolbarVenueProvider>
+            </DashboardDetailCacheProvider>
           </DashboardSWRProvider>
         </DashboardVenueBootstrapProvider>
       </main>

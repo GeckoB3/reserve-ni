@@ -28,6 +28,7 @@ import { TabBar } from '@/components/ui/dashboard/TabBar';
 import { BookingStatusPill } from '@/components/ui/dashboard/BookingStatusPill';
 import { Pill, type PillVariant } from '@/components/ui/dashboard/Pill';
 import { OperationsWorkspaceToolbar } from '@/components/dashboard/OperationsWorkspaceToolbar';
+import { OperationsToolbarGuestSearchPanel } from '@/components/dashboard/OperationsToolbarGuestSearchPanel';
 import { ClampedFixedDropdown } from '@/components/ui/ClampedFixedDropdown';
 import type { ViewToolbarSummary } from '@/components/dashboard/ViewToolbar';
 import type { BookingModel } from '@/types/booking-models';
@@ -174,8 +175,8 @@ interface StatusFilterOption {
 
 /**
  * Filter UI labels.
- *  - `Booked`    — `status === 'Booked'` and not attendance-confirmed.
- *  - `Confirmed` — guest or staff confirmed attendance, including legacy `status === 'Confirmed'`.
+ *  - `Booked`    â€” `status === 'Booked'` and not attendance-confirmed.
+ *  - `Confirmed` â€” guest or staff confirmed attendance, including legacy `status === 'Confirmed'`.
  */
 const STATUS_FILTER_OPTIONS: StatusFilterOption[] = [
   { label: 'All', apiStatus: null },
@@ -310,7 +311,7 @@ function formatDateLabel(date: string, mode: ViewMode): string {
   }
   if (mode === 'week') {
     const end = new Date(addDays(date, 6) + 'T12:00:00');
-    return `${d.getDate()} ${MONTHS_SHORT[d.getMonth()]} – ${end.getDate()} ${MONTHS_SHORT[end.getMonth()]} ${end.getFullYear()}`;
+    return `${d.getDate()} ${MONTHS_SHORT[d.getMonth()]} â€“ ${end.getDate()} ${MONTHS_SHORT[end.getMonth()]} ${end.getFullYear()}`;
   }
   if (mode === 'month') return `${MONTHS_LONG[d.getMonth()]} ${d.getFullYear()}`;
   return '';
@@ -361,7 +362,7 @@ export function BookingsDashboard({
   currency?: string;
   primaryBookingModel?: BookingModel;
   enabledModels?: BookingModel[];
-  /** yyyy-mm-dd from the server render — keeps “today” aligned between SSR and hydration. */
+  /** yyyy-mm-dd from the server render â€” keeps â€œtodayâ€ aligned between SSR and hydration. */
   initialTodayIso?: string;
 }) {
   const { addToast } = useToast();
@@ -384,7 +385,7 @@ export function BookingsDashboard({
   const [customTo, setCustomTo] = useState(rememberedPreferences.customTo ?? todayIso);
   const [statusFilter, setStatusFilter] = useState<string>(rememberedPreferences.statusFilter ?? 'All');
   const [modelFilter, setModelFilter] = useState<'all' | BookingModel>(rememberedPreferences.modelFilter ?? 'all');
-  const [searchQuery, setSearchQuery] = useState('');
+  const [guestToolbarSearchQuery, setGuestToolbarSearchQuery] = useState('');
   const [viewRangePopoverOpen, setViewRangePopoverOpen] = useState(false);
   const viewRangeTriggerRef = useRef<HTMLButtonElement>(null);
   const viewRangeWrapRef = useRef<HTMLDivElement>(null);
@@ -1059,7 +1060,7 @@ export function BookingsDashboard({
         }
         if (payload.errors && payload.errors.length > 0) {
           const w = payload.errors.join('; ');
-          addToast(`Sent with issues — ${w}`, 'error');
+          addToast(`Sent with issues â€” ${w}`, 'error');
           setMessageDraftById((prev) => ({ ...prev, [bookingId]: '' }));
           invalidateVenueBookingDetail(bookingId);
           setDetailById((prev) => {
@@ -1237,7 +1238,7 @@ export function BookingsDashboard({
         addToast(`Message sent to ${okCount} booking(s)`, 'success');
       } else if (okCount > 0) {
         setError(
-          `Sent to ${okCount}/${selectedIds.length}. ${failureSummaries.slice(0, 3).join(' · ')}`,
+          `Sent to ${okCount}/${selectedIds.length}. ${failureSummaries.slice(0, 3).join(' Â· ')}`,
         );
         addToast(`Sent to ${okCount}/${selectedIds.length}`, 'error');
       } else {
@@ -1311,7 +1312,7 @@ export function BookingsDashboard({
     const skipped = selectedIds.length - bulkCancelEligibleIds.length;
     const skipNote =
       skipped > 0
-        ? ` (${skipped} selected ${skipped === 1 ? 'booking cannot' : 'bookings cannot'} be cancelled — only active bookings will be updated).`
+        ? ` (${skipped} selected ${skipped === 1 ? 'booking cannot' : 'bookings cannot'} be cancelled â€” only active bookings will be updated).`
         : '';
     setConfirmDialog({
       title: 'Cancel bookings',
@@ -1374,7 +1375,7 @@ export function BookingsDashboard({
     const skipped = selectedIds.length - bulkDeleteEligibleIds.length;
     const skipNote =
       skipped > 0
-        ? ` (${skipped} selected ${skipped === 1 ? 'booking is' : 'bookings are'} not cancelled — only cancelled bookings will be removed).`
+        ? ` (${skipped} selected ${skipped === 1 ? 'booking is' : 'bookings are'} not cancelled â€” only cancelled bookings will be removed).`
         : '';
     setConfirmDialog({
       title: 'Delete bookings permanently?',
@@ -1411,24 +1412,12 @@ export function BookingsDashboard({
 
   const filteredBookings = useMemo(() => {
     let list = modelScopedBookings;
-    const q = searchQuery.trim().toLowerCase();
-    if (q) {
-      list = list.filter((booking) =>
-        booking.guest_name.toLowerCase().includes(q)
-        || (booking.guest_phone ?? '').toLowerCase().includes(q)
-        || (booking.guest_email ?? '').toLowerCase().includes(q)
-        || (booking.booking_item_name ?? '').toLowerCase().includes(q)
-        || booking.id.toLowerCase().includes(q)
-        || booking.source.toLowerCase().includes(q)
-      );
-    }
     if (viewMode === 'day' && timeRangeFilterActive) {
       list = list.filter((b) => isBookingTimeInHourRange(b.booking_time, pickerStartHour, pickerEndHour));
     }
     return list;
   }, [
     modelScopedBookings,
-    searchQuery,
     viewMode,
     timeRangeFilterActive,
     pickerStartHour,
@@ -1731,7 +1720,7 @@ export function BookingsDashboard({
           aria-expanded={viewRangePopoverOpen}
           aria-haspopup="dialog"
           aria-controls={viewRangePanelId}
-          aria-label="View — Day, week, month, or custom range"
+          aria-label="View â€” Day, week, month, or custom range"
         >
           <span className="max-w-[4.75rem] truncate sm:max-w-none">
             {VIEW_MODE_OPTIONS.find((o) => o.id === viewMode)?.label ?? 'Day'}
@@ -1814,7 +1803,7 @@ export function BookingsDashboard({
         summaryContent={bookingSummaryContent}
         date={anchorDate}
         todayIso={todayIso}
-        dateLabel={viewMode === 'custom' ? `${customFrom} – ${customTo}` : formatDateLabel(anchorDate, viewMode)}
+        dateLabel={viewMode === 'custom' ? `${customFrom} â€“ ${customTo}` : formatDateLabel(anchorDate, viewMode)}
         onDateChange={setAnchorDate}
         onPreviousDate={() => navigate(-1)}
         onNextDate={() => navigate(1)}
@@ -1827,37 +1816,14 @@ export function BookingsDashboard({
         controlsLabel={filterCount > 0 ? `Filter (${filterCount})` : 'Filter'}
         controlsPanel={bookingsFilterPanel}
         datePickerPanel={bookingsDatePanel}
-        searchActive={searchQuery.trim().length > 0}
+        searchActive={guestToolbarSearchQuery.trim().length > 0}
+        searchAriaLabel="Search contacts"
         searchPanel={(
-          <div className="space-y-2">
-            <label htmlFor="bookings-toolbar-search" className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-              Search
-            </label>
-            <div className="relative">
-              <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-                <svg className="h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
-                </svg>
-              </div>
-              <input
-                id="bookings-toolbar-search"
-                type="text"
-                value={searchQuery}
-                onChange={(event) => setSearchQuery(event.target.value)}
-                placeholder="Search guest, phone, email…"
-                className="w-full rounded-xl border border-slate-200 bg-slate-50/60 py-2 pl-9 pr-3 text-sm placeholder:text-slate-400 focus:border-brand-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-100"
-              />
-            </div>
-            {searchQuery.trim() ? (
-              <button
-                type="button"
-                onClick={() => setSearchQuery('')}
-                className="text-xs font-semibold text-brand-600 hover:text-brand-700 hover:underline"
-              >
-                Clear search
-              </button>
-            ) : null}
-          </div>
+          <OperationsToolbarGuestSearchPanel
+            onQueryChange={setGuestToolbarSearchQuery}
+            initialDate={viewMode === 'day' ? anchorDate : undefined}
+            onBookingCreated={() => void fetchBookings()}
+          />
         )}
         inlineTools={
           showModelFilters ? (
@@ -1884,7 +1850,6 @@ export function BookingsDashboard({
           className={`pointer-events-none absolute inset-x-0 top-0 z-10 h-0.5 bg-brand-500 transition-opacity duration-200 ease-out ${isRefreshing ? 'opacity-100' : 'opacity-0'}`}
           aria-hidden
         />
-      </div>
 
       {loading ? (
         <DashboardListSkeleton rowCount={6} />
@@ -1990,6 +1955,7 @@ export function BookingsDashboard({
           ))}
         </div>
       )}
+      </div>
 
       {bulkGuestMessageOpen && (
         <BulkGuestMessageModal
@@ -2070,7 +2036,7 @@ export function BookingsDashboard({
               Select table(s) for {changeTableBooking.guest_name}. Tables already assigned to this booking are treated as free so you can move or keep them.
             </p>
             {changeTableDayLoading && (
-              <p className="mt-2 text-xs text-slate-500">Loading table occupancy for this date…</p>
+              <p className="mt-2 text-xs text-slate-500">Loading table occupancy for this dateâ€¦</p>
             )}
             {changeTableSelectorTables.length === 0 ? (
               <p className="mt-4 text-sm text-amber-700">No active tables are configured. Add tables in venue settings.</p>
@@ -2082,7 +2048,7 @@ export function BookingsDashboard({
                   partySize={changeTableBooking.party_size}
                   selectedIds={changeTableSelectedIds}
                   onChange={setChangeTableSelectedIds}
-                  confirmLabel={changeTableSaving ? 'Saving…' : 'Save'}
+                  confirmLabel={changeTableSaving ? 'Savingâ€¦' : 'Save'}
                   skipLabel="Cancel"
                   onConfirm={(ids) => { void confirmChangeTableAssignment(ids); }}
                   onSkip={() => { if (!changeTableSaving) closeChangeTableModal(); }}
@@ -2134,7 +2100,7 @@ export function BookingsDashboard({
       )}
       </div>
 
-      {/* Floating bulk-actions tray — appears when rows are selected */}
+      {/* Floating bulk-actions tray â€” appears when rows are selected */}
       {selectedIds.length > 0 && (
         <div className="fixed left-1/2 z-40 max-w-[calc(100vw-1rem)] -translate-x-1/2 px-2 bottom-[max(1rem,env(safe-area-inset-bottom,0px))]">
           <div className="flex max-w-full flex-wrap items-center justify-center gap-1.5 rounded-2xl border border-slate-200/80 bg-white px-3 py-2 shadow-xl shadow-slate-900/15 ring-1 ring-slate-100 sm:flex-nowrap sm:px-4 sm:py-2.5">
@@ -2210,7 +2176,7 @@ function sourceBadge(s: string) {
 
 function depositBadge(status: string, amountPence: number | null) {
   if (status === 'Not Required') return null;
-  const amt = amountPence ? `£${(amountPence / 100).toFixed(2)}` : null;
+  const amt = amountPence ? `Â£${(amountPence / 100).toFixed(2)}` : null;
   const variantMap: Record<string, PillVariant> = {
     Paid: 'success',
     Refunded: 'brand',
@@ -2350,7 +2316,7 @@ function BookingsAccordionList({
                     <span className="shrink-0 font-semibold tabular-nums text-slate-700">{booking.booking_time.slice(0, 5)}</span>
                     {booking.booking_item_name?.trim() ? (
                       <>
-                        <span className="shrink-0 text-slate-300">·</span>
+                        <span className="shrink-0 text-slate-300">Â·</span>
                         <span className="min-w-0 max-w-[11rem] truncate text-[11px] font-semibold text-slate-800 sm:max-w-[16rem] sm:text-xs">
                           {booking.booking_item_name.trim()}
                         </span>
@@ -2358,14 +2324,14 @@ function BookingsAccordionList({
                     ) : null}
                     {isTableBooking ? (
                       <>
-                        <span className="shrink-0 text-slate-300">·</span>
+                        <span className="shrink-0 text-slate-300">Â·</span>
                         <span className="shrink-0 text-[11px] font-medium text-slate-600 sm:text-xs">
                           {booking.party_size} {booking.party_size === 1 ? 'cover' : 'covers'}
                         </span>
                       </>
                     ) : booking.party_size > 1 ? (
                       <>
-                        <span className="shrink-0 text-slate-300">·</span>
+                        <span className="shrink-0 text-slate-300">Â·</span>
                         <span className="shrink-0 text-[11px] font-medium text-slate-600 sm:text-xs">
                           {booking.party_size} people
                         </span>
@@ -2378,7 +2344,7 @@ function BookingsAccordionList({
                           : 'hidden shrink-0 text-slate-300 sm:inline'
                       }
                     >
-                      ·
+                      Â·
                     </span>
                     <span
                       className={expanded ? 'inline-flex shrink-0' : 'hidden shrink-0 sm:inline-flex'}
@@ -2424,7 +2390,7 @@ function BookingsAccordionList({
                     {booking.group_booking_id && (
                       <span className={expanded ? 'inline-flex' : 'hidden sm:inline-flex'}>
                         <Pill variant="neutral" size="sm">
-                          {booking.person_label ? `Group · ${booking.person_label}` : 'Group'}
+                          {booking.person_label ? `Group Â· ${booking.person_label}` : 'Group'}
                         </Pill>
                       </span>
                     )}

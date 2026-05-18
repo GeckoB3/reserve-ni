@@ -80,18 +80,36 @@ export function EmbedBookingClient({
     ? ({ '--accent': `#${accentColour.replace(/^#/, '')}` } as React.CSSProperties)
     : undefined;
 
+  const isAppointment =
+    venue.booking_model === 'practitioner_appointment' || venue.booking_model === 'unified_scheduling';
+
   return (
-    <main ref={contentRef} className="bg-white px-4 pb-4 pt-4" style={accentStyle}>
-      <p className="mb-3 text-center text-[11px] font-medium tracking-wide text-slate-500">
-        Powered by{' '}
-        <span className="text-slate-700">ReserveNI</span>
-      </p>
+    <main
+      ref={contentRef}
+      className={
+        isAppointment
+          ? 'bg-gradient-to-b from-slate-50/90 to-white px-3 pb-4 pt-3 sm:px-4'
+          : 'bg-white px-4 pb-4 pt-4'
+      }
+      style={accentStyle}
+    >
       <BookPublicBookingFlow
         venue={venue}
         embed
         onHeightChange={bumpEmbedHeight}
         accentColour={accentColour ?? undefined}
       />
+      <p className="mt-4 text-center text-[10px] font-medium tracking-wide text-slate-400">
+        Powered by{' '}
+        <a
+          href="https://www.reserveni.com"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-slate-500 underline decoration-slate-300 underline-offset-2 hover:text-slate-700"
+        >
+          ReserveNI
+        </a>
+      </p>
     </main>
   );
 }

@@ -18,6 +18,7 @@ import { bookingDetailLiteFromListRow } from '@/lib/booking/booking-detail-from-
 import { warmIdsWithConcurrency } from '@/lib/dashboard/venue-detail-swr';
 import type { RegistryAppointment } from '@/components/booking/AppointmentRegistryCard';
 import { OperationsWorkspaceToolbar } from '@/components/dashboard/OperationsWorkspaceToolbar';
+import { OperationsToolbarGuestSearchPanel } from '@/components/dashboard/OperationsToolbarGuestSearchPanel';
 import { PageFrame } from '@/components/ui/dashboard/PageFrame';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { currencySymbolFromCode } from '@/lib/money/currency-symbol';
@@ -122,7 +123,7 @@ function formatDateLabel(date: string, mode: ViewMode): string {
   }
   if (mode === 'week') {
     const end = new Date(`${addDays(date, 6)}T12:00:00`);
-    return `${d.getDate()} ${MONTHS_SHORT[d.getMonth()]} – ${end.getDate()} ${MONTHS_SHORT[end.getMonth()]} ${end.getFullYear()}`;
+    return `${d.getDate()} ${MONTHS_SHORT[d.getMonth()]} â€“ ${end.getDate()} ${MONTHS_SHORT[end.getMonth()]} ${end.getFullYear()}`;
   }
   if (mode === 'month') return `${MONTHS_LONG[d.getMonth()]} ${d.getFullYear()}`;
   return '';
@@ -159,7 +160,7 @@ function inferRegistryModel(b: RegistryAppointment): BookingModel {
   return inferBookingRowModel(rowForInference(b));
 }
 
-/** Left-edge status strip — same palette as table grid / main bookings list. */
+/** Left-edge status strip â€” same palette as table grid / main bookings list. */
 function statusBorderClass(b: RegistryAppointment): string {
   return bookingStatusVisualForKey(b.status).listBorderLeft;
 }
@@ -331,7 +332,7 @@ export function AppointmentBookingsDashboard({
   defaultPractitionerFilter?: 'all' | string;
   /** Bookable calendars this staff user manages. */
   linkedPractitionerIds?: string[];
-  /** yyyy-mm-dd from the server render — keeps “today” aligned between SSR and hydration. */
+  /** yyyy-mm-dd from the server render â€” keeps â€œtodayâ€ aligned between SSR and hydration. */
   initialTodayIso?: string;
 }) {
   const { addToast } = useToast();
@@ -358,7 +359,7 @@ export function AppointmentBookingsDashboard({
   const [modelFilter, setModelFilter] = useState<'all' | BookingModel>('all');
   const [sortKey, setSortKey] = useState<SortKey>('date');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
-  const [searchQuery, setSearchQuery] = useState('');
+  const [guestToolbarSearchQuery, setGuestToolbarSearchQuery] = useState('');
   const [bookings, setBookings] = useState<RegistryAppointment[]>([]);
   /** All statuses in range - used for summary tiles (list may be status-filtered). */
   const [allStatusBookings, setAllStatusBookings] = useState<RegistryAppointment[]>([]);
@@ -393,7 +394,7 @@ export function AppointmentBookingsDashboard({
   const [bulkGuestMessageSending, setBulkGuestMessageSending] = useState(false);
   const [messageDraftById, setMessageDraftById] = useState<Record<string, string>>({});
   const [sendingMessageIds, setSendingMessageIds] = useState<string[]>([]);
-  /** Own / linked-in / all source filter (§8.2). */
+  /** Own / linked-in / all source filter (Â§8.2). */
   const [sourceScope, setSourceScope] = useState<SourceScope>('all');
   /** True once the venue is known to hold at least one linked calendar. */
   const [linkedAvailable, setLinkedAvailable] = useState(false);
@@ -530,7 +531,7 @@ export function AppointmentBookingsDashboard({
   useEffect(() => {
     const ob = searchParams.get('openBooking');
     if (ob && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(ob)) {
-      setExpandedIds((prev) => (prev.includes(ob) ? prev : [...prev, ob]));
+      setExpandedIds((prev) => (prev.includes(ob) ? prev : [ob]));
       void loadBookingDetail(ob);
       const next = new URLSearchParams(searchParams.toString());
       next.delete('openBooking');
@@ -558,7 +559,7 @@ export function AppointmentBookingsDashboard({
     async (options?: { silent?: boolean }) => {
       const silent = options?.silent ?? false;
       if (invalidCustomRange) {
-        setError('Custom date range is invalid. “From” must be before or equal to “To”.');
+        setError('Custom date range is invalid. â€œFromâ€ must be before or equal to â€œToâ€.');
         setLoading(false);
         return;
       }
@@ -706,11 +707,11 @@ export function AppointmentBookingsDashboard({
         bookings,
         practitionerFilter,
         serviceFilter,
-        searchQuery,
+        '',
         primaryBookingModel,
         enabledModels,
       ),
-    [bookings, practitionerFilter, serviceFilter, searchQuery, primaryBookingModel, enabledModels],
+    [bookings, practitionerFilter, serviceFilter, primaryBookingModel, enabledModels],
   );
 
   const filteredBookings = useMemo(() => {
@@ -733,7 +734,7 @@ export function AppointmentBookingsDashboard({
       allStatusBookings,
       practitionerFilter,
       serviceFilter,
-      searchQuery,
+      '',
       primaryBookingModel,
       enabledModels,
     );
@@ -746,7 +747,6 @@ export function AppointmentBookingsDashboard({
     allStatusBookings,
     practitionerFilter,
     serviceFilter,
-    searchQuery,
     primaryBookingModel,
     enabledModels,
     modelFilter,
@@ -982,7 +982,7 @@ export function AppointmentBookingsDashboard({
           addToast(`Message sent to ${okCount} guest(s)`, 'success');
         } else if (okCount > 0) {
           setError(
-            `Sent to ${okCount}/${ids.length}. ${failureSummaries.slice(0, 3).join(' · ')}`,
+            `Sent to ${okCount}/${ids.length}. ${failureSummaries.slice(0, 3).join(' Â· ')}`,
           );
           addToast(`Sent to ${okCount}/${ids.length}`, 'error');
         } else {
@@ -1032,7 +1032,7 @@ export function AppointmentBookingsDashboard({
             return next;
           });
           void loadBookingDetail(bookingId, true);
-          addToast(`Sent with issues — ${w}`, 'error');
+          addToast(`Sent with issues â€” ${w}`, 'error');
           return { ok: true, warning: `Sent with issues: ${w}` };
         }
         setMessageDraftById((prev) => ({ ...prev, [bookingId]: '' }));
@@ -1057,7 +1057,10 @@ export function AppointmentBookingsDashboard({
 
   const toggleExpanded = useCallback(
     (id: string) => {
-      setExpandedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+      setExpandedIds((prev) => {
+        if (prev.includes(id)) return [];
+        return [id];
+      });
       const row = bookings.find((b) => b.id === id);
       const fromCache = bookingDetailLiteFromCachePayload(id, peekVenueBookingDetail(id));
       const fromRow = row ? bookingDetailLiteFromListRow(row) : undefined;
@@ -1081,7 +1084,7 @@ export function AppointmentBookingsDashboard({
       { key: 'deposit', label: 'Deposit' },
       { key: 'type', label: 'Type' },
     ];
-    /** Matches OperationsWorkspaceToolbar compact “Today” control sizing and weight. */
+    /** Matches OperationsWorkspaceToolbar compact â€œTodayâ€ control sizing and weight. */
     const sortTriggerClass =
       'min-h-8 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 sm:text-xs';
     return (
@@ -1109,7 +1112,7 @@ export function AppointmentBookingsDashboard({
             className={`${sortTriggerClass} inline-flex shrink-0 items-center gap-1`}
             aria-label={`Sort direction: ${sortDir === 'asc' ? 'ascending' : 'descending'}`}
           >
-            <span aria-hidden>{sortDir === 'asc' ? '↑' : '↓'}</span>
+            <span aria-hidden>{sortDir === 'asc' ? 'â†‘' : 'â†“'}</span>
             <span>{sortDir === 'asc' ? 'Asc' : 'Desc'}</span>
           </button>
         </div>
@@ -1222,7 +1225,7 @@ export function AppointmentBookingsDashboard({
                     : 'hidden shrink-0 text-slate-300 sm:inline'
                 }
               >
-                ·
+                Â·
               </span>
               <span
                 className={
@@ -1240,7 +1243,7 @@ export function AppointmentBookingsDashboard({
                     : 'hidden shrink-0 text-slate-300 sm:inline'
                 }
               >
-                ·
+                Â·
               </span>
               <span
                 className={
@@ -1258,7 +1261,7 @@ export function AppointmentBookingsDashboard({
                     : 'hidden shrink-0 text-slate-300 md:inline'
                 }
               >
-                ·
+                Â·
               </span>
               <span
                 className={
@@ -1316,7 +1319,7 @@ export function AppointmentBookingsDashboard({
               {priceDisplay && (
                 <span className={expanded ? 'inline-flex' : 'hidden sm:inline-flex'}>
                   <Pill variant={depositPillVariant(b.deposit_status)} size="sm" dot>
-                    {priceDisplay} · {b.deposit_status}
+                    {priceDisplay} Â· {b.deposit_status}
                   </Pill>
                 </span>
               )}
@@ -1596,39 +1599,6 @@ export function AppointmentBookingsDashboard({
     </div>
   );
 
-  const appointmentSearchPanel = (
-    <div className="space-y-2">
-      <label htmlFor="appointment-toolbar-search" className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-        Search
-      </label>
-      <div className="relative">
-        <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-          <svg className="h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
-          </svg>
-        </div>
-        <input
-          id="appointment-toolbar-search"
-          type="search"
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="Search client, phone, email..."
-          className="w-full rounded-xl border border-slate-200 bg-slate-50/60 py-2 pl-9 pr-3 text-sm placeholder:text-slate-400 focus:border-brand-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-100"
-          autoComplete="off"
-        />
-      </div>
-      {searchQuery.trim() ? (
-        <button
-          type="button"
-          onClick={() => setSearchQuery('')}
-          className="text-xs font-semibold text-brand-600 hover:text-brand-700 hover:underline"
-        >
-          Clear search
-        </button>
-      ) : null}
-    </div>
-  );
-
   const appointmentToolbarLeadingTools = useCallback(
     (toolbarPanelAnchorRef: RefObject<HTMLDivElement | null>) => (
       <div ref={viewRangeWrapRef} className="relative shrink-0">
@@ -1698,7 +1668,7 @@ export function AppointmentBookingsDashboard({
       <div className="min-w-0 space-y-6">
       {realtimeConnected === false && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          Updates may be delayed. Reconnecting…
+          Updates may be delayed. Reconnectingâ€¦
         </div>
       )}
       {error && (
@@ -1749,8 +1719,18 @@ export function AppointmentBookingsDashboard({
         controlsLabel={filterCount > 0 ? `Filter (${filterCount})` : 'Filter'}
         controlsPanel={appointmentFilterPanel}
         datePickerPanel={appointmentDatePanel}
-        searchActive={searchQuery.trim().length > 0}
-        searchPanel={appointmentSearchPanel}
+        searchActive={guestToolbarSearchQuery.trim().length > 0}
+        searchAriaLabel="Search contacts"
+        searchPanel={(
+          <OperationsToolbarGuestSearchPanel
+            onQueryChange={setGuestToolbarSearchQuery}
+            initialDate={viewMode === 'day' ? anchorDate : undefined}
+            onBookingCreated={() => {
+              void fetchBookings({ silent: true });
+              void fetchBookingsForStats();
+            }}
+          />
+        )}
       />
       <div className="relative overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm shadow-slate-900/5">
         <div

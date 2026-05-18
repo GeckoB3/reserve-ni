@@ -24,6 +24,7 @@ import { ExpandedBookingContent } from '@/app/dashboard/bookings/ExpandedBooking
 import { BookingDetailPanel, type BookingDetailPanelSnapshot } from '@/app/dashboard/bookings/BookingDetailPanel';
 import { expandedBookingRowShellClass } from '@/app/dashboard/bookings/booking-expand-accordion-classes';
 import { OperationsWorkspaceToolbar } from '@/components/dashboard/OperationsWorkspaceToolbar';
+import { OperationsToolbarGuestSearchPanel } from '@/components/dashboard/OperationsToolbarGuestSearchPanel';
 import type { ViewToolbarSummary } from '@/components/dashboard/ViewToolbar';
 import { BookingStatusPill } from '@/components/ui/dashboard/BookingStatusPill';
 import { Pill, type PillVariant } from '@/components/ui/dashboard/Pill';
@@ -63,7 +64,7 @@ import type { OpeningHours } from '@/types/availability';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { LinkedCalendarView } from '@/components/linked-accounts/LinkedCalendarView';
 
-// ─── Types ──────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 interface DaySheetBooking {
   id: string;
@@ -199,7 +200,7 @@ interface Filters {
   showNoShow: boolean;
 }
 
-// ─── Constants ──────────────────────────────────────────────────────────────
+// â”€â”€â”€ Constants â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -211,7 +212,7 @@ const AREA_UUID_RE =
 
 const DEFAULT_STATUSES = new Set(['Pending', 'Booked', 'Confirmed', 'Seated']);
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function todayISO(): string {
   return new Date().toISOString().slice(0, 10);
@@ -273,7 +274,7 @@ function bookingTypePillVariant(model: BookingModel): PillVariant {
 
 function depositBadge(status: string, amountPence: number | null) {
   if (status === 'Not Required' || status === 'N/A') return null;
-  const amt = amountPence ? `£${(amountPence / 100).toFixed(2)}` : null;
+  const amt = amountPence ? `Â£${(amountPence / 100).toFixed(2)}` : null;
   const variantMap: Record<string, PillVariant> = {
     Paid: 'success',
     Refunded: 'brand',
@@ -295,7 +296,7 @@ function depositBadge(status: string, amountPence: number | null) {
 }
 
 /**
- * Confirm attendance when nobody has confirmed yet; “undo” clears guest + staff
+ * Confirm attendance when nobody has confirmed yet; â€œundoâ€ clears guest + staff
  * attendance markers (same PATCH as bookings dashboard lists).
  */
 function canShowDaySheetStaffAttendanceToggle(b: {
@@ -320,7 +321,7 @@ function ordinal(n: number): string {
   return n + (s[(v - 20) % 10] || s[v] || s[0]!);
 }
 
-// ─── FillBar ────────────────────────────────────────────────────────────────
+// â”€â”€â”€ FillBar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function FillBar({ booked, capacity }: { booked: number; capacity: number }) {
   const pct = capacity > 0 ? Math.min(100, Math.round((booked / capacity) * 100)) : 0;
@@ -337,7 +338,7 @@ function FillBar({ booked, capacity }: { booked: number; capacity: number }) {
   );
 }
 
-// ─── Day sheet toolbar summary ───────────────────────────────────────────────
+// â”€â”€â”€ Day sheet toolbar summary â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function DaySheetToolbarSummary({
   summary,
@@ -416,7 +417,7 @@ function DaySheetToolbarSummary({
   );
 }
 
-// ─── ConfirmDialog ──────────────────────────────────────────────────────────
+// â”€â”€â”€ ConfirmDialog â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function ConfirmDialog({ state, onClose }: { state: ConfirmState; onClose: () => void }) {
   return (
@@ -443,7 +444,7 @@ function ConfirmDialog({ state, onClose }: { state: ConfirmState; onClose: () =>
   );
 }
 
-// ─── Main: DaySheetView ─────────────────────────────────────────────────────
+// â”€â”€â”€ Main: DaySheetView â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export function DaySheetView({
   venueId,
@@ -456,7 +457,7 @@ export function DaySheetView({
   currency?: string;
   bookingModel?: BookingModel;
   enabledModels?: BookingModel[];
-  /** When true, linked calendars follow this page's selected date (§8.2). */
+  /** When true, linked calendars follow this page's selected date (Â§8.2). */
   linkFeature?: boolean;
 }) {
   const { addToast } = useToast();
@@ -1219,37 +1220,6 @@ export function DaySheetView({
       ) : null}
     </div>
   );
-  const daySheetSearchPanel = (
-    <div className="space-y-2">
-      <label htmlFor="day-sheet-toolbar-search" className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-        Search
-      </label>
-      <div className="relative">
-        <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-          <svg className="h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
-          </svg>
-        </div>
-        <input
-          id="day-sheet-toolbar-search"
-          type="text"
-          value={filters.search}
-          onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value }))}
-          placeholder="Search guest or party size..."
-          className="w-full rounded-xl border border-slate-200 bg-slate-50/60 py-2 pl-9 pr-3 text-sm placeholder:text-slate-400 focus:border-brand-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-100"
-        />
-      </div>
-      {filters.search.trim() ? (
-        <button
-          type="button"
-          onClick={() => setFilters((f) => ({ ...f, search: '' }))}
-          className="text-xs font-semibold text-brand-600 hover:text-brand-700 hover:underline"
-        >
-          Clear search
-        </button>
-      ) : null}
-    </div>
-  );
 
   return (
     <div className="daysheet-root space-y-4">
@@ -1273,7 +1243,17 @@ export function DaySheetView({
           controlsPanel={daySheetSettingsPanel}
           datePickerPanel={daySheetDatePanel}
           searchActive={filters.search.trim().length > 0}
-          searchPanel={daySheetSearchPanel}
+          searchAriaLabel="Search contacts"
+          searchPanel={(
+            <OperationsToolbarGuestSearchPanel
+              onQueryChange={(q) => setFilters((f) => ({ ...f, search: q }))}
+              initialDate={date}
+              onBookingCreated={() => {
+                setLoading(true);
+                void fetchDaySheet();
+              }}
+            />
+          )}
           trailingActions={
             <button
               type="button"
@@ -1300,11 +1280,11 @@ export function DaySheetView({
       {/* Capacity not configured banner */}
       {!data.capacity_configured && (
         <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-700 print:hidden">
-          Set your venue capacity in Settings → Availability for accurate cover tracking.
+          Set your venue capacity in Settings â†’ Availability for accurate cover tracking.
         </div>
       )}
 
-      {/* ── Print header ── */}
+      {/* â”€â”€ Print header â”€â”€ */}
       <div className="hidden print:block print:mb-4">
         <div className="flex items-baseline justify-between">
           <h1 className="text-lg font-bold text-slate-900">{data.venue_name || 'Venue'}</h1>
@@ -1313,7 +1293,7 @@ export function DaySheetView({
         <p className="text-sm font-medium text-slate-700">{formatDateFull(date)}</p>
       </div>
 
-      {/* ── Dietary Summary ── */}
+      {/* â”€â”€ Dietary Summary â”€â”€ */}
       {data.dietary_summary.length > 0 && (
         <div className="rounded-2xl border border-slate-200 bg-white shadow-sm shadow-slate-900/5 print:border-slate-300 print:shadow-none">
           <button
@@ -1352,7 +1332,7 @@ export function DaySheetView({
         </div>
       )}
 
-      {/* ── Service Period Groups ── */}
+      {/* â”€â”€ Service Period Groups â”€â”€ */}
       {filteredPeriods.length === 0 && data.periods.length === 0 ? (
         <EmptyState
           title={`No bookings for ${formatDateFull(date)}`}
@@ -1379,7 +1359,7 @@ export function DaySheetView({
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <span className="text-sm font-semibold text-slate-800">{period.label}</span>
-                    <span className="text-xs text-slate-500">{period.start_time} – {period.end_time}</span>
+                    <span className="text-xs text-slate-500">{period.start_time} â€“ {period.end_time}</span>
                   </div>
                   <div className="flex items-center gap-3">
                     {period.max_covers != null ? (
@@ -1391,7 +1371,7 @@ export function DaySheetView({
                       </>
                     ) : (
                       <span className="text-xs text-slate-500">
-                        {period.booked_covers} covers · {period.bookings.filter((b) => !isTerminal(b.status)).length} bookings
+                        {period.booked_covers} covers Â· {period.bookings.filter((b) => !isTerminal(b.status)).length} bookings
                       </span>
                     )}
                   </div>
@@ -1449,20 +1429,20 @@ export function DaySheetView({
                               <span className="shrink-0 font-semibold tabular-nums text-slate-700">{b.booking_time.slice(0, 5)}</span>
                               {isTableBooking ? (
                                 <>
-                                  <span className="shrink-0 text-slate-300">·</span>
+                                  <span className="shrink-0 text-slate-300">Â·</span>
                                   <span className="shrink-0 text-[11px] font-medium text-slate-600 sm:text-xs">
                                     {b.party_size} {b.party_size === 1 ? 'cover' : 'covers'}
                                   </span>
                                 </>
                               ) : b.party_size > 1 ? (
                                 <>
-                                  <span className="shrink-0 text-slate-300">·</span>
+                                  <span className="shrink-0 text-slate-300">Â·</span>
                                   <span className="shrink-0 text-[11px] font-medium text-slate-600 sm:text-xs">
                                     {b.party_size} people
                                   </span>
                                 </>
                               ) : null}
-                              <span className="hidden shrink-0 text-slate-300 sm:inline">·</span>
+                              <span className="hidden shrink-0 text-slate-300 sm:inline">Â·</span>
                               <span className="hidden shrink-0 sm:inline-flex">{sourceBadge(b.source)}</span>
                               <BookingStatusPill statusKey={b.status}>{displayStatus}</BookingStatusPill>
                               {isTableBooking && b.area_name ? (
@@ -1657,7 +1637,7 @@ export function DaySheetView({
         />
       ) : null}
 
-      {/* ── Modals ── */}
+      {/* â”€â”€ Modals â”€â”€ */}
       {showWalkIn && (
         <DashboardStaffBookingModal
           open
@@ -1706,7 +1686,7 @@ export function DaySheetView({
         />
       )}
 
-      {/* ── Table Selector (Seat flow) ── */}
+      {/* â”€â”€ Table Selector (Seat flow) â”€â”€ */}
       {seatWithTableBookingId && (
         <div
           className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/20 p-4 backdrop-blur-sm"
@@ -1849,12 +1829,12 @@ export function DaySheetView({
         </section>
       ) : null}
 
-      {/* ── Print Footer (print only) ── */}
+      {/* â”€â”€ Print Footer (print only) â”€â”€ */}
       <div className="hidden print:block print:fixed print:bottom-0 print:left-0 print:right-0 print:border-t print:border-slate-200 print:py-2 print:px-6 print:text-xs print:text-slate-400 print:text-center">
         Printed {new Date().toLocaleString()} - ReserveNI
       </div>
 
-      {/* ── Print styles ── */}
+      {/* â”€â”€ Print styles â”€â”€ */}
       <style>{`
         @media print {
           body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }

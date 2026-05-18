@@ -40,34 +40,44 @@ describe('pickInfoRowCount', () => {
 
 describe('groupInfoRows', () => {
   it('collapses all full booking fields onto one row at the shortest height (calendar priority order)', () => {
-    expect(groupInfoRows(1, false)).toEqual([['name', 'time', 'pill', 'service', 'phone']]);
+    expect(groupInfoRows(1, false)).toEqual([['name', 'service', 'phone', 'time', 'pill']]);
   });
 
   it('expands all full booking fields onto separate rows at the tallest height', () => {
     expect(groupInfoRows(5, false)).toEqual([
       ['name'],
-      ['time'],
-      ['pill'],
       ['service'],
       ['phone'],
+      ['time'],
+      ['pill'],
     ]);
   });
 
-  it('keeps time and status pill together as height grows', () => {
+  it('merges lower-priority fields as height shrinks', () => {
     expect(groupInfoRows(4, false)).toEqual([
       ['name'],
-      ['time', 'pill'],
       ['service'],
       ['phone'],
+      ['time', 'pill'],
     ]);
     expect(groupInfoRows(3, false)).toEqual([
       ['name'],
-      ['time', 'pill'],
       ['service', 'phone'],
+      ['time', 'pill'],
     ]);
     expect(groupInfoRows(2, false)).toEqual([
       ['name'],
-      ['time', 'pill', 'service', 'phone'],
+      ['service', 'phone', 'time', 'pill'],
+    ]);
+  });
+
+  it('lays out segment blocks without name in service-first order', () => {
+    expect(groupInfoRows(1, true)).toEqual([['service', 'phone', 'time', 'pill']]);
+    expect(groupInfoRows(4, true)).toEqual([
+      ['service'],
+      ['phone'],
+      ['time'],
+      ['pill'],
     ]);
   });
 });
@@ -81,24 +91,24 @@ describe('pickVisibleInfoRows', () => {
     pill: 50,
   };
 
-  it('keeps name, time, and status before service and phone on a short row', () => {
+  it('keeps name, service, and phone before time and status on a short row', () => {
     expect(
       pickVisibleInfoRows({
-        rows: [['name', 'time', 'pill', 'service', 'phone']],
+        rows: [['name', 'service', 'phone', 'time', 'pill']],
         availableWidth: 260,
         widths,
       }),
-    ).toEqual([['name', 'time', 'pill']]);
+    ).toEqual([['name', 'service', 'phone']]);
   });
 
-  it('drops phone and service before time when space is very tight', () => {
+  it('drops time and status before service when space is very tight', () => {
     expect(
       pickVisibleInfoRows({
-        rows: [['name', 'time', 'pill', 'service', 'phone']],
+        rows: [['name', 'service', 'phone', 'time', 'pill']],
         availableWidth: 200,
         widths,
       }),
-    ).toEqual([['name', 'time']]);
+    ).toEqual([['name', 'service']]);
   });
 
   it('shows all fields when they have dedicated rows', () => {

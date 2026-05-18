@@ -11,6 +11,7 @@ import {
 import { resolveActiveBookingModels } from '@/lib/booking/active-models';
 import { BookingFlowRouter, type LockedPractitionerBooking } from '@/components/booking/BookingFlowRouter';
 import type { VenuePublic } from '@/components/booking/types';
+import { appointmentAccentStyle } from '@/components/booking/appointment-public-ui';
 
 const EMPTY_ENABLED: BookingModel[] = [];
 
@@ -96,8 +97,14 @@ export function BookPublicBookingFlow({
     );
   }
 
+  const appointmentTabs =
+    activeModel === 'practitioner_appointment' || activeModel === 'unified_scheduling';
+
   return (
-    <div className={embed ? 'space-y-4' : 'space-y-6'}>
+    <div
+      className={`${embed ? 'space-y-4' : 'space-y-6'} ${appointmentTabs ? 'appointment-public' : ''}`.trim()}
+      style={appointmentTabs ? appointmentAccentStyle(accentColour) : undefined}
+    >
       {tabs.length > 1 && (
         <div className={`border-b border-slate-200 pb-2 ${embed ? 'space-y-2' : ''}`} aria-busy={tabPending}>
           <div className={`flex flex-wrap items-center gap-2 ${embed ? 'justify-center' : ''}`}>
@@ -108,9 +115,11 @@ export function BookPublicBookingFlow({
                   key={t.slug}
                   type="button"
                   onClick={() => replaceTabInUrl(t.slug)}
-                  className={`min-h-[44px] rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
+                  className={`min-h-[44px] rounded-full px-4 py-2 text-sm font-semibold transition-colors ${
                     isActive
-                      ? 'bg-brand-600 text-white shadow-sm'
+                      ? appointmentTabs
+                        ? 'ap-tab-active shadow-sm'
+                        : 'bg-brand-600 text-white shadow-sm'
                       : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
                   }`}
                 >
