@@ -61,7 +61,10 @@ COMMENT ON FUNCTION terminate_account_links_for_venue_deletion(uuid) IS
   'Expire live account_links touching a venue before hard-delete. Returns JSON array of {link_id, survivor_venue_id, deleted_venue_name} for partner notifications.';
 
 -- Wire into the existing hard-delete RPC so every deletion path terminates links first.
-CREATE OR REPLACE FUNCTION admin_hard_delete_venue(p_venue_id uuid)
+-- Must DROP first: live DB has RETURNS void from 20260516130000; PG forbids changing return type via CREATE OR REPLACE.
+DROP FUNCTION IF EXISTS admin_hard_delete_venue(uuid);
+
+CREATE FUNCTION admin_hard_delete_venue(p_venue_id uuid)
 RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -115,3 +118,9 @@ BEGIN
   RETURN v_link_partners;
 END;
 $$;
+
+REVOKE ALL ON FUNCTION admin_hard_delete_venue(uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION admin_hard_delete_venue(uuid) TO service_role;
+
+COMMENT ON FUNCTION admin_hard_delete_venue(uuid) IS
+  'Hard-delete a venue and dependent rows; terminates account_links first and returns partner JSON for notifications. Callable only by service_role.';
