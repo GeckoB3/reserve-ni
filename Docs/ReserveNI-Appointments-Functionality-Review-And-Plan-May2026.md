@@ -1,8 +1,9 @@
 # Reserve NI — Appointments Functionality Review & Plan
 
-**Version:** 2.1
-**Date:** 19 May 2026 (status refresh)
+**Version:** 3.0
+**Date:** 19 May 2026
 **Scope:** Appointment-style businesses using **appointments**, **classes**, **ticketed events**, and **bookable resources** — plus shared capabilities (CRM, payments, comms, online booking, staff tools) where they apply to both appointments and restaurants.
+**Engineering status:** Phase 0 (5/6) and Phase 1a (6/6) **complete in-repo**; merged to **`staging`** (commits through `2b7f2bc`). Production pilot rollout (migrations, flags, metrics) is the current gate.
 **Restaurant-only surfaces** (floor plan, table grid, dining waitlist, covers mode) are out of scope except where noted as shared infrastructure.
 **Audience:** Product, engineering, and founding-venue GTM.
 
@@ -19,10 +20,11 @@
 7. [Gap analysis](#7-gap-analysis)
 8. [World-class north star](#8-world-class-north-star)
 9. [Implementation plan](#9-implementation-plan)
-10. [Success metrics](#10-success-metrics)
-11. [Dependencies and risks](#11-dependencies-and-risks)
-12. [Related documents](#12-related-documents)
-13. [Appendix — feature parity checklist](#13-appendix--feature-parity-checklist)
+10. [Recommended next steps](#10-recommended-next-steps)
+11. [Success metrics](#11-success-metrics)
+12. [Dependencies and risks](#12-dependencies-and-risks)
+13. [Related documents](#13-related-documents)
+14. [Appendix — feature parity checklist](#14-appendix--feature-parity-checklist)
 
 ---
 
@@ -30,9 +32,20 @@
 
 Reserve NI is **not a thin appointment scheduler**. It is a **multi-model booking platform** with a mature scheduling engine, unified calendar, deep service catalogue, class/event/resource managers, Stripe Connect payments, communications abstraction, CRM, import tooling, customer account portal, and rare **linked-venue** capabilities. For hybrid and multi-offering independents (salon + classes + pop-up events + room hire), Reserve NI is **already more capable in breadth** than Booksy, Fresha, or Phorest.
 
-Against those competitors on **salon-native daily operations**, Reserve NI is **strong on scheduling mechanics and back-office depth** but **behind on reception-desk workflows and growth distribution**: appointment waitlist automation, guest self-reschedule, consultation compliance (patch tests/forms), marketing/reviews/discovery, and native staff mobile.
+**May 2026 inflection point:** Through Phase 0 and Phase 1a (May 2026), engineering closed the **Tier 1 reception-desk gaps** that previously blocked sales demos: **any-available practitioner**, **guest self-reschedule**, **appointment waitlist v2**, **calendar blocks UI**, unified booking detail, and operational UI primitives on daily paths. These ship **behind per-venue feature flags** (default off) until pilot rollout. The competitive story shifts from *"we're missing desk workflows"* to *"we match Booksy/Fresha on daily desk ops in code; we still trail on polish, compliance, and growth channels."*
 
-**Verdict:** Reserve NI can become **best-in-class for NI and UK independents who need multi-model booking with direct Stripe payouts** — but only if the next 12–18 months deliberately close **Tier 1 operational gaps** (self-service, waitlist, any-stylist) while **preserving differentiators** (classes commerce, linked accounts, import, GDPR CRM, collectives). Competing head-on with Fresha's marketplace, Phorest's full retail POS, or Booksy's marketplace acquisition without a focused wedge is the wrong strategy.
+### 1.1 How Reserve NI compares today (May 2026)
+
+| vs competitor | Reserve NI today | They still lead on |
+|---------------|------------------|-------------------|
+| **Fresha** | Multi-model + Connect + import + linked venues; **desk parity in code** (flags) | Marketplace discovery, integrated POS, loyalty, native app polish, two-way inbox |
+| **Booksy** | Deeper scheduling + CRM + classes/events; waitlist + reschedule + any-stylist **shipped** | Mobile app, social booking, simpler onboarding UX |
+| **Phorest** | Multi-model + GDPR CRM + documents; Stripe direct to venue | Consultation forms, patch tests, salon loyalty (Treatcard), chair POS |
+| **Square / Vagaro / Mindbody** | NI wedge + four models on one calendar | POS hardware, enterprise scale, fitness marketplace |
+
+**Verdict:** Reserve NI is **credible for founding-venue pilots** on the wedge buyer (*appointments + classes/events/rooms*, collectives, migration from spreadsheets/Fresha exports). It is **not yet credible** for compliance-led colour/lash clinics (patch tests), POS-led retail salons, or venues that need Fresha-style discovery. Competing head-on with marketplace acquisition or integrated till without the focused wedge remains the wrong strategy.
+
+**Next 90 days (priority order):** (1) production pilot — migrations + flags + demo script; (2) measure §11.2 baselines; (3) start **Phase 1b** (saved cards, pay-balance, packages); (4) week-12 gate on patch tests; (5) opportunistic P0.1 Wave E — not a pilot gate.
 
 **Strategic posture — POS deliberately out of scope.** Reserve NI's target customers are independents, sole traders, and collectives. They already have working payment hardware (SumUp, Zettle, bank terminals). Many operate as chair-rental collectives where each renter handles their own payments to their own bank — integrated POS would actively complicate, not simplify, their setup. Reserve NI already collects deposits and full pre-payments via Stripe Connect on booking, which covers the no-show-protection and revenue-critical scenarios. **Chair-side retail POS is not on the roadmap.** The pitch is: *"We integrate with your existing terminal rather than replacing it — most of our customers prefer keeping retail payments separate, especially in collective setups."* See §6.2.
 
@@ -43,7 +56,8 @@ Against those competitors on **salon-native daily operations**, Reserve NI is **
 | Win "one platform for appointments + classes + events + rooms" | Try to replicate Fresha Marketplace acquisition |
 | Close reception-desk parity gaps first (reschedule, waitlist, any-stylist) | Build integrated retail POS / inventory / terminal |
 | Lead with Stripe Connect + NI support story | Fork payments into a platform-hold model prematurely |
-| Ship guest self-reschedule + smart waitlist in Q3 2026 | Spend 6 months on design-system-only work with zero workflow wins |
+| **Roll out** guest self-reschedule + waitlist on pilot venues (flags on) | Spend Q3 only on design-system Wave E with zero pilot learnings |
+| Start Phase 1b (saved cards, packages) in Jun–Aug 2026 | Chase Fresha Marketplace or build POS |
 | Integrate with existing card terminals (SumUp/Zettle) where useful | Become a till replacement |
 
 ---
@@ -110,7 +124,19 @@ From product docs and help (`Appointments_Light_Plan_Information.md`, `appointme
 
 Competitors often use **per-bookable-staff-member** pricing (Fresha Team) or tiered salon plans (Phorest Starter/Ultimate/Elite). Reserve NI's **multi-model inclusion on Light** is a competitive **acquisition wedge** if onboarding is fast.
 
-### 3.3 Strategic wedge (honest)
+### 3.3 Competitive stance snapshot (May 2026)
+
+| Axis | Reserve NI | Fresha / Booksy | Phorest |
+|------|------------|-----------------|---------|
+| **Booking breadth** (appt + class + event + resource) | **Leader** | Appointments (+ classes weak) | Appointments (+ retail POS) |
+| **Reception / guest desk ops** | **Parity in code** (flags) | Mature in production | Mature + compliance |
+| **Growth & discovery** | Weak | **Leader** (marketplace, social) | Moderate |
+| **Compliance beauty** | Weak | Moderate | **Leader** |
+| **Payment model** | Connect → venue | Platform / blended | Platform + POS |
+
+Reserve NI leads on **breadth** and **Connect architecture**; matches **desk workflows** after Phase 1a once flags are on in production; still trails on **compliance**, **growth channels**, and **native mobile**.
+
+### 3.4 Strategic wedge (honest)
 
 **Reserve NI wins when the buyer says:**
 
@@ -122,7 +148,7 @@ Competitors often use **per-bookable-staff-member** pricing (Fresha Team) or tie
 
 The first loss is **strategic and accepted** — POS-led salons are not the target customer. The plan below optimises for the wedge buyer while closing blockers for compliance-led beauty over time.
 
-### 3.4 What "feature parity" means in this document
+### 3.5 What "feature parity" means in this document
 
 Where this plan refers to parity with Fresha, Booksy, or Phorest, it refers to **booking, scheduling, CRM, communications, distribution, and reception workflows** — not retail POS, inventory, terminal hardware, or commission/payroll. Reserve NI's target parity surface is the booking platform, not the till.
 
@@ -248,7 +274,7 @@ Maturity key: **● Complete** · **◐ Partial** · **○ Missing**
 | Confirmation + reminders (cron) | ● | `send-communications` |
 | Per-booking staff message | ● | Booking message API |
 | Confirm/cancel SMS link | ● | `/confirm/[token]` |
-| Reschedule notification | ◐ | Staff drag triggers notify; guest-initiated reschedule weak |
+| Reschedule notification | ● | Staff drag: deferred notify (Notify now / Skip / Undo); guest manage-link modify triggers comms when enabled |
 | WhatsApp | ○ | PRD Phase 2 |
 | Two-way SMS inbox | ○ | Fresha-style messaging hub |
 | Review requests post-visit | ○ | All three competitors |
@@ -300,29 +326,66 @@ Maturity key: **● Complete** · **◐ Partial** · **○ Missing**
 
 ## 5. Competitive benchmark
 
-Summary scoring (1 = far behind · 5 = parity or ahead). **POS row included for context only — Reserve NI does not target parity here by design.**
+Summary scoring (1 = far behind · 5 = parity or ahead). **Scores reflect product capability in May 2026** — including features **shipped behind flags** where noted. **POS row is context only** (Reserve NI does not target parity).
 
-| Dimension | Reserve NI | Fresha | Booksy | Phorest |
-|-----------|:----------:|:------:|:------:|:-------:|
-| Multi-model (appt+class+event+resource) | **5** | 2 | 2 | 2 |
-| Scheduling engine depth | **4** | 4 | 4 | 4 |
-| Calendar UX polish | 3 | **5** | 4 | 4 |
-| Bookings list / ops | **4** | 4 | 4 | 4 |
-| Online booking | 4 | **5** | **5** | 4 |
-| Deposits / pre-payment / no-show protection | **4** | 4 | 4 | 4 |
-| POS / chair checkout *(deliberately not targeted)* | 1 | **5** | 4 | **5** |
-| CRM depth (salon) | 3 | 4 | 3 | **5** |
-| Compliance (forms/patch tests) | 1 | 3 | 2 | **5** |
-| Class/membership commerce | **5** | 3 | 2 | 3 |
-| Waitlist (appointments) | 1 | **5** | **5** | 4 |
-| Guest self-service | 2 | **5** | **5** | 4 |
-| Marketing / reviews / discovery | 1 | **5** | 4 | 3 |
-| Native staff mobile | 1 | **5** | **5** | **5** |
-| Linked multi-venue / collectives | **5** | 2 | 1 | 2 |
-| Import / migration | **5** | 3 | 3 | 3 |
-| Direct Stripe Connect payouts | **5** | 3 | 3 | 3 |
+| Dimension | Reserve NI May 2026 | Fresha | Booksy | Phorest | Notes |
+|-----------|:-------------------:|:------:|:------:|:-------:|-------|
+| Multi-model (appt+class+event+resource) | **5** | 2 | 2 | 2 | RN unique wedge |
+| Scheduling engine depth | **4** | 4 | 4 | 4 | Drag-reschedule, buffers, groups |
+| Calendar UX polish | **4** | **5** | 4 | 4 | P0.1 Waves A–D on ops paths; mobile reception still ◐ |
+| Bookings list / ops | **4** | 4 | 4 | 4 | Unified detail (P0.2) |
+| Online booking | 4 | **5** | **5** | 4 | Any-stylist + waitlist join when flags on |
+| Deposits / pre-payment / no-show protection | **4** | 4 | 4 | 4 | Connect direct charge |
+| POS / chair checkout *(not targeted)* | 1 | **5** | 4 | **5** | Strategic non-feature §6.2 |
+| CRM depth (salon) | 3 | 4 | 3 | **5** | Documents/GDPR strong; no photos/loyalty |
+| Compliance (forms/patch tests) | 1 | 3 | 2 | **5** | Blocks colour/lash/brow segment |
+| Class/membership commerce | **5** | 3 | 2 | 3 | Credits, courses, memberships |
+| Waitlist (appointments) | **4** † | **5** | **5** | 4 | `waitlist_v2` — flag `waitlist_v2` |
+| Guest self-service | **4** † | **5** | **5** | 4 | Reschedule on manage link — flag `guest_self_reschedule`; fees → P1b |
+| Marketing / reviews / discovery | 1 | **5** | 4 | 3 | No marketplace, reviews, or Google yet |
+| Native staff mobile | 1 | **5** | **5** | **5** | Responsive web; P5.1 PWA/native |
+| Linked multi-venue / collectives | **5** | 2 | 1 | 2 | Rare in SMB scheduling |
+| Import / migration | **5** | 3 | 3 | 3 | AI column mapping + undo |
+| Direct Stripe Connect payouts | **5** | 3 | 3 | 3 | Venue owns payment relationship |
 
-**Parity target by May 2027:** All dimensions ≥ 4 except POS (remains 1 by design) and marketplace discovery (not pursued).
+† **Production maturity:** scored 4 for **engineered parity**; becomes **5** only after pilot venues run flags for 30+ days with §11.2 metrics met.
+
+### 5.1 Competitive narrative (May 2026)
+
+**Where Reserve NI is ahead (market these):**
+
+1. **One platform, four bookable models** — No competitor in the primary set runs appointments, classes, ticketed events, and resource hire on one calendar, one CRM, and one comms layer without bolt-ons.
+2. **Class commerce** — Credits, courses, memberships, and entitlement rules exceed typical salon “class list” features.
+3. **Linked accounts & collectives** — Cross-venue visibility and `/book/c/{slug}` suit NI salon groups, shared studios, and tourism collectives.
+4. **Migration** — CSV import with AI mapping and 24-hour undo lowers switching cost vs marketplace lock-in.
+5. **Payment architecture** — Stripe Connect direct charges; works with external terminals; suits chair-rental collectives.
+
+**Where Reserve NI is at parity (prove in pilots):**
+
+1. **Reception desk** — Any-stylist pooling, guest reschedule, appointment waitlist, calendar blocks, unified booking detail — **code complete**, flags off by default.
+2. **Scheduling mechanics** — Drag-reschedule, duration resize, processing time, group stacks, deposit policies.
+
+**Where Reserve NI is behind (roadmap, don’t bluff in sales):**
+
+1. **Compliance beauty** — No consultation forms or patch test registry (Phorest gate for colour/lash).
+2. **Growth** — No Fresha/Booksy marketplace, Reserve with Google, Meta booking, or automated review requests.
+3. **Staff daily tool** — No native app or push; tablet web only.
+4. **Salon retention products** — No appointment packages, salon-wide loyalty, or gift cards (class packs ≠ haircut series).
+5. **POS** — Deliberately out of scope; expect losses on POS-led RFPs.
+
+### 5.2 Win / loss guide (sales)
+
+| Buyer says | Outcome | Talk track |
+|------------|---------|------------|
+| “Appointments + classes/events/rooms” | **Win** | One calendar demo; class commerce; import |
+| “Collective / each renter own bank” | **Win** | Connect + §6.2 — booking only, retail on their terminal |
+| “Migrating from Fresha/Booksy export” | **Win** | Import wizard + founder onboarding |
+| “Need patch tests / consultation forms” | **Loss until P1b.5/P2** | Week-12 gate; honest timeline |
+| “Need integrated retail POS” | **Expected loss** | §6.2 — integrate, don’t replace |
+| “Need Fresha discovery / new clients” | **Loss until P3** | Venue-led SEO, widget, collectives; no marketplace |
+| “Just need simple barber app on phone” | **Weak** | Booksy mobile UX; RN P5.1 timeline |
+
+**Parity target by May 2027:** All dimensions ≥ 4 except POS (1 by design) and marketplace discovery (not pursued). **May 2026 progress:** Tier 1 reception dimensions moved from 1–2 → **4†** in engineering; marketing/compliance/mobile remain 1–3.
 
 ---
 
@@ -368,17 +431,20 @@ Reserve NI deliberately does **not** build integrated retail POS, inventory, ter
 
 Gaps grouped by tier. POS removed from all tiers (see §6.2). Patch tests reframed — see Tier 2 notes.
 
-### Tier 1 — Reception desk parity (blocks sales demos)
+### Tier 1 — Reception desk parity — **CLOSED IN ENGINEERING (May 2026)**
 
-| Gap | Why it hurts |
-|-----|--------------|
-| ~~Guest self-reschedule~~ | **Addressed (P1a.2)** — flag `guest_self_reschedule`; E2E smoke on manage link |
-| ~~Appointment waitlist~~ | **Addressed (P1a.3)** — flag `waitlist_v2`; rollout per venue |
-| ~~Any-available practitioner~~ | **Addressed (P1a.1)** — flag `any_available_practitioner`; public + staff |
-| ~~Calendar blocks UI~~ | **Addressed (P1a.4)** — practitioner calendar day/week |
-| ~~Unified booking detail surface~~ | **Addressed (P0.2)** — `BookingDetailSurface` + `BookingDetailContent` |
+| Item | Status | Evidence |
+|------|--------|----------|
+| Guest self-reschedule | **Done** (flagged) | P1a.2 — `guest_self_reschedule`; manage link + `/api/confirm` modify |
+| Appointment waitlist | **Done** (flagged) | P1a.3 — `waitlist_v2`; join, offer, auto-offer on cancel |
+| Any-available practitioner | **Done** (flagged) | P1a.1 — `any_available_practitioner`; public + staff |
+| Calendar blocks UI | **Done** | P1a.4 — practitioner calendar day/week |
+| Unified booking detail | **Done** | P0.2 — `BookingDetailSurface` + `BookingDetailContent` |
+| Calendar card / notify polish | **Done** | P1a.5, P1a.6 |
 
-### Tier 2 — Retention & compliance
+**Remaining Tier 1 risk is rollout, not code:** flags default off; pilots must enable, run the demo script, and measure §11.2 before claiming parity in GTM.
+
+### Tier 2 — Retention & compliance (current sales blockers)
 
 | Gap | Why it hurts |
 |-----|--------------|
@@ -393,7 +459,7 @@ Gaps grouped by tier. POS removed from all tiers (see §6.2). Patch tests refram
 - **(a) Pull forward** — small build (date field, expiry calc, booking-block hook); unlocks segment in Phase 1b
 - **(b) Defer** — accept that compliance-led beauty is not a launch segment; revisit in 2027
 
-This document recommends **(a)** if Phase 1a tracks on schedule, **(b)** if it slips. Decision gate at end of Phase 1a (week 12).
+**May 2026 update:** Phase 1a **tracked on schedule** — recommend **(a) pull forward** patch tests into P1b.5 at the week-12 gate (Aug 2026) unless Phase 1b is overloaded.
 
 ### Tier 3 — Growth & distribution
 
@@ -489,7 +555,7 @@ Horizon: **May 2026 → May 2027** (adjust quarterly). Phases overlap; dependenc
 
 **Implementation status (May 2026):** `Status` = engineering completeness for plan exit. `Production` = ready to enable for founding venues (code + ops). Legend: **Done** · **Partial** · **Not started** · **Flagged** (shipped behind feature flag, default off).
 
-**Snapshot (19 May 2026):** Phase **1a engineering is complete in-repo**. Phase **0** is **5/6 items Done**; **P0.1 remains Partial** (operational modal migration complete; settings/legacy Wave E + `FormField` rollout outstanding). See [§9.5](#95-phase-0--1a--remaining-work-may-2026) for the full remaining checklist.
+**Snapshot (19 May 2026):** Phase **1a engineering is complete in-repo** and on **`staging`**. Phase **0** is **5/6 Done**; **P0.1 Partial** (Waves A–D on operational paths; Wave E + `FormField` outstanding). CI E2E job gated by repo variable `RUN_E2E_SMOKE` ([E2E_SMOKE.md](./E2E_SMOKE.md)). See [§9.5](#95-phase-0--1a--remaining-work-may-2026) and [§10](#10-recommended-next-steps).
 
 ### Phase 0 — Foundation (Weeks 1–6, May–Jun 2026)
 
@@ -500,7 +566,7 @@ Horizon: **May 2026 → May 2027** (adjust quarterly). Phases overlap; dependenc
 | P0.1 | Adopt Radix Dialog/Sheet + shared `Button`/`FormField` (UI plan first sprint) | **Partial** | Yes (critical paths) | **Waves A–D done (May 2026)** — see delivery log. Operational surfaces migrated: practitioner calendar (block/resource/staff booking), appointment services + availability, class/event instance sheets, day sheet, table grid, floor plan, contacts, bookings change-table, shared `DashboardStaffBookingModal`. **Wave E remaining (~30 files):** settings (floor plan editor, tables, staff, comms templates), class timetable/schedule, event manager, import preview, areas modals, `ModifyTableBookingModal`, `AppointmentDetailSheet`, resource timeline, onboarding, super-admin, legacy booking forms. **Not migrated (intentional):** transparent dismiss layers (table-grid cell menu, booking detail backdrop, class popover dismiss). Primitives exist; **`FormField` not yet rolled out** beyond component + stories. ESLint warns on new hand-rolled `fixed inset-0` ([`eslint.config.mjs`](../eslint.config.mjs)). |
 | P0.2 | Unified `BookingDetailSurface` used by calendar, list, contacts | **Done** | Yes | `BookingDetailSurface` (chrome) + `BookingDetailContent` (body) via `BookingDetailPanel` on calendar, list, contacts, floor plan |
 | P0.3 | Feature flags for waitlist-v2, guest-reschedule, any-stylist | **Done** | **Flagged** | [FEATURE_FLAGS.md](./FEATURE_FLAGS.md); per-venue + env overrides |
-| P0.4 | Playwright smoke: book → pay → confirm; guest self-reschedule | **Done** | Conditional | [E2E_SMOKE.md](./E2E_SMOKE.md); tests in-repo; **CI smoke requires GitHub E2E secrets** |
+| P0.4 | Playwright smoke: book → pay → confirm; guest self-reschedule | **Done** | Conditional | [E2E_SMOKE.md](./E2E_SMOKE.md); tests in-repo; CI runs when `vars.RUN_E2E_SMOKE == 'true'` + E2E secrets configured |
 | P0.5 | Update PRD §4 — Linked Accounts shipped; remove POS roadmap | **Done** | Yes | PRD §3.10, §4, glossary |
 | P0.6 | Baseline metrics instrumentation | **Done** | Yes (after migration) | Code + Reports UI + cron in `vercel.json` (Sun 03:00 UTC); **apply** `20260519120000_venue_baseline_metrics_snapshots.sql` on Supabase before first snapshot |
 
@@ -523,18 +589,18 @@ Horizon: **May 2026 → May 2027** (adjust quarterly). Phases overlap; dependenc
 
 **Engineering exit (May 2026):** All P1a.1–P1a.6 items are **Done in-repo**. Tier 1 gaps in §7 are addressed in code; flags default off until pilot rollout.
 
-**Production exit (remaining):** Enable flags on pilot venues, run pilot checklist below, validate sales demo script, refresh help articles (§9.3). Measure §10.2 metrics after baseline migration + first month of flagged usage.
+**Production exit (remaining):** Enable flags on pilot venues, run pilot checklist below, validate sales demo script, refresh help articles (§9.3). Measure §11.2 metrics after baseline migration + first month of flagged usage.
 
 **Exit:** Sales can demo "full reception day" without apologising for missing reschedule, waitlist, or any-stylist. Public conversion improves measurably.
 
-**P1a.2 scope (locked):** Phase 1a is **done** when guests can move their appointment on the manage link within venue min-notice rules (same window as cancellation policy). Charging a fee or forfeiting a deposit on late reschedule is **not** a Phase 1a exit criterion — it ships with **P1b.1** (saved cards + off-session Stripe) so venues are not asked to collect card details twice. The §10.2 guest self-reschedule rate (≥ 15%) measures **staff-free moves**, not fee collection.
+**P1a.2 scope (locked):** Phase 1a is **done** when guests can move their appointment on the manage link within venue min-notice rules (same window as cancellation policy). Charging a fee or forfeiting a deposit on late reschedule is **not** a Phase 1a exit criterion — it ships with **P1b.1** (saved cards + off-session Stripe) so venues are not asked to collect card details twice. The §11.2 guest self-reschedule rate (≥ 15%) measures **staff-free moves**, not fee collection.
 
 **Phase 1a pilot launch checklist**
 
 1. Apply Supabase migration `20260519120000_venue_baseline_metrics_snapshots.sql` (if not already).
 2. Deploy so `vercel.json` cron runs `baseline-metrics-snapshot` (Sundays 03:00 UTC).
 3. Enable beta flags on pilot venues: `any_available_practitioner`, `guest_self_reschedule`, `waitlist_v2`.
-4. Configure GitHub E2E secrets (`E2E_VENUE_SLUG`, `E2E_STRIPE_CONNECTED_ACCOUNT_ID`, …) for CI smoke on PRs.
+4. Set GitHub variable `RUN_E2E_SMOKE=true` and E2E secrets (`E2E_VENUE_SLUG`, `E2E_STRIPE_CONNECTED_ACCOUNT_ID`, …) for CI smoke on PRs.
 5. Sales demo script: any-stylist book → guest reschedule on manage link → waitlist offer on cancel.
 6. Re-run `node scripts/seed-e2e-smoke-venue.mjs` after pulling (enables flags + `booking_rules.cancellation_notice_hours: 1` for E2E reschedule).
 
@@ -547,7 +613,8 @@ Engineering completed in-repo; production still requires migration, deploy, and 
 | Date / sprint | ID | Deliverable |
 |---------------|-----|-------------|
 | May 2026 | P0.3 | Feature flags: `waitlist_v2`, `guest_self_reschedule`, `any_available_practitioner` — [FEATURE_FLAGS.md](./FEATURE_FLAGS.md) |
-| May 2026 | P0.4 | Playwright: book/pay/confirm + guest self-reschedule on manage link; shared helpers; CI when secrets set; seed enables Phase 1a flags + 1h cancellation notice |
+| May 2026 | P0.4 | Playwright: book/pay/confirm + guest self-reschedule on manage link; shared helpers; CI gated by `RUN_E2E_SMOKE`; seed enables Phase 1a flags + 1h cancellation notice |
+| May 2026 | — | Staging deploy: Phase 0/1a bundle + CI workflow fix (`RUN_E2E_SMOKE`); Vitest excludes `e2e/`; linked-bookings flash fix |
 | May 2026 | P0.5 | PRD §3.10 Linked Accounts; POS removed from roadmap |
 | May 2026 | P0.6 | `venue_baseline_metrics_snapshots` migration; compute/capture lib; Reports card; cron `baseline-metrics-snapshot` in `vercel.json` (Sun 03:00 UTC) — [BASELINE_METRICS.md](./BASELINE_METRICS.md) |
 | May 2026 | P0.1 Wave A | Radix `Dialog` / `ConfirmDialog` on staff booking modal, walk-in, bookings confirm, calendar block/resource modals |
@@ -582,8 +649,8 @@ Engineering completed in-repo; production still requires migration, deploy, and 
 | ID | Remaining | Owner | Blocks pilots? |
 |----|-----------|-------|----------------|
 | **P0.1** | **Wave E:** migrate ~30 remaining hand-rolled overlays (settings, class timetable, import, areas, legacy booking modals, super-admin, onboarding). Roll out **`FormField`** on high-traffic forms. | Eng | **No** — operational paths (Waves A–D) are migrated |
-| **P0.4** | Configure GitHub **E2E secrets** so Playwright smoke runs on PRs | Eng / DevOps | **No** — tests runnable locally; CI optional for pilots |
-| **P0.6** | **Apply** baseline metrics migration on production Supabase; verify Sunday cron captures first snapshot | Eng / Ops | **Yes** for §10.2 baseline comparison — not for feature demos |
+| **P0.4** | Set `RUN_E2E_SMOKE=true` + GitHub **E2E secrets** so Playwright smoke runs on PRs | Eng / DevOps | **No** — tests runnable locally; CI optional for pilots |
+| **P0.6** | **Apply** baseline metrics migration on production Supabase; verify Sunday cron captures first snapshot | Eng / Ops | **Yes** for §11.2 baseline comparison — not for feature demos |
 
 **Phase 0 items with no engineering work left:** P0.2, P0.3, P0.5.
 
@@ -594,11 +661,11 @@ Engineering completed in-repo; production still requires migration, deploy, and 
 | **Database** | Apply `20260519120000_venue_baseline_metrics_snapshots.sql` if not already | Eng / Ops | Shared with P0.6 |
 | **Deploy** | Deploy app so `vercel.json` cron runs `baseline-metrics-snapshot` (Sun 03:00 UTC) | Eng / Ops | |
 | **Feature flags** | Enable on pilot venues: `any_available_practitioner`, `guest_self_reschedule`, `waitlist_v2` | Product / CS | Per [FEATURE_FLAGS.md](./FEATURE_FLAGS.md) |
-| **E2E** | Configure `E2E_VENUE_SLUG`, `E2E_STRIPE_CONNECTED_ACCOUNT_ID`, etc. | Eng | See [E2E_SMOKE.md](./E2E_SMOKE.md) |
+| **E2E** | Set `RUN_E2E_SMOKE=true` + `E2E_VENUE_SLUG`, `E2E_STRIPE_CONNECTED_ACCOUNT_ID`, etc. | Eng | See [E2E_SMOKE.md](./E2E_SMOKE.md) |
 | **Seed** | Re-run `node scripts/seed-e2e-smoke-venue.mjs` after pull (flags + 1h cancellation notice for reschedule E2E) | Eng | |
 | **GTM** | Run sales demo: any-stylist book → guest reschedule on manage link → waitlist offer on cancel | GTM | Pilot checklist §Phase 1a |
 | **Docs** | Refresh help articles when flags go live (§9.3) | Product + eng | |
-| **Metrics** | Start measuring §10.2 targets after ~30 days of flagged pilot usage | Product | Reschedule rate, waitlist conversion, any-stylist rate |
+| **Metrics** | Start measuring §11.2 targets after ~30 days of flagged pilot usage | Product | Reschedule rate, waitlist conversion, any-stylist rate |
 
 **Phase 1a items with no engineering work left:** P1a.1–P1a.6 (all **Done** in-repo).
 
@@ -723,16 +790,73 @@ From `.cursor/rules` and unified booking doc:
 
 ---
 
-## 10. Success metrics
+## 10. Recommended next steps
 
-### 10.1 Pilot / founding venue (qualitative)
+Prioritised actions after the May 2026 engineering milestone. **Do not start Phase 2 growth work until pilots validate Tier 1 in production.**
+
+### 10.1 Immediate — production pilot (Weeks 1–4)
+
+| # | Action | Owner | Why |
+|---|--------|-------|-----|
+| 1 | Apply Supabase migrations on staging/production: `20260519120000_venue_baseline_metrics_snapshots.sql`, `20260520120000_venue_feature_flags.sql`, `20260521120000_appointment_waitlist.sql` | Eng / Ops | Baselines + flags + waitlist schema |
+| 2 | Deploy `staging` → production; confirm `vercel.json` cron `baseline-metrics-snapshot` (Sun 03:00 UTC) and `CRON_SECRET` | Eng / Ops | §11.2 metrics need snapshots |
+| 3 | Enable pilot flags: `any_available_practitioner`, `guest_self_reschedule`, `waitlist_v2` (Settings → Beta features or env on staging) | Product / CS | Tier 1 only valuable when on |
+| 4 | Run **sales demo script** end-to-end: any-stylist book → guest reschedule on manage link → waitlist offer on cancel | GTM + Product | Proves competitive desk story |
+| 5 | Refresh help articles for waitlist, self-reschedule, any-stylist (§9.3) | Product + eng | Avoid support confusion |
+| 6 | Verify GitHub Actions green; optionally set `RUN_E2E_SMOKE=true` + E2E secrets | Eng | Regression safety on PRs |
+
+### 10.2 Near-term product engineering (Jun–Aug 2026)
+
+| Priority | Work | Rationale |
+|----------|------|-----------|
+| **P0** | **Phase 1b** — P1b.1 saved cards, P1b.2 pay-balance link, P1b.3 appointment packages | Unlocks late reschedule fees, retention, cash flow; class commerce is the template |
+| **P1** | **Week-12 gate (Aug 2026):** P1b.5 patch test registry *or* defer to P2.2 | Unlocks colour/lash/brow segment if pulled forward |
+| **P2** | P2.3 review request automation | Cheap marketing parity; no marketplace needed |
+| **P3** | P0.1 Wave E + `FormField` on settings/import paths | UX debt; **not** a pilot gate |
+| **Defer** | P3.1 Google, P5.1 staff app until 1b + pilot metrics | Growth/mobile after desk + payment story validated |
+
+### 10.3 GTM and positioning (parallel)
+
+| Action | Detail |
+|--------|--------|
+| **Battlecard v2** | Lead: multi-model + collectives + import + Connect; **honest on:** patch tests, POS, marketplace |
+| **Pilot cohort** | 3–5 founding venues: at least one **hybrid** (appt + class/event) and one **salon-only** with flags on |
+| **Win/loss CRM** | Tag every deal with §5.2 reasons; review monthly |
+| **Appointments Light landing** | “One platform for appointments, classes, events, and rooms — works with your existing card terminal” |
+| **Do not pitch** | Integrated POS, Fresha discovery parity, native app “today” |
+
+### 10.4 What to measure before declaring “parity”
+
+After **30 days** of flagged pilot usage, review §11.2:
+
+- Guest self-reschedule rate ≥ 15%
+- Waitlist conversion ≥ 25% of offers accepted
+- Any-stylist rate ≥ 30% of new public bookings (where offered)
+
+If metrics miss targets, fix UX/ops (not new features) before Phase 2 scope expansion.
+
+### 10.5 Suggested quarterly roadmap (May 2026 → May 2027)
+
+| Quarter | Focus |
+|---------|--------|
+| **Q2 2026** | Pilot rollout + Phase 1b start |
+| **Q3 2026** | Phase 1b complete; patch-test gate; review requests (P2.3) |
+| **Q4 2026** | Phase 2 compliance (forms, patch tests if not in 1b); salon loyalty scoping |
+| **Q1 2027** | Phase 3 growth (Google, WhatsApp); gift cards scoping |
+| **Q2 2027** | Phase 5 staff PWA MVP; advanced analytics |
+
+---
+
+## 11. Success metrics
+
+### 11.1 Pilot / founding venue (qualitative)
 
 - Owner completes first paid online booking within 48 hours of onboarding
 - Staff report phone booking is **faster than paper** (PRD §2.2)
 - ≥ 1 venue runs **two non-appointment models** (class/event/resource) in production
 - ≥ 1 collective venue operates with **independent chair-renter payment flows** using Reserve NI for booking only
 
-### 10.2 Product metrics (6 months post Phase 1a)
+### 11.2 Product metrics (6 months post Phase 1a)
 
 Baseline captured in P0.6.
 
@@ -745,7 +869,7 @@ Baseline captured in P0.6.
 | Time-to-book (staff) | Median < 45s for returning client | P0.6 baseline |
 | Import completion rate | ≥ 80% of migrations finish wizard | Current funnel |
 
-### 10.3 Competitive win/loss tracking (sales)
+### 11.3 Competitive win/loss tracking (sales)
 
 Track loss reasons in CRM:
 
@@ -759,7 +883,7 @@ If "Need POS" exceeds **20% of losses for two consecutive quarters**, revisit §
 
 ---
 
-## 11. Dependencies and risks
+## 12. Dependencies and risks
 
 | Risk | Mitigation |
 |------|------------|
@@ -771,11 +895,13 @@ If "Need POS" exceeds **20% of losses for two consecutive quarters**, revisit §
 | Multi-model complexity confuses salon-only buyers | **Venue presets** in onboarding: "Salon", "Studio", "Collective", "Hybrid" nav |
 | PRD stale vs code (Linked Accounts) | Addressed in P0.5 (PRD §3.10) |
 | Patch test pull-forward overcommits Phase 1b | Week-12 decision gate — explicit go/no-go, not optional |
-| "No POS" pitch fails in market | Track in 10.3; revisit only if losses exceed 20% threshold |
+| "No POS" pitch fails in market | Track in §11.3; revisit only if losses exceed 20% threshold |
+| Pilot flags left off | Product enables on pilot venues; GTM demo script requires flags on |
+| Migration not applied before pilot | Checklist §10.1 — waitlist/baselines/flags tables |
 
 ---
 
-## 12. Related documents
+## 13. Related documents
 
 | Document | Relevance |
 |----------|-----------|
@@ -786,22 +912,25 @@ If "Need POS" exceeds **20% of losses for two consecutive quarters**, revisit §
 | `Docs/reserveni-linked-accounts-spec.md` | Linked venue feature spec |
 | `Docs/Appointments_Light_Plan_Information.md` | Light tier GTM |
 | `Docs/ACCOUNT_MVP_GAP_REPORT.md` | Customer portal status |
+| `Docs/FEATURE_FLAGS.md` | Phase 1a flag keys and rollout |
+| `Docs/E2E_SMOKE.md` | Playwright smoke + `RUN_E2E_SMOKE` CI gate |
+| `Docs/BASELINE_METRICS.md` | P0.6 baseline snapshots |
 | `src/lib/planning/phase3-backlog.ts` | Engineering backlog seed |
 | `src/lib/help/articles/appointments.ts` | User-facing capability reference |
 
 ---
 
-## 13. Appendix — feature parity checklist
+## 14. Appendix — feature parity checklist
 
 Use for quarterly reviews. **Target column:** May 2027 world-class goal.
 
 | Feature | Reserve NI May 2026 | Target May 2027 |
 |---------|---------------------|-----------------|
 | Day/week/month calendar | Yes | Yes + mobile-optimised |
-| Drag-reschedule | Yes | Yes + guest self-serve |
+| Drag-reschedule | Yes | Yes + guest self-serve (flagged) |
 | Service variants & buffers | Yes | Yes |
 | Multi-service appointment | Yes | Yes |
-| Any-available stylist | No | Yes |
+| Any-available stylist | Yes (flag `any_available_practitioner`) | Yes — default on for new salons |
 | Walk-in booking | Yes | Yes |
 | Class timetable + roster | Yes | Yes + PDF roster optional |
 | Event tickets + tiers | Yes | Yes |
@@ -818,7 +947,7 @@ Use for quarterly reviews. **Target column:** May 2027 world-class goal.
 | Gift cards | No | Yes |
 | Appointment packages | No | Yes |
 | Class credits/memberships | Yes | Yes |
-| Appointment waitlist | No | Yes |
+| Appointment waitlist | Yes (flag `waitlist_v2`) | Yes — default on for new salons |
 | Table waitlist | Yes (restaurant) | Unchanged |
 | Consultation forms | No | Yes |
 | Patch tests | No | Yes |
@@ -826,7 +955,8 @@ Use for quarterly reviews. **Target column:** May 2027 world-class goal.
 | Loyalty points | No | Yes |
 | Bulk SMS/email | Yes | Yes |
 | Review requests | No | Yes |
-| Guest account portal | Yes | Yes + reschedule + saved cards |
+| Guest self-reschedule (manage link) | Yes (flag `guest_self_reschedule`) | Yes — default on |
+| Guest account portal | Yes | Yes + saved cards (P1b) |
 | iFrame widget | Yes | Yes |
 | Google booking | No | Yes (if approved) |
 | Social booking | No | Partial |
@@ -842,24 +972,33 @@ Use for quarterly reviews. **Target column:** May 2027 world-class goal.
 
 ## Summary
 
-Reserve NI's appointments functionality is **already deep and unusually broad**. The path to **world-class** is not "add what Fresha has, feature by feature" — it is:
+Reserve NI's appointments functionality is **deep, unusually broad, and — as of May 2026 — reception-desk competitive in code**. The platform is **not** trying to beat Fresha on marketplace discovery or Phorest on integrated POS. It wins the **wedge buyer**: multi-model independents, collectives, and migrators who need **one calendar, direct Stripe payouts, and import** — and who already have a card terminal.
 
-1. **Close the reception loop** (any-stylist, reschedule, waitlist) — Phase 1a
-2. **Tighten the payment-at-booking experience** without expanding into POS — Phase 1b
-3. **Win compliance-led beauty** (forms, patch tests) — Phase 2 (or Phase 1b conditionally)
-4. **Ship growth channels** (Google, WhatsApp, reviews) without building a marketplace — Phase 3
-5. **Complement existing card terminals** rather than replace them — Phase 4
-6. **Free engineering capacity from the no-POS decision** for staff app, analytics, and roster — Phase 5
-7. **Keep winning multi-model, collective, and NI-specific stories** competitors cannot copy quickly — Phase 6
+### Achieved (May 2026)
 
-**POS is deliberately not on this roadmap.** Reserve NI's target customers (independents, sole traders, collectives) have working payment hardware and structural reasons to keep retail flows separate from booking. The data model stays open for POS in 2028+ if demand materially shifts; until then, integrate, don't replace.
+| Area | Status |
+|------|--------|
+| **Phase 0** | 5/6 Done — unified booking detail, feature flags, E2E smoke, PRD sync, baseline metrics; P0.1 Partial (Waves A–D on ops paths) |
+| **Phase 1a** | 6/6 Done in engineering — any-stylist, guest reschedule, waitlist v2, calendar blocks, card UX, modification notify |
+| **Staging** | Deployed (`staging` branch through `2b7f2bc`) |
+| **Competitive desk parity** | Engineered (scores ↑ to **4†** for waitlist + guest self-service — see §5); **production proof pending** |
 
-**Phase 0 (May 2026):** **5/6 Done** — P0.2–P0.6 complete; **P0.1 Partial** (Waves A–D on operational surfaces; Wave E + `FormField` rollout remain). Ops: apply baseline migration; optional E2E CI secrets.
+### vs competitors (headline)
 
-**Phase 1a (May 2026):** **6/6 Done in engineering** — any-stylist, guest reschedule, waitlist v2, calendar blocks, card simplification, modification notify. **Production rollout** remains: pilot checklist (flags, deploy, demo, help articles, metrics).
+- **Ahead:** multi-model booking, class commerce, linked venues/collectives, import, Stripe Connect architecture
+- **At parity (flagged):** appointment waitlist, guest reschedule, any-stylist, scheduling depth
+- **Behind:** patch tests/forms, marketplace/Google/social, review automation, native staff app, appointment packages, salon loyalty
 
-**Next product slice:** **Phase 1b** (saved cards, pay-balance, packages). Treat P0.1 Wave E as **ongoing UX debt**, not a gate for pilots. Revisit in **August 2026** for the week-12 patch-test gate (P1b.5 vs P2.2).
+### What to do next (see §10)
+
+1. **Pilot rollout** — migrations, deploy, enable flags, demo script, help articles
+2. **Measure** — §11.2 metrics after 30 days on pilot venues
+3. **Build Phase 1b** — saved cards, pay-balance, appointment packages
+4. **August 2026 gate** — patch tests pull-forward (P1b.5) vs defer (P2.2)
+5. **GTM** — battlecard v2; do not pitch POS or marketplace parity
+
+**POS remains deliberately off the roadmap.** Integrate with existing terminals; do not replace them.
 
 ---
 
-*Document owner: Product. Last updated: 19 May 2026 (v2.1 — Phase 0/1a status refresh). Next review: August 2026.*
+*Document owner: Product. Last updated: 19 May 2026 (v3.0 — competitive position, achievements, next steps). Next review: August 2026 (week-12 patch-test gate).*
