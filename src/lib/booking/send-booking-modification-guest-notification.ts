@@ -9,9 +9,10 @@ import { enrichBookingEmailForComms } from '@/lib/emails/booking-email-enrichmen
 import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
 import type { BookingEmailData } from '@/lib/emails/types';
 import { sendBookingModificationNotification } from '@/lib/communications/send-templated';
+import { resolveCommPolicy } from '@/lib/communications/policy-resolver';
 import { createOrGetBookingShortLink } from '@/lib/booking-short-links';
 import { formatGuestDisplayName } from '@/lib/guests/name';
-import { getVenueNotificationSettings } from '@/lib/notifications/notification-settings';
+import { inferBookingRowModel } from '@/lib/booking/infer-booking-row-model';
 import type { BookingModificationNotifyResult } from '@/lib/booking/modification-notify-result';
 
 export async function executeBookingModificationGuestNotification(
@@ -35,13 +36,38 @@ export async function executeBookingModificationGuestNotification(
     return { emailSent: false, smsSent: false, skipped: true, skippedReason: 'Booking not found' };
   }
 
-  const notificationSettings = await getVenueNotificationSettings(venueId);
-  if (!notificationSettings.reschedule_notification_enabled) {
+  const bookingModel = inferBookingRowModel(
+    bookingRow as {
+      booking_model?: string | null;
+      experience_event_id?: string | null;
+      class_instance_id?: string | null;
+      resource_id?: string | null;
+      event_session_id?: string | null;
+      calendar_id?: string | null;
+      service_item_id?: string | null;
+      practitioner_id?: string | null;
+      appointment_service_id?: string | null;
+    },
+  );
+  const modificationPolicy = await resolveCommPolicy({
+    venueId,
+    messageKey: 'booking_modification',
+    bookingModel,
+  });
+  if (!modificationPolicy.enabled) {
     return {
       emailSent: false,
       smsSent: false,
       skipped: true,
-      skippedReason: 'Reschedule notifications are turned off in venue settings.',
+      skippedReason: 'Booking modification notifications are turned off in Communications settings.',
+    };
+  }
+  if (modificationPolicy.channels.length === 0) {
+    return {
+      emailSent: false,
+      smsSent: false,
+      skipped: true,
+      skippedReason: 'No channels enabled for booking modification notifications.',
     };
   }
 
@@ -94,6 +120,7 @@ export async function executeBookingModificationGuestNotification(
     deposit_amount_pence: br.deposit_amount_pence ?? null,
     deposit_status: br.deposit_status ?? null,
     manage_booking_link: manageLink,
+    booking_model: bookingModel,
   };
 
   const venueEmailData = venueRowToEmailData({

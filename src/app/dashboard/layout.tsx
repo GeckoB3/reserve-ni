@@ -28,8 +28,9 @@ import { SupportSessionControls } from '@/components/dashboard/SupportSessionCon
 import { StaffRebookBootstrapRouteCleanup } from '@/components/dashboard/StaffRebookBootstrapRouteCleanup';
 import { isVenueSubscriptionExpiredCancelled } from '@/lib/billing/subscription-entitlement';
 import { LinkedAccountBanner } from '@/components/linked-accounts/LinkedAccountBanner';
+import { WaitlistAvailabilityBanner } from '@/components/dashboard/waitlist/WaitlistAvailabilityBanner';
 import { isRestaurantTableProductTier } from '@/lib/tier-enforcement';
-import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlags } from '@/lib/feature-flags';
+import { DEFAULT_RESOLVED_APPOINTMENTS_FEATURE_FLAGS, parseVenueFeatureFlags, resolveAppointmentsFeatureFlags } from '@/lib/feature-flags';
 import { VenueFeatureFlagsProvider } from '@/components/providers/VenueFeatureFlagsProvider';
 import type { ResolvedAppointmentsFeatureFlags } from '@/lib/feature-flags';
 
@@ -63,11 +64,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
   let onboardingCompleted = true;
   let venueTerminology: Record<string, unknown> | null = null;
   let venueBootstrap: DashboardVenueBootstrapValue | null = null;
-  let appointmentsFeatureFlags: ResolvedAppointmentsFeatureFlags = {
-    waitlist_v2: false,
-    guest_self_reschedule: false,
-    any_available_practitioner: false,
-  };
+  let appointmentsFeatureFlags: ResolvedAppointmentsFeatureFlags =
+    DEFAULT_RESOLVED_APPOINTMENTS_FEATURE_FLAGS;
   try {
     const staff = await getDashboardStaff(supabase);
     const admin = staff.db;
@@ -181,6 +179,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
       <DashboardShell
         venueId={venueId}
         initialTableManagementEnabled={tableManagementEnabled}
+        initialAppointmentWaitlistEnabled={appointmentsFeatureFlags.waitlist_v2}
         supportSessionToolbar={
           supportSession ? (
             <SupportSessionControls expiresAtIso={supportSession.expiresAt} />
@@ -283,6 +282,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
           </div>
         )}
         {isAdmin && !isRestaurantTableProductTier(pricingTier) ? <LinkedAccountBanner /> : null}
+        <WaitlistAvailabilityBanner />
         {venueId && !supportSession ? <SessionTimeoutGuard venueId={venueId} /> : null}
         <StaffRebookBootstrapRouteCleanup />
         <VenueFeatureFlagsProvider flags={appointmentsFeatureFlags}>

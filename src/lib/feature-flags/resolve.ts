@@ -12,6 +12,21 @@ const ENV_BY_FLAG: Record<AppointmentsFeatureFlagKey, string> = {
   any_available_practitioner: 'FEATURE_FLAG_ANY_AVAILABLE_PRACTITIONER',
 };
 
+/** Per-flag defaults when venue storage omits the key (env override still wins). */
+const FLAG_DEFAULT_ON: Partial<Record<AppointmentsFeatureFlagKey, boolean>> = {
+  guest_self_reschedule: true,
+};
+
+function defaultAppointmentsFeatureFlagValue(flag: AppointmentsFeatureFlagKey): boolean {
+  return FLAG_DEFAULT_ON[flag] ?? false;
+}
+
+export const DEFAULT_RESOLVED_APPOINTMENTS_FEATURE_FLAGS: ResolvedAppointmentsFeatureFlags =
+  APPOINTMENTS_FEATURE_FLAG_KEYS.reduce((acc, key) => {
+    acc[key] = defaultAppointmentsFeatureFlagValue(key);
+    return acc;
+  }, {} as ResolvedAppointmentsFeatureFlags);
+
 function parseEnvOverride(value: string | undefined): boolean | null {
   if (value === undefined || value.trim() === '') return null;
   const normalized = value.trim().toLowerCase();
@@ -34,7 +49,8 @@ export function parseVenueFeatureFlags(raw: unknown): VenueFeatureFlags {
 }
 
 /**
- * Resolve a single flag: env override wins, then per-venue `true`, else default false.
+ * Resolve a single flag: env override wins, then explicit venue value, else per-flag default.
+ * Most flags default off; `guest_self_reschedule` defaults on unless explicitly `false`.
  */
 export function resolveAppointmentsFeatureFlag(
   flag: AppointmentsFeatureFlagKey,
@@ -42,7 +58,9 @@ export function resolveAppointmentsFeatureFlag(
 ): boolean {
   const envOverride = parseEnvOverride(process.env[ENV_BY_FLAG[flag]]);
   if (envOverride !== null) return envOverride;
-  return venueFlags?.[flag] === true;
+  const venueValue = venueFlags?.[flag];
+  if (venueValue === true || venueValue === false) return venueValue;
+  return defaultAppointmentsFeatureFlagValue(flag);
 }
 
 export function resolveAppointmentsFeatureFlags(
@@ -65,7 +83,13 @@ export function mergeVenueFeatureFlagsPatch(
     const value = patch[key];
     if (value === undefined) continue;
     if (value === true) {
-      next[key] = true;
+      if (key === 'guest_self_reschedule') {
+        delete next[key];
+      } else {
+        next[key] = true;
+      }
+    } else if (key === 'guest_self_reschedule') {
+      next[key] = false;
     } else {
       delete next[key];
     }
@@ -75,19 +99,32 @@ export function mergeVenueFeatureFlagsPatch(
   } else if (patch.any_available_practitioner_config !== undefined) {
     next.any_available_practitioner_config = patch.any_available_practitioner_config;
   }
+  if (patch.waitlist_config !== undefined) {
+    next.waitlist_config = patch.waitlist_config;
+  }
+  if (patch.waitlist_v2 === false) {
+    delete next.waitlist_config;
+  }
   return next;
 }
 
 export function venueFeatureFlagsForStorage(flags: VenueFeatureFlags): Record<string, unknown> {
   const stored: Record<string, unknown> = {};
   for (const key of APPOINTMENTS_FEATURE_FLAG_KEYS) {
-    if (flags[key] === true) stored[key] = true;
+    if (flags[key] === true) {
+      if (key !== 'guest_self_reschedule') stored[key] = true;
+    } else if (key === 'guest_self_reschedule' && flags[key] === false) {
+      stored[key] = false;
+    }
   }
   if (
     flags.any_available_practitioner === true &&
     flags.any_available_practitioner_config
   ) {
     stored.any_available_practitioner_config = flags.any_available_practitioner_config;
+  }
+  if (flags.waitlist_config) {
+    stored.waitlist_config = flags.waitlist_config;
   }
   return stored;
 }

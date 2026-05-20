@@ -21,7 +21,7 @@ const joinSchema = z.object({
   practitioner_id: z.string().uuid().optional(),
   first_name: z.string().min(1).max(100),
   last_name: z.string().min(1).max(100),
-  guest_email: z.string().email().optional().or(z.literal('')),
+  guest_email: z.string().trim().email(),
   guest_phone: z.string().min(1).max(24),
   notes: z.string().max(500).optional(),
 });
@@ -122,7 +122,7 @@ export async function POST(request: NextRequest) {
         party_size: 1,
         guest_first_name: guestFirst,
         guest_last_name: guestLast,
-        guest_email: parsed.data.guest_email || null,
+        guest_email: parsed.data.guest_email.trim().toLowerCase(),
         guest_phone: guestPhoneE164,
         notes: parsed.data.notes || null,
       })

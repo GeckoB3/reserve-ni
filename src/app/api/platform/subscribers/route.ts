@@ -4,6 +4,7 @@ import {
   formatPeriodByModelSummary,
   resolveVenueEnabledModelLabels,
 } from '@/lib/platform/subscriber-report';
+import { isPlatformAuthFailure, requirePlatformSuperuserAuth } from '@/lib/platform-api-auth';
 
 function parseUtcDateStart(isoDate: string): Date | null {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate.trim());
@@ -31,7 +32,7 @@ function defaultRange(): { from: Date; toExclusive: Date } {
 /**
  * GET /api/platform/subscribers
  *
- * Subscriber intelligence for platform superusers. Middleware enforces access.
+ * Subscriber intelligence for platform superusers.
  *
  * Query:
  *   from       – optional YYYY-MM-DD (UTC start of day)
@@ -40,6 +41,9 @@ function defaultRange(): { from: Date; toExclusive: Date } {
  */
 export async function GET(req: NextRequest) {
   try {
+    const auth = await requirePlatformSuperuserAuth();
+    if (isPlatformAuthFailure(auth)) return auth;
+
     const { searchParams } = req.nextUrl;
     const search = searchParams.get('search')?.trim() ?? '';
 

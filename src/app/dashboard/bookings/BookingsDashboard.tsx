@@ -66,6 +66,7 @@ import { readSessionPreference, writeSessionPreference } from '@/lib/ui/session-
 import type { GuestHistoryRelatedBookingPayload } from '@/app/dashboard/bookings/GuestBookingsForGuestAccordion';
 import { expandedBookingRowShellClass } from '@/app/dashboard/bookings/booking-expand-accordion-classes';
 import { bindDetailPrefetchHandlers } from '@/lib/dashboard/detail-prefetch-intent';
+import { scheduleWaitlistAlertsRefresh } from '@/lib/booking/waitlist-alerts-events';
 import { bookingDetailLiteFromCachePayload } from '@/lib/booking/resolve-booking-detail-lite';
 import { bookingDetailLiteFromListRow } from '@/lib/booking/booking-detail-from-row';
 import { warmIdsWithConcurrency } from '@/lib/dashboard/venue-detail-swr';
@@ -1027,6 +1028,9 @@ export function BookingsDashboard({
         current_state: { bookingId, status: newStatus },
       });
       addToast('Booking status updated', 'success');
+      if (newStatus === 'Cancelled') {
+        scheduleWaitlistAlertsRefresh();
+      }
     } catch {
       setBookings((prev) => prev.map((booking) => booking.id === bookingId ? { ...booking, status: previous } : booking));
       setError(`Could not update booking status for ${bookingId.slice(0, 8).toUpperCase()}.`);
@@ -1167,7 +1171,7 @@ export function BookingsDashboard({
 
   const requestStatusChange = useCallback((booking: BookingRow, nextStatus: BookingStatus) => {
     if (!canTransitionBookingStatus(booking.status, nextStatus)) return;
-    if (nextStatus === 'No-Show' && !canMarkNoShowForSlot(booking.booking_date, booking.booking_time, noShowGraceMinutes)) {
+    if (nextStatus === 'No-Show' && !canMarkNoShowForSlot(booking.booking_date, booking.booking_time, noShowGraceMinutes, venueTimezone)) {
       setError(`No-show can only be marked ${noShowGraceMinutes} minutes after the booking start time.`);
       return;
     }
@@ -1203,7 +1207,7 @@ export function BookingsDashboard({
       return;
     }
     void updateBookingStatus(booking.id, nextStatus);
-  }, [updateBookingStatus, noShowGraceMinutes]);
+  }, [updateBookingStatus, noShowGraceMinutes, venueTimezone]);
 
   const runBulkMessage = useCallback(async (message: string, channel: GuestMessageChannel) => {
     if (selectedIds.length === 0) return;
@@ -1298,6 +1302,7 @@ export function BookingsDashboard({
         );
       } else {
         addToast(`${okCount} booking(s) cancelled`, 'success');
+        scheduleWaitlistAlertsRefresh();
       }
       setSelectedIds([]);
       void fetchBookings({ silent: true });

@@ -85,6 +85,7 @@ function messageKeyTitle(key: CommunicationMessageKey): string {
     custom_message: 'Custom message',
     no_show_notification: 'No-show notification',
     post_visit_thankyou: 'Post-visit thank you',
+    appointment_waitlist_offer: 'Waitlist invite',
   };
   return titles[key];
 }
@@ -216,13 +217,12 @@ export function getEmailTemplateGalleryItems(): EmailGalleryItem[] {
     guestName: 'Alex Smith',
     desiredDate: '2026-06-15',
     timeWindowLabel: '10:00 – 14:00',
-    expiresAtLabel: '15 Jun, 14:30',
     bookingPageUrl: EMAIL_GALLERY_DEMO_VENUE.booking_page_url ?? null,
   });
   items.push({
     id: 'appointment-waitlist-offer',
-    title: 'Appointment waitlist offer',
-    subtitle: 'Slot opened — book before expiry',
+    title: 'Appointment waitlist availability',
+    subtitle: 'Slot opened — view availability and book online',
     subject: waitlistOffer.subject,
     html: waitlistOffer.html,
   });

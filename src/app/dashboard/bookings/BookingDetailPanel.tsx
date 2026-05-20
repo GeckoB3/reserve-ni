@@ -23,6 +23,7 @@ import { GuestMessageChannelSelect } from '@/components/booking/GuestMessageChan
 import type { GuestMessageChannel, GuestMessageSendResult } from '@/lib/booking/guest-message-channel';
 import { BookingStatusPill } from '@/components/ui/dashboard/BookingStatusPill';
 import { Pill } from '@/components/ui/dashboard/Pill';
+import { scheduleWaitlistAlertsRefresh } from '@/lib/booking/waitlist-alerts-events';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { computePopoverPanelStyle } from '@/lib/ui/clamped-floating-styles';
 import { isBookingDetailPopoverDismissExempt } from '@/lib/ui/booking-detail-popover-dismiss';
@@ -44,6 +45,7 @@ import {
   useOptionalDashboardDetailCache,
   type VenueBookingDetailPayload,
 } from '@/components/providers/DashboardDetailCacheProvider';
+import { useVenuePostgresLiveSync } from '@/lib/realtime/useVenuePostgresLiveSync';
 
 import { BookingDetailSurface } from '@/components/booking/BookingDetailSurface';
 import { bookingDetailPanelClassName } from '@/components/booking/booking-detail-types';
@@ -230,6 +232,36 @@ export function BookingDetailPanel({
   }, [bookingId, detailCache, initialSnapshot, venueId]);
 
   const loadBookingCore = useCallback(async () => {
+    const fetchFreshBookingDetail = async (): Promise<BookingDetail | null> => {
+      const summaryRes = await fetch(`/api/venue/bookings/${bookingId}/summary`, {
+        credentials: 'same-origin',
+      });
+      if (summaryRes.ok) {
+        const summary = (await summaryRes.json()) as BookingDetail;
+        if (summary.id === bookingId) {
+          setDetail(summary);
+          setAssignedTables(summary.table_assignments ?? []);
+          detailCache?.primeVenueBookingDetail(bookingId, summary as unknown as VenueBookingDetailPayload);
+        }
+      }
+
+      const bookingRes = await fetch(`/api/venue/bookings/${bookingId}`, { credentials: 'same-origin' });
+
+      if (!bookingRes.ok) {
+        if (!summaryRes.ok) {
+          setError(bookingRes.status === 404 ? 'Booking not found' : 'Failed to load booking');
+        }
+        return null;
+      }
+
+      const data = (await bookingRes.json()) as BookingDetail;
+      setDetail(data);
+      detailCache?.primeVenueBookingDetail(bookingId, data as unknown as VenueBookingDetailPayload);
+      setGuestHistoryListRefresh((k) => k + 1);
+      setAssignedTables(data.table_assignments ?? []);
+      return data;
+    };
+
     const cached = detailCache?.peekVenueBookingDetail(bookingId);
     if (
       cached &&
@@ -240,38 +272,11 @@ export function BookingDetailPanel({
       const data = cached as unknown as BookingDetail;
       setDetail(data);
       setAssignedTables(data.table_assignments ?? []);
+      void fetchFreshBookingDetail();
       return data;
     }
 
-    const summaryRes = await fetch(`/api/venue/bookings/${bookingId}/summary`, {
-      credentials: 'same-origin',
-    });
-    if (summaryRes.ok) {
-      const summary = (await summaryRes.json()) as BookingDetail;
-      if (summary.id === bookingId) {
-        setDetail(summary);
-        setAssignedTables(summary.table_assignments ?? []);
-        detailCache?.primeVenueBookingDetail(bookingId, summary as unknown as VenueBookingDetailPayload);
-      }
-    }
-
-    const bookingRes = await fetch(`/api/venue/bookings/${bookingId}`, { credentials: 'same-origin' });
-
-    if (!bookingRes.ok) {
-      if (!summaryRes.ok) {
-        setError(bookingRes.status === 404 ? 'Booking not found' : 'Failed to load booking');
-      }
-      return null;
-    }
-
-    const data = (await bookingRes.json()) as BookingDetail;
-    setDetail(data);
-    detailCache?.primeVenueBookingDetail(bookingId, data as unknown as VenueBookingDetailPayload);
-    setGuestHistoryListRefresh((k) => k + 1);
-
-    setAssignedTables(data.table_assignments ?? []);
-
-    return data;
+    return fetchFreshBookingDetail();
   }, [bookingId, detailCache]);
 
   const loadTableContext = useCallback(async (data: BookingDetail) => {
@@ -329,6 +334,29 @@ export function BookingDetailPanel({
       await loadTableContext(data);
     }
   }, [loadBookingCore, loadTableContext, isAppointment]);
+
+  const refreshOpenBookingDetail = useCallback(() => {
+    void load();
+  }, [load]);
+
+  useVenuePostgresLiveSync({
+    venueId,
+    enabled: Boolean(venueId),
+    onRefresh: refreshOpenBookingDetail,
+    subscriptions: venueId
+      ? [{ table: 'bookings', filter: `id=eq.${bookingId}` }]
+      : [],
+  });
+
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        refreshOpenBookingDetail();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, [refreshOpenBookingDetail]);
 
   const loadAssignmentSuggestions = useCallback(async () => {
     if (!detail) return;
@@ -522,6 +550,9 @@ export function BookingDetailPanel({
             setDetail((prev) => (prev ? { ...prev, status: previous } : prev));
           }
           return;
+        }
+        if (newStatus === 'Cancelled') {
+          scheduleWaitlistAlertsRefresh();
         }
       }
       setError(null);

@@ -1130,7 +1130,7 @@ export function FloorPlanLiveView({
   const requestBookingStatusChange = useCallback(async (bookingId: string, currentStatus: BookingStatus, newStatus: BookingStatus) => {
     if (newStatus === 'No-Show') {
       const bookingStart = bookingMap.get(bookingId)?.start_time ?? '00:00';
-      if (!canMarkNoShowForSlot(selectedDate, bookingStart, noShowGraceMinutes)) {
+      if (!canMarkNoShowForSlot(selectedDate, bookingStart, noShowGraceMinutes, venueTimezone)) {
         addToast('No-show can only be marked after booking start time', 'error');
         return;
       }
@@ -1163,7 +1163,7 @@ export function FloorPlanLiveView({
       return;
     }
     await handleBookingStatusChange(bookingId, currentStatus, newStatus);
-  }, [addToast, bookingMap, handleBookingStatusChange, selectedDate, noShowGraceMinutes]);
+  }, [addToast, bookingMap, handleBookingStatusChange, selectedDate, noShowGraceMinutes, venueTimezone]);
 
   const floorMenuStatusChange = useCallback(
     async (bookingId: string, currentStatus: string, newStatus: string) => {

@@ -1,23 +1,37 @@
-import Script from 'next/script';
-import { EMBED_IFRAME_DEFAULT_HEIGHT_PX } from '@/lib/embed/widget-frame';
+import type { Metadata } from 'next';
+import { buildVenueEmbedSnippet, normalizeEmbedAccentHex } from '@/lib/embed/accent-colour';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { normalizePublicBaseUrl } from '@/lib/public-base-url';
+import { EmbedTestSalonSite } from './EmbedTestSalonSite';
 
 const PLUS1_DEV_EMAIL = 'plus1@reserveni.com';
 
+export const metadata: Metadata = {
+  title: 'Book online | Salon embed preview',
+  description: 'Preview how the Reserve NI booking widget looks on a hair salon website.',
+  robots: { index: false, follow: false },
+};
+
 async function resolveVenueForEmbedTest(
   slugOverride?: string,
-): Promise<{ slug: string; name: string; email: string } | null> {
+): Promise<{ slug: string; name: string; email: string; embedAccentColour: string | null } | null> {
   const admin = getSupabaseAdminClient();
 
   if (slugOverride?.trim()) {
     const { data: venue } = await admin
       .from('venues')
-      .select('slug, name')
+      .select('slug, name, embed_accent_colour')
       .eq('slug', slugOverride.trim())
       .maybeSingle();
     if (!venue?.slug) return null;
-    return { slug: venue.slug, name: venue.name, email: PLUS1_DEV_EMAIL };
+    return {
+      slug: venue.slug,
+      name: venue.name,
+      email: PLUS1_DEV_EMAIL,
+      embedAccentColour: normalizeEmbedAccentHex(
+        (venue as { embed_accent_colour?: string | null }).embed_accent_colour,
+      ),
+    };
   }
 
   const { data: staff } = await admin
@@ -31,7 +45,7 @@ async function resolveVenueForEmbedTest(
 
   const { data: venue } = await admin
     .from('venues')
-    .select('slug, name')
+    .select('slug, name, embed_accent_colour')
     .eq('id', staff.venue_id)
     .maybeSingle();
 
@@ -41,24 +55,26 @@ async function resolveVenueForEmbedTest(
     slug: venue.slug,
     name: venue.name,
     email: (staff.email as string) ?? PLUS1_DEV_EMAIL,
+    embedAccentColour: normalizeEmbedAccentHex(
+      (venue as { embed_accent_colour?: string | null }).embed_accent_colour,
+    ),
   };
 }
 
 export default async function EmbedTestPage({
   searchParams,
 }: {
-  searchParams: Promise<{ slug?: string }>;
+  searchParams: Promise<{ slug?: string; accent?: string }>;
 }) {
-  const { slug: slugParam } = await searchParams;
+  const { slug: slugParam, accent: accentParam } = await searchParams;
   const venue = await resolveVenueForEmbedTest(slugParam);
   const origin = normalizePublicBaseUrl(process.env.NEXT_PUBLIC_BASE_URL);
-  const resizeScriptSrc = `${origin}/embed/resize.js`;
 
   if (!venue) {
     return (
-      <main className="min-h-screen bg-slate-50 px-6 py-16">
+      <main className="min-h-screen bg-[#f7f4f0] px-6 py-16">
         <div className="mx-auto max-w-lg rounded-2xl border border-red-200 bg-white p-8 shadow-sm">
-          <h1 className="text-lg font-semibold text-slate-900">Embed test — venue not found</h1>
+          <h1 className="text-lg font-semibold text-slate-900">Salon preview — venue not found</h1>
           <p className="mt-3 text-sm text-slate-600">
             No venue found for <span className="font-mono text-slate-800">{PLUS1_DEV_EMAIL}</span>
             {slugParam ? (
@@ -74,56 +90,27 @@ export default async function EmbedTestPage({
     );
   }
 
-  const embedUrl = `${origin}/embed/${venue.slug}`;
-  const bookUrl = `${origin}/book/${venue.slug}`;
-  const snippet = `<iframe src="${embedUrl}" width="100%" height="${EMBED_IFRAME_DEFAULT_HEIGHT_PX}" style="border:none;overflow:hidden;" scrolling="no" id="reserveni-widget"></iframe>
-<script src="${resizeScriptSrc}"></script>`;
+  const accentOverride = normalizeEmbedAccentHex(
+    typeof accentParam === 'string' ? accentParam : undefined,
+  );
+  const accentHex = accentOverride ?? venue.embedAccentColour;
+  const { embedUrl, snippet } = buildVenueEmbedSnippet({
+    baseUrl: origin,
+    venueSlug: venue.slug,
+    accentHex,
+  });
+  const bookUrl = `${origin.replace(/\/$/, '')}/book/${venue.slug}`;
+  const resizeScriptSrc = `${origin.replace(/\/$/, '')}/embed/resize.js`;
 
   return (
-    <main className="min-h-screen bg-slate-100 px-4 py-10 sm:px-6">
-      <div className="mx-auto max-w-2xl space-y-8">
-        <header className="space-y-2">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Internal test</p>
-          <h1 className="text-2xl font-bold text-slate-900">Embed widget test</h1>
-          <p className="text-sm text-slate-600">
-            Venue: <span className="font-medium text-slate-900">{venue.name}</span> (
-            <span className="font-mono text-slate-800">{venue.slug}</span>) · Account{' '}
-            <span className="font-mono text-slate-800">{venue.email}</span>
-          </p>
-          <p className="text-sm text-slate-500">
-            Hosted page:{' '}
-            <a href={bookUrl} className="text-brand-700 underline hover:text-brand-800">
-              {bookUrl}
-            </a>
-          </p>
-        </header>
-
-        <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg ring-1 ring-slate-900/5">
-          <div className="border-b border-slate-100 bg-slate-50 px-4 py-2.5">
-            <p className="text-xs font-medium text-slate-600">Live embed preview</p>
-          </div>
-          <div className="p-4">
-            <iframe
-              src={embedUrl}
-              width="100%"
-              height={EMBED_IFRAME_DEFAULT_HEIGHT_PX}
-              style={{ border: 'none', overflow: 'hidden' }}
-              scrolling="no"
-              id="reserveni-widget"
-              title={`ReserveNI booking widget — ${venue.name}`}
-            />
-          </div>
-        </section>
-
-        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <h2 className="text-sm font-semibold text-slate-900">Embed snippet</h2>
-          <pre className="mt-3 overflow-x-auto rounded-lg bg-slate-900 p-4 text-xs leading-relaxed text-slate-100">
-            {snippet}
-          </pre>
-        </section>
-      </div>
-
-      <Script src={resizeScriptSrc} strategy="afterInteractive" />
-    </main>
+    <EmbedTestSalonSite
+      venueName={venue.name}
+      venueSlug={venue.slug}
+      embedUrl={embedUrl}
+      resizeScriptSrc={resizeScriptSrc}
+      bookUrl={bookUrl}
+      snippet={snippet}
+      accentHex={accentHex}
+    />
   );
 }

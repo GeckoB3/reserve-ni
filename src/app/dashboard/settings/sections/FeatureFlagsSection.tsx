@@ -6,6 +6,12 @@ import type { ResolvedAppointmentsFeatureFlags, VenueFeatureFlags } from '@/lib/
 import type { AnyAvailablePractitionerConfig } from '@/lib/feature-flags/any-available-practitioner-config';
 import { DEFAULT_ANY_AVAILABLE_PRACTITIONER_CONFIG } from '@/lib/feature-flags/any-available-practitioner-config';
 import { AnyAvailablePractitionerConfigSection } from '@/app/dashboard/settings/sections/AnyAvailablePractitionerConfigSection';
+import {
+  WaitlistConfigSection,
+  waitlistModeFromFlags,
+} from '@/app/dashboard/settings/sections/WaitlistConfigSection';
+import { useDashboardWaitlistNavSync } from '@/app/dashboard/DashboardShell';
+import type { AppointmentWaitlistMode } from '@/lib/booking/waitlist-config';
 
 const FLAG_META: {
   key: keyof ResolvedAppointmentsFeatureFlags;
@@ -28,7 +34,7 @@ const FLAG_META: {
     key: 'waitlist_v2',
     title: 'Appointment waitlist',
     description:
-      'When you are fully booked, guests can join a waitlist. You can offer them a slot or send a notification, and cancelled slots can be offered to the waitlist automatically. For appointments only — not table reservations.',
+      'When you are fully booked, guests can join a waitlist for their preferred date, time, calendar, and service. Choose how your team is notified when a slot opens.',
   },
 ];
 
@@ -47,9 +53,13 @@ export function FeatureFlagsSection({
     initialRaw.any_available_practitioner_config ?? DEFAULT_ANY_AVAILABLE_PRACTITIONER_CONFIG,
   );
   const [calendars, setCalendars] = useState<Array<{ id: string; name: string }>>([]);
+  const [waitlistMode, setWaitlistMode] = useState<AppointmentWaitlistMode>(() =>
+    waitlistModeFromFlags(initialRaw),
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const waitlistNavSync = useDashboardWaitlistNavSync();
 
   useEffect(() => {
     if (!resolved.any_available_practitioner) return;
@@ -78,7 +88,10 @@ export function FeatureFlagsSection({
   const persist = useCallback(
     async (
       nextRaw: VenueFeatureFlags,
-      options?: { expectedOff?: keyof ResolvedAppointmentsFeatureFlags },
+      options?: {
+        expectedOff?: keyof ResolvedAppointmentsFeatureFlags;
+        waitlistJustEnabled?: boolean;
+      },
     ) => {
       setSaving(true);
       setError(null);
@@ -103,10 +116,12 @@ export function FeatureFlagsSection({
         const savedResolved = data.resolved ?? resolved;
         setRaw(savedRaw);
         setResolved(savedResolved);
+        setWaitlistMode(waitlistModeFromFlags(savedRaw));
         if (data.any_available_practitioner_config) {
           setAnyAvailableConfig(data.any_available_practitioner_config);
         }
         if (data.calendars) setCalendars(data.calendars);
+        waitlistNavSync?.setAppointmentWaitlistEnabled(savedResolved.waitlist_v2);
         onSaved(savedRaw, savedResolved);
         if (options?.expectedOff && savedResolved[options.expectedOff]) {
           setError(
@@ -114,14 +129,20 @@ export function FeatureFlagsSection({
           );
           return;
         }
-        setMessage('Beta feature settings saved.');
+        if (options?.waitlistJustEnabled) {
+          setMessage(
+            'Appointment waitlist is on. Guests are notified by email when a slot opens — adjust SMS and templates under Settings → Communications → Waitlist invites.',
+          );
+        } else {
+          setMessage('Beta feature settings saved.');
+        }
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Save failed');
       } finally {
         setSaving(false);
       }
     },
-    [onSaved, resolved],
+    [onSaved, resolved, waitlistNavSync],
   );
 
   const saveAnyAvailableConfig = useCallback(
@@ -137,12 +158,30 @@ export function FeatureFlagsSection({
     [raw, persist],
   );
 
+  const saveWaitlistMode = useCallback(
+    async (mode: AppointmentWaitlistMode) => {
+      const nextRaw: VenueFeatureFlags = {
+        ...raw,
+        waitlist_v2: true,
+        waitlist_config: { mode },
+      };
+      setWaitlistMode(mode);
+      await persist(nextRaw);
+    },
+    [raw, persist],
+  );
+
   const toggle = (key: keyof ResolvedAppointmentsFeatureFlags) => {
     const nextEnabled = !resolved[key];
     const nextRaw: VenueFeatureFlags = { ...raw };
     if (nextEnabled) {
       nextRaw[key] = true;
-      void persist(nextRaw);
+      if (key === 'waitlist_v2' && !nextRaw.waitlist_config) {
+        nextRaw.waitlist_config = { mode: waitlistMode };
+      }
+      void persist(nextRaw, {
+        waitlistJustEnabled: key === 'waitlist_v2' && !resolved.waitlist_v2,
+      });
       return;
     }
     // Must send `false` — omitted keys are ignored by mergeVenueFeatureFlagsPatch.
@@ -150,14 +189,17 @@ export function FeatureFlagsSection({
     if (key === 'any_available_practitioner') {
       delete nextRaw.any_available_practitioner_config;
     }
+    if (key === 'waitlist_v2') {
+      delete nextRaw.waitlist_config;
+    }
     void persist(nextRaw, { expectedOff: key });
   };
 
   return (
     <SectionCard elevated>
       <SectionCard.Header
-        title="Beta features"
-        description="Optional appointment tools for your venue. Each one stays off until you turn it on here."
+        title="Optional Booking features"
+        description="Optional tools for your booking flow."
       />
       <SectionCard.Body className="space-y-4">
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
@@ -198,6 +240,14 @@ export function FeatureFlagsSection({
                   calendars={calendars}
                   saving={saving}
                   onSave={saveAnyAvailableConfig}
+                />
+              ) : null}
+              {key === 'waitlist_v2' ? (
+                <WaitlistConfigSection
+                  enabled={resolved.waitlist_v2}
+                  mode={waitlistMode}
+                  saving={saving}
+                  onModeChange={saveWaitlistMode}
                 />
               ) : null}
             </li>

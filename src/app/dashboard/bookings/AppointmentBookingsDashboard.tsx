@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { scheduleWaitlistAlertsRefresh } from '@/lib/booking/waitlist-alerts-events';
 import type { RefObject } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/browser';
@@ -884,6 +885,9 @@ export function AppointmentBookingsDashboard({
         );
       }
       void fetchBookingsForStats();
+      if (nextStatus === 'Cancelled') {
+        scheduleWaitlistAlertsRefresh();
+      }
     } catch {
       addToast('Could not update status', 'error');
       setBookings((rows) => rows.map((r) => (r.id === bookingId ? prev : r)));

@@ -20,6 +20,10 @@ import { communicationPoliciesEmailOnlyAppointmentsLane } from '@/lib/communicat
 import { defaultNotificationSettingsForLightPlan } from '@/lib/notifications/notification-settings';
 import { isAppointmentPlanTier } from '@/lib/tier-enforcement';
 import { DEFAULT_VENUE_BOOKING_LOG_EMAIL_CONFIG } from '@/lib/reports/booking-log-email-config';
+import {
+  claimStripeWebhookEvent,
+  releaseStripeWebhookEvent,
+} from '@/lib/webhooks/stripe-event-idempotency';
 
 /**
  * Configure in Stripe Dashboard: endpoint URL /api/webhooks/stripe-subscription,
@@ -71,9 +75,17 @@ export async function POST(request: NextRequest) {
 
   const supabase = getSupabaseAdminClient();
 
-  const claimed = await claimWebhookEvent(supabase, event.id, event.type);
-  if (!claimed) {
+  const claim = await claimStripeWebhookEvent(
+    supabase,
+    event.id,
+    event.type,
+    '[Subscription webhook]',
+  );
+  if (claim === 'already_processed') {
     return NextResponse.json({ received: true });
+  }
+  if (claim === 'concurrent') {
+    return NextResponse.json({ error: 'Event processing in progress' }, { status: 500 });
   }
 
   console.log(`[Subscription webhook] ${event.type} (event: ${event.id})`);
@@ -127,44 +139,12 @@ export async function POST(request: NextRequest) {
         console.log(`[Subscription webhook] Unhandled event type: ${event.type}`);
     }
 
-    await recordProcessed(supabase, event.id, event.type);
-
     return NextResponse.json({ received: true });
   } catch (err) {
+    await releaseStripeWebhookEvent(supabase, event.id, '[Subscription webhook]');
     console.error('[Subscription webhook] Processing failed:', event.id, event.type, err);
     return NextResponse.json({ error: 'Processing failed' }, { status: 500 });
   }
-}
-
-async function recordProcessed(
-  supabase: ReturnType<typeof getSupabaseAdminClient>,
-  stripeEventId: string,
-  eventType: string
-): Promise<void> {
-  await supabase
-    .from('webhook_events')
-    .upsert({
-      stripe_event_id: stripeEventId,
-      event_type: eventType,
-    }, { onConflict: 'stripe_event_id', ignoreDuplicates: true });
-}
-
-async function claimWebhookEvent(
-  supabase: ReturnType<typeof getSupabaseAdminClient>,
-  stripeEventId: string,
-  eventType: string,
-): Promise<boolean> {
-  const { error } = await supabase
-    .from('webhook_events')
-    .insert({ stripe_event_id: stripeEventId, event_type: eventType });
-  if (!error) return true;
-
-  const code = (error as { code?: string }).code;
-  if (code === '23505' || code === '409') {
-    return false;
-  }
-  console.error('[Subscription webhook] Failed to claim event idempotency lock:', error);
-  throw error;
 }
 
 async function handleCheckoutCompleted(

@@ -94,6 +94,23 @@ export function resolveWaitlistVenueCapabilities(
   };
 }
 
+/**
+ * Whether staff should see `/dashboard/waitlist` in the sidebar.
+ * Table-only restaurants always get the link; appointment (and hybrid) waitlist requires `waitlist_v2`.
+ */
+export function shouldShowWaitlistNav(
+  capabilities: WaitlistVenueCapabilities,
+  appointmentWaitlistEnabled: boolean,
+): boolean {
+  if (capabilities.showTableWaitlist && !capabilities.showAppointmentWaitlist) {
+    return true;
+  }
+  return (
+    appointmentWaitlistEnabled &&
+    (capabilities.showTableWaitlist || capabilities.showAppointmentWaitlist)
+  );
+}
+
 export function isWaitlistKindAllowed(
   capabilities: WaitlistVenueCapabilities,
   kind: 'table' | 'appointment',

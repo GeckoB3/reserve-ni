@@ -45,6 +45,10 @@
       "schedule": "30 4 * * *"
     },
     {
+      "path": "/api/cron/expire-waitlist-offers",
+      "schedule": "*/5 * * * *"
+    },
+    {
       "path": "/api/cron/baseline-metrics-snapshot",
       "schedule": "0 3 * * 0"
     }

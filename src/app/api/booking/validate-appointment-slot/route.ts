@@ -13,6 +13,10 @@ import { z } from 'zod';
 import { isUnifiedSchedulingVenue, venueUsesUnifiedAppointmentData } from '@/lib/booking/unified-scheduling';
 import { isGuestBookingDateAllowed, loadServiceEntityBookingWindow } from '@/lib/booking/entity-booking-window';
 import { isPublicOnlineBookingBlocked } from '@/lib/billing/subscription-entitlement';
+import {
+  loadActiveWaitlistOfferForGuestAccess,
+  validateBookingAgainstWaitlistOffer,
+} from '@/lib/booking/validate-waitlist-offer-access';
 
 const phantomSchema = z.object({
   practitioner_id: z.string().uuid(),
@@ -30,6 +34,7 @@ const bodySchema = z.object({
   variant_id: z.string().uuid().optional(),
   start_time: z.string().regex(/^([01]?[0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$/),
   phantoms: z.array(phantomSchema).optional(),
+  waitlist_offer_id: z.string().uuid().optional(),
 });
 
 /**
@@ -43,7 +48,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: 'Invalid request' }, { status: 400 });
     }
 
-    const { venue_id, booking_date, practitioner_id, service_id, variant_id, start_time, phantoms } = parsed.data;
+    const { venue_id, booking_date, practitioner_id, service_id, variant_id, start_time, phantoms, waitlist_offer_id } = parsed.data;
     const supabase = getSupabaseAdminClient();
 
     const venueMode = await resolveVenueMode(supabase, venue_id);
@@ -116,6 +121,24 @@ export async function POST(request: NextRequest) {
       venue as { timezone?: string | null; booking_rules?: unknown; opening_hours?: unknown },
       serviceWindow,
     );
+
+    if (waitlist_offer_id) {
+      const offer = await loadActiveWaitlistOfferForGuestAccess(supabase, waitlist_offer_id, venue_id);
+      if (!offer) {
+        return NextResponse.json({ ok: false, error: 'This waitlist offer is no longer valid.' });
+      }
+      const timeStr = start_time.slice(0, 5);
+      const offerValidation = validateBookingAgainstWaitlistOffer(offer, {
+        bookingDate: booking_date,
+        bookingTimeHm: timeStr,
+        practitionerOrCalendarId: practitioner_id,
+        appointmentServiceId: service_id,
+      });
+      if (!offerValidation.ok) {
+        return NextResponse.json({ ok: false, error: offerValidation.message });
+      }
+      input.skipPastSlotFilter = true;
+    }
 
     const timeStr = start_time.slice(0, 5);
     const result = validateExactAppointmentStart(input, practitioner_id, service_id, timeStr);

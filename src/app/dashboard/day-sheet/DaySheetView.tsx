@@ -23,6 +23,7 @@ import { Dialog } from '@/components/ui/primitives/Dialog';
 import { ConfirmDialog } from '@/components/ui/primitives/ConfirmDialog';
 import type { BookingModel } from '@/types/booking-models';
 import { ExpandedBookingContent } from '@/app/dashboard/bookings/ExpandedBookingContent';
+import { scheduleWaitlistAlertsRefresh } from '@/lib/booking/waitlist-alerts-events';
 import { BookingDetailPanel, type BookingDetailPanelSnapshot } from '@/app/dashboard/bookings/BookingDetailPanel';
 import { expandedBookingRowShellClass } from '@/app/dashboard/bookings/booking-expand-accordion-classes';
 import { OperationsWorkspaceToolbar } from '@/components/dashboard/OperationsWorkspaceToolbar';
@@ -892,6 +893,9 @@ export function DaySheetView({
                      newStatus === 'No-Show' ? 'Marked as no-show' :
                      newStatus === 'Cancelled' ? 'Booking cancelled' : 'Status updated';
       addToast(label, 'success');
+      if (newStatus === 'Cancelled') {
+        scheduleWaitlistAlertsRefresh();
+      }
       const tableStyle = isTableReservationBooking(currentBooking);
       setUndoAction({
         id: crypto.randomUUID(),
@@ -913,7 +917,7 @@ export function DaySheetView({
   const requestStatusChange = useCallback(
     (booking: DaySheetBooking, nextStatus: BookingStatus) => {
       if (!canTransitionBookingStatus(booking.status, nextStatus)) return;
-      if (nextStatus === 'No-Show' && data && !canMarkNoShowForSlot(date, booking.booking_time, data.no_show_grace_minutes)) {
+      if (nextStatus === 'No-Show' && data && !canMarkNoShowForSlot(date, booking.booking_time, data.no_show_grace_minutes, venueTimezone)) {
         addToast(`No-show can only be marked ${data.no_show_grace_minutes} minutes after the booking start time.`, 'error');
         return;
       }
@@ -955,7 +959,7 @@ export function DaySheetView({
       }
       void changeStatus(booking.id, nextStatus);
     },
-    [activeTables.length, addToast, changeStatus, data, date],
+    [activeTables.length, addToast, changeStatus, data, date, venueTimezone],
   );
 
   const undoStatusChange = useCallback(async () => {

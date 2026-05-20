@@ -6,6 +6,7 @@ export {
   venueFeatureFlagsSchema,
 } from '@/lib/feature-flags/types';
 export {
+  DEFAULT_RESOLVED_APPOINTMENTS_FEATURE_FLAGS,
   mergeVenueFeatureFlagsPatch,
   parseVenueFeatureFlags,
   resolveAppointmentsFeatureFlag,

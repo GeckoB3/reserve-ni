@@ -27,6 +27,7 @@ import {
   syncedMinBookingMinutesFromSlot,
 } from '@/lib/booking/resource-booking-defaults';
 import type { WorkingHours } from '@/types/booking-models';
+import { useVenuePostgresLiveSync } from '@/lib/realtime/useVenuePostgresLiveSync';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -264,7 +265,7 @@ function resourceBookingPaymentLine(b: ResourceBooking, formatPrice: (pence: num
 // ---------------------------------------------------------------------------
 
 export function ResourceTimelineView({
-  venueId: _venueId,
+  venueId,
   isAdmin = false,
   linkedPractitionerIds = [],
   currency = 'GBP',
@@ -361,8 +362,11 @@ export function ResourceTimelineView({
   }, [formSlotStr]);
 
   // Fetch resources
-  const fetchResources = useCallback(async () => {
-    setLoading(true);
+  const fetchResources = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent ?? false;
+    if (!silent) {
+      setLoading(true);
+    }
     try {
       const res = await fetch('/api/venue/resources');
       const data = await res.json();
@@ -370,11 +374,65 @@ export function ResourceTimelineView({
     } catch {
       // ignore
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   }, []);
 
   useEffect(() => { void fetchResources(); }, [fetchResources]);
+
+  const fetchResourceBookings = useCallback(async () => {
+    if (!selectedId || showForm) {
+      setBookings([]);
+      return;
+    }
+    setBookingsLoading(true);
+    try {
+      const res = await fetch(`/api/venue/bookings/list?date=${bookingsDate}&resource_id=${selectedId}`);
+      if (!res.ok) {
+        setBookings([]);
+        return;
+      }
+      const data = await res.json();
+      const rows = (data.bookings ?? []) as Array<Record<string, unknown>>;
+      setBookings(
+        rows
+          .filter((b) => (b.resource_id === selectedId || b.calendar_id === selectedId))
+          .map((b) => ({
+            id: b.id as string,
+            booking_date: b.booking_date as string,
+            booking_time: ((b.booking_time as string) ?? '').slice(0, 5),
+            booking_end_time: b.booking_end_time ? (b.booking_end_time as string).slice(0, 5) : null,
+            status: b.status as string,
+            guest_name: (b.guest_name as string) ?? 'Guest',
+            party_size: (b.party_size as number) ?? 1,
+            deposit_amount_pence: (b.deposit_amount_pence as number | null) ?? null,
+            deposit_status: (b.deposit_status as string | null) ?? null,
+            resource_payment_requirement: (b.resource_payment_requirement as ResourcePaymentRequirement | null) ?? null,
+          }))
+          .sort((a, b) => a.booking_time.localeCompare(b.booking_time)),
+      );
+    } catch {
+      setBookings([]);
+    } finally {
+      setBookingsLoading(false);
+    }
+  }, [selectedId, bookingsDate, showForm]);
+
+  const refreshResourceTimeline = useCallback(() => {
+    void fetchResources({ silent: true });
+    void fetchResourceBookings();
+  }, [fetchResourceBookings, fetchResources]);
+
+  useVenuePostgresLiveSync({
+    venueId,
+    onRefresh: refreshResourceTimeline,
+    subscriptions: [
+      { table: 'unified_calendars', filter: `venue_id=eq.${venueId}` },
+      { table: 'bookings', filter: `venue_id=eq.${venueId}` },
+    ],
+  });
 
   const fetchHostCalendars = useCallback(async () => {
     try {
@@ -466,41 +524,8 @@ export function ResourceTimelineView({
 
   // Fetch bookings for selected resource
   useEffect(() => {
-    if (!selectedId || showForm) { setBookings([]); return; }
-    let cancelled = false;
-    setBookingsLoading(true);
-    (async () => {
-      try {
-        const res = await fetch(`/api/venue/bookings/list?date=${bookingsDate}&resource_id=${selectedId}`);
-        if (!res.ok) { setBookings([]); return; }
-        const data = await res.json();
-        if (cancelled) return;
-        const rows = (data.bookings ?? []) as Array<Record<string, unknown>>;
-        setBookings(
-          rows
-            .filter((b) => (b.resource_id === selectedId || b.calendar_id === selectedId))
-            .map((b) => ({
-              id: b.id as string,
-              booking_date: b.booking_date as string,
-              booking_time: ((b.booking_time as string) ?? '').slice(0, 5),
-              booking_end_time: b.booking_end_time ? (b.booking_end_time as string).slice(0, 5) : null,
-              status: b.status as string,
-              guest_name: (b.guest_name as string) ?? 'Guest',
-              party_size: (b.party_size as number) ?? 1,
-              deposit_amount_pence: (b.deposit_amount_pence as number | null) ?? null,
-              deposit_status: (b.deposit_status as string | null) ?? null,
-              resource_payment_requirement: (b.resource_payment_requirement as ResourcePaymentRequirement | null) ?? null,
-            }))
-            .sort((a, b) => a.booking_time.localeCompare(b.booking_time)),
-        );
-      } catch {
-        if (!cancelled) setBookings([]);
-      } finally {
-        if (!cancelled) setBookingsLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [selectedId, bookingsDate, showForm]);
+    void fetchResourceBookings();
+  }, [fetchResourceBookings]);
 
   // Select first resource on load
   useEffect(() => {

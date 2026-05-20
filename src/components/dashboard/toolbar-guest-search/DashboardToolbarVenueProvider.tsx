@@ -2,6 +2,7 @@
 
 import { createContext, useContext, type ReactNode } from 'react';
 import type { BookingModel, VenueTerminology } from '@/types/booking-models';
+import { VenueDetailLiveInvalidator } from '@/components/providers/VenueDetailLiveInvalidator';
 
 export interface DashboardToolbarVenueContextValue {
   venueId: string;
@@ -43,6 +44,7 @@ export function DashboardToolbarVenueProvider({
   }
   return (
     <DashboardToolbarVenueContext.Provider value={value}>
+      <VenueDetailLiveInvalidator />
       {children}
     </DashboardToolbarVenueContext.Provider>
   );

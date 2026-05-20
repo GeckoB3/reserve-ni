@@ -4,6 +4,10 @@ import { resolveCommPolicy } from './policy-resolver';
 import { renderCommunicationEmail, renderCommunicationSms } from './renderer';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import {
+  parseVenueFeatureFlags,
+  resolveAppointmentsFeatureFlag,
+} from '@/lib/feature-flags';
+import {
   deliverEmailMessage,
   deliverSmsMessage,
   type CommunicationSendResult,
@@ -35,21 +39,34 @@ export interface SendPolicyMessageOptions {
   guestIdForLog?: string;
 }
 
-async function fetchVenueBookingModel(venueId: string): Promise<string | null> {
+async function fetchVenueCommContext(venueId: string): Promise<{
+  bookingModel: string | null;
+  guestSelfRescheduleEnabled: boolean;
+}> {
   const { data } = await getSupabaseAdminClient()
     .from('venues')
-    .select('booking_model')
+    .select('booking_model, feature_flags')
     .eq('id', venueId)
     .maybeSingle();
 
-  return (data as { booking_model?: string | null } | null)?.booking_model ?? null;
+  const row = data as { booking_model?: string | null; feature_flags?: unknown } | null;
+  const venueFlags = parseVenueFeatureFlags(row?.feature_flags);
+
+  return {
+    bookingModel: row?.booking_model ?? null,
+    guestSelfRescheduleEnabled: resolveAppointmentsFeatureFlag(
+      'guest_self_reschedule',
+      venueFlags,
+    ),
+  };
 }
 
 export async function sendPolicyMessage(
   opts: SendPolicyMessageOptions,
 ): Promise<CommunicationSendResult> {
-  const bookingModel =
-    opts.booking.booking_model ?? (await fetchVenueBookingModel(opts.venueId));
+  const venueComm = await fetchVenueCommContext(opts.venueId);
+  const bookingModel = opts.booking.booking_model ?? venueComm.bookingModel;
+  const guestSelfRescheduleEnabled = venueComm.guestSelfRescheduleEnabled;
   const resolved = await resolveCommPolicy({
     venueId: opts.venueId,
     messageKey: opts.messageKey,
@@ -107,6 +124,7 @@ export async function sendPolicyMessage(
       cancellationPolicy: opts.cancellationPolicy ?? null,
       changeSummary: opts.changeSummary ?? null,
       message: opts.message ?? null,
+      guestSelfRescheduleEnabled,
     });
     if (!rendered) return { sent: false, reason: 'disabled' };
     return deliverEmailMessage(deliveryContext, rendered, deliverMode);
@@ -131,6 +149,7 @@ export async function sendPolicyMessage(
     cancellationPolicy: opts.cancellationPolicy ?? null,
     changeSummary: opts.changeSummary ?? null,
     message: opts.message ?? null,
+    guestSelfRescheduleEnabled,
   });
   if (!rendered) return { sent: false, reason: 'disabled' };
   return deliverSmsMessage(deliveryContext, rendered, deliverMode);

@@ -31,7 +31,9 @@ export type CommunicationLogMessageType =
   | 'custom_message_email'
   | 'custom_message_sms'
   | 'no_show_notification_email'
-  | 'post_visit_thankyou_email';
+  | 'post_visit_thankyou_email'
+  | 'appointment_waitlist_offer_email'
+  | 'appointment_waitlist_offer_sms';
 
 const LOG_MESSAGE_TYPE_MAP: Record<
   CommunicationMessageKey,
@@ -81,6 +83,10 @@ const LOG_MESSAGE_TYPE_MAP: Record<
   },
   post_visit_thankyou: {
     email: 'post_visit_thankyou_email',
+  },
+  appointment_waitlist_offer: {
+    email: 'appointment_waitlist_offer_email',
+    sms: 'appointment_waitlist_offer_sms',
   },
 };
 

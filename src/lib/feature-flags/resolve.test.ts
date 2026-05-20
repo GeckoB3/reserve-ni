@@ -35,6 +35,13 @@ describe('resolveAppointmentsFeatureFlag', () => {
     expect(resolveAppointmentsFeatureFlag('waitlist_v2', { waitlist_v2: true })).toBe(true);
   });
 
+  it('defaults guest_self_reschedule to true when unset', () => {
+    expect(resolveAppointmentsFeatureFlag('guest_self_reschedule', {})).toBe(true);
+    expect(resolveAppointmentsFeatureFlag('guest_self_reschedule', { guest_self_reschedule: false })).toBe(
+      false,
+    );
+  });
+
   it('env true forces on regardless of venue', () => {
     process.env.FEATURE_FLAG_WAITLIST_V2 = 'true';
     expect(resolveAppointmentsFeatureFlag('waitlist_v2', {})).toBe(true);
@@ -50,6 +57,19 @@ describe('mergeVenueFeatureFlagsPatch', () => {
   it('removes key when set to false', () => {
     const next = mergeVenueFeatureFlagsPatch({ waitlist_v2: true }, { waitlist_v2: false });
     expect(next.waitlist_v2).toBeUndefined();
+  });
+
+  it('persists guest_self_reschedule false when turned off', () => {
+    const next = mergeVenueFeatureFlagsPatch({}, { guest_self_reschedule: false });
+    expect(next.guest_self_reschedule).toBe(false);
+  });
+
+  it('clears guest_self_reschedule override when turned on', () => {
+    const next = mergeVenueFeatureFlagsPatch(
+      { guest_self_reschedule: false },
+      { guest_self_reschedule: true },
+    );
+    expect(next.guest_self_reschedule).toBeUndefined();
   });
 
   it('leaves flag on when patch omits the key', () => {
@@ -77,7 +97,12 @@ describe('venueFeatureFlagsForStorage', () => {
   it('only persists true keys', () => {
     expect(venueFeatureFlagsForStorage({ waitlist_v2: true, guest_self_reschedule: false })).toEqual({
       waitlist_v2: true,
+      guest_self_reschedule: false,
     });
+  });
+
+  it('omits guest_self_reschedule when on by default', () => {
+    expect(venueFeatureFlagsForStorage({ guest_self_reschedule: true })).toEqual({});
   });
 
   it('does not persist any-available config when the flag is off', () => {

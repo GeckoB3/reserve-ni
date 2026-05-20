@@ -23,6 +23,9 @@ export interface StaffCancelBookingNotifyOptions {
 
 export interface StaffCancelBookingResult {
   cancelled: boolean;
+  /** Refund was required by policy but Stripe refund failed — booking left unchanged. */
+  refundFailed?: boolean;
+  reason?: 'not_found' | 'invalid_status' | 'refund_failed';
   /** Run inside `after()` so the HTTP response is not blocked. */
   scheduleNotification?: () => Promise<void>;
 }
@@ -124,13 +127,17 @@ export async function cancelStaffBookingWithNotify(
     }
   }
 
+  if (canRefund && !refundSucceeded) {
+    return { cancelled: false, refundFailed: true, reason: 'refund_failed' };
+  }
+
   const { data: beforeRows } = await admin
     .from('bookings')
     .select('id, guest_id, status')
     .in('id', idsToCancel);
 
   if (refundSucceeded) {
-    await staffDb
+    const { error: cancelErr } = await staffDb
       .from('bookings')
       .update({
         status: 'Cancelled',
@@ -140,8 +147,12 @@ export async function cancelStaffBookingWithNotify(
         updated_at: new Date().toISOString(),
       })
       .in('id', idsToCancel);
+    if (cancelErr) {
+      console.error('[staff-cancel-booking] cancel update failed after refund:', cancelErr, { bookingId });
+      return { cancelled: false, reason: 'not_found' };
+    }
   } else {
-    await staffDb
+    const { error: cancelErr } = await staffDb
       .from('bookings')
       .update({
         status: 'Cancelled',
@@ -150,6 +161,10 @@ export async function cancelStaffBookingWithNotify(
         updated_at: new Date().toISOString(),
       })
       .in('id', idsToCancel);
+    if (cancelErr) {
+      console.error('[staff-cancel-booking] cancel update failed:', cancelErr, { bookingId });
+      return { cancelled: false, reason: 'not_found' };
+    }
   }
 
   for (const row of beforeRows ?? []) {
@@ -248,6 +263,12 @@ export async function cancelStaffBookingWithNotify(
     event_session_id: booking.event_session_id as string | null | undefined,
   };
 
+  try {
+    await offerAppointmentWaitlistOnCancel(admin, cancelledBookingForWaitlist);
+  } catch (waitlistErr) {
+    console.error('[staff-cancel-booking] waitlist offer failed:', waitlistErr, { bookingId });
+  }
+
   let scheduleNotification: (() => Promise<void>) | undefined;
   if (guestRow && venueRow?.name) {
     scheduleNotification = async () => {
@@ -256,19 +277,6 @@ export async function cancelStaffBookingWithNotify(
         await sendCancellationNotification(enriched, cancelVenueEmail, venueId, refundMsgCombined);
       } catch (commsErr) {
         console.error('[staff-cancel-booking] cancellation notification failed:', commsErr);
-      }
-      try {
-        await offerAppointmentWaitlistOnCancel(admin, cancelledBookingForWaitlist);
-      } catch (waitlistErr) {
-        console.error('[staff-cancel-booking] waitlist offer failed:', waitlistErr, { bookingId });
-      }
-    };
-  } else {
-    scheduleNotification = async () => {
-      try {
-        await offerAppointmentWaitlistOnCancel(admin, cancelledBookingForWaitlist);
-      } catch (waitlistErr) {
-        console.error('[staff-cancel-booking] waitlist offer failed:', waitlistErr, { bookingId });
       }
     };
   }

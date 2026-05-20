@@ -19,6 +19,7 @@ import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { ClassInstanceDetailSheet } from '@/components/practitioner-calendar/ClassInstanceDetailSheet';
 import type { ScheduleBlockDTO } from '@/types/schedule-blocks';
+import { useVenuePostgresLiveSync } from '@/lib/realtime/useVenuePostgresLiveSync';
 
 interface PractitionerOption {
   id: string;
@@ -146,7 +147,7 @@ function buildAgendaClassBlock(inst: ClassInstance, ct: ClassType | undefined): 
 }
 
 export function ClassTimetableView({
-  venueId: _venueId,
+  venueId,
   isAdmin,
   linkedPractitionerIds = [],
   currency = 'GBP',
@@ -252,6 +253,19 @@ export function ClassTimetableView({
   const refreshClassData = useCallback(async () => {
     await fetchData({ silent: true });
   }, [fetchData]);
+
+  useVenuePostgresLiveSync({
+    venueId,
+    onRefresh: () => {
+      void refreshClassData();
+    },
+    subscriptions: [
+      { table: 'class_types', filter: `venue_id=eq.${venueId}` },
+      { table: 'class_instances' },
+      { table: 'class_timetable' },
+      { table: 'bookings', filter: `venue_id=eq.${venueId}` },
+    ],
+  });
 
   const submitInlineNewCalendar = useCallback(async () => {
     const name = newCalendarName.trim();

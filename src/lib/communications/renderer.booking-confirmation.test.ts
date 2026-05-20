@@ -136,6 +136,25 @@ describe('renderCommunicationEmail booking_confirmation', () => {
     expect(out?.text).toContain('Price and payment:');
     expect(out?.text).toContain('Free');
   });
+
+  it('uses cancel-only copy for appointments when guest self-reschedule is off', () => {
+    const out = renderCommunicationEmail({
+      lane: 'appointments_other',
+      messageKey: 'booking_confirmation',
+      booking: baseBooking({
+        email_variant: 'appointment',
+        appointment_service_name: 'Massage',
+        practitioner_name: 'Jo',
+      }),
+      venue,
+      guestSelfRescheduleEnabled: false,
+    });
+    expect(out?.html).toMatch(/>\s*Cancel\s*</);
+    expect(out?.html).not.toMatch(/>\s*Manage\s*</);
+    expect(out?.text).toContain('Need to cancel?');
+    expect(out?.text).not.toContain('Need to make changes?');
+    expect(out?.text).toContain('Cancel appointment: https://example.com/m');
+  });
 });
 
 describe('renderCommunicationEmail booking_confirmation account CTA', () => {
@@ -288,5 +307,52 @@ describe('renderCommunicationSms confirm_or_cancel_prompt', () => {
     expect(out?.body).not.toContain('Cancel:');
     expect(out?.body.match(/https:\/\/example\.com\/c\/signed/g)).toHaveLength(1);
     expect(out!.body.length).toBeLessThanOrEqual(160);
+  });
+});
+
+describe('renderCommunicationSms appointment cancel-only copy', () => {
+  it('uses Cancel prefix in booking confirmation SMS when guest self-reschedule is off', () => {
+    const out = renderCommunicationSms({
+      lane: 'appointments_other',
+      messageKey: 'booking_confirmation',
+      booking: baseBooking({
+        appointment_service_name: 'Massage',
+        practitioner_name: 'Jo',
+      }),
+      venue,
+      guestSelfRescheduleEnabled: false,
+    });
+    expect(out?.body).toContain('Cancel: https://example.com/m');
+    expect(out?.body).not.toContain('Manage:');
+  });
+
+  it('uses Cancel prefix in booking modification SMS when guest self-reschedule is off', () => {
+    const out = renderCommunicationSms({
+      lane: 'appointments_other',
+      messageKey: 'booking_modification',
+      booking: baseBooking({
+        appointment_service_name: 'Massage',
+        practitioner_name: 'Jo',
+      }),
+      venue,
+      guestSelfRescheduleEnabled: false,
+    });
+    expect(out?.body).toContain('Cancel: https://example.com/m');
+    expect(out?.body).not.toContain('Manage:');
+  });
+
+  it('uses cancel-only CTA in pre-visit reminder email when guest self-reschedule is off', () => {
+    const out = renderCommunicationEmail({
+      lane: 'appointments_other',
+      messageKey: 'pre_visit_reminder',
+      booking: baseBooking({
+        appointment_service_name: 'Massage',
+        practitioner_name: 'Jo',
+      }),
+      venue,
+      guestSelfRescheduleEnabled: false,
+    });
+    expect(out?.text).toContain('Cancel Your Appointment: https://example.com/m');
+    expect(out?.text).not.toContain('Manage Your Booking');
   });
 });

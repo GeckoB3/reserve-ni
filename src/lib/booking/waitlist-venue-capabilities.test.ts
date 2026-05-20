@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeWaitlistKindQuery, resolveWaitlistVenueCapabilities } from './waitlist-venue-capabilities';
+import {
+  normalizeWaitlistKindQuery,
+  resolveWaitlistVenueCapabilities,
+  shouldShowWaitlistNav,
+} from './waitlist-venue-capabilities';
 
 describe('resolveWaitlistVenueCapabilities', () => {
   it('appointments plan: appointment waitlist only', () => {
@@ -55,6 +59,35 @@ describe('resolveWaitlistVenueCapabilities', () => {
     expect(caps.showTableWaitlist).toBe(true);
     expect(caps.showAppointmentWaitlist).toBe(false);
     expect(caps.showKindTabs).toBe(false);
+  });
+});
+
+describe('shouldShowWaitlistNav', () => {
+  it('shows table-only restaurant waitlist without the appointment flag', () => {
+    const caps = resolveWaitlistVenueCapabilities({
+      pricingTier: 'restaurant',
+      bookingModel: 'table_reservation',
+    });
+    expect(shouldShowWaitlistNav(caps, false)).toBe(true);
+  });
+
+  it('hides appointment waitlist nav until waitlist_v2 is enabled', () => {
+    const caps = resolveWaitlistVenueCapabilities({
+      pricingTier: 'appointments',
+      bookingModel: 'unified_scheduling',
+    });
+    expect(shouldShowWaitlistNav(caps, false)).toBe(false);
+    expect(shouldShowWaitlistNav(caps, true)).toBe(true);
+  });
+
+  it('hides hybrid waitlist nav until waitlist_v2 is enabled', () => {
+    const caps = resolveWaitlistVenueCapabilities({
+      pricingTier: 'restaurant',
+      bookingModel: 'table_reservation',
+      enabledModels: ['unified_scheduling'],
+    });
+    expect(shouldShowWaitlistNav(caps, false)).toBe(false);
+    expect(shouldShowWaitlistNav(caps, true)).toBe(true);
   });
 });
 

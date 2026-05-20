@@ -63,6 +63,12 @@ import { createRouteHandlerClient } from '@/lib/supabase/server';
 import { sumAvailableClassCreditsForClassType } from '@/lib/class-commerce/available-class-credits';
 import { consumeClassCreditsForBooking } from '@/lib/class-commerce/consume-class-credits';
 import { formatGuestDisplayName, normaliseGuestNamePart } from '@/lib/guests/name';
+import {
+  completeWaitlistEntryAfterGuestBooking,
+  loadActiveWaitlistOfferForGuestAccess,
+  validateBookingAgainstWaitlistOffer,
+  type ActiveWaitlistOfferRow,
+} from '@/lib/booking/validate-waitlist-offer-access';
 
 const createBookingSchema = z.object({
   venue_id: z.string().uuid(),
@@ -106,6 +112,8 @@ const createBookingSchema = z.object({
   marketing_consent: z.boolean().optional(),
   /** §7.7: set when the booking was routed through a venue collective page (attribution only). */
   collective_id: z.string().uuid().optional(),
+  /** Active waitlist offer — bypasses guest min-notice for offered slots. */
+  waitlist_offer_id: z.string().uuid().optional(),
 });
 
 /**
@@ -596,6 +604,7 @@ async function handleNonTableBooking(
     event_session_id,
     capacity_used,
     collective_id,
+    waitlist_offer_id,
   } = data;
 
   const routeAuthClient = await createRouteHandlerClient(request);
@@ -626,6 +635,15 @@ async function handleNonTableBooking(
 
   const timeForDb = booking_time.length === 5 ? booking_time + ':00' : booking_time;
   const timeStr = timeForDb.slice(0, 5);
+
+  if (waitlist_offer_id && effectiveModel !== 'unified_scheduling') {
+    return NextResponse.json(
+      { error: 'Waitlist offer is only valid for appointment bookings.' },
+      { status: 400 },
+    );
+  }
+
+  let activeWaitlistOffer: ActiveWaitlistOfferRow | null = null;
 
   if (!venueExposesBookingModel(venueMode.bookingModel, venueMode.enabledModels, effectiveModel)) {
     return NextResponse.json(
@@ -815,6 +833,29 @@ async function handleNonTableBooking(
       venue as { timezone?: string | null; booking_rules?: unknown; opening_hours?: unknown },
       serviceWindow,
     );
+    if (waitlist_offer_id) {
+      activeWaitlistOffer = await loadActiveWaitlistOfferForGuestAccess(
+        supabase,
+        waitlist_offer_id,
+        venue_id,
+      );
+      if (!activeWaitlistOffer) {
+        return NextResponse.json(
+          { error: 'This waitlist offer is no longer valid.' },
+          { status: 409 },
+        );
+      }
+      const offerValidation = validateBookingAgainstWaitlistOffer(activeWaitlistOffer, {
+        bookingDate: booking_date,
+        bookingTimeHm: timeStr,
+        practitionerOrCalendarId: practitioner_id,
+        appointmentServiceId: appointment_service_id,
+      });
+      if (!offerValidation.ok) {
+        return NextResponse.json({ error: offerValidation.message }, { status: 409 });
+      }
+      input.skipPastSlotFilter = true;
+    }
     const result = computeAppointmentAvailability(input);
     const prac = result.practitioners.find((p) => p.id === practitioner_id);
     const slotAvailable = prac?.slots.some((s) => s.start_time === timeStr && s.service_id === appointment_service_id);
@@ -1172,6 +1213,15 @@ async function handleNonTableBooking(
   if (bookErr) {
     console.error('Booking insert failed:', bookErr);
     return NextResponse.json({ error: 'Failed to create booking' }, { status: 500 });
+  }
+
+  if (activeWaitlistOffer) {
+    await completeWaitlistEntryAfterGuestBooking(supabase, {
+      offer: activeWaitlistOffer,
+      venueId: venue_id,
+      bookingId: booking.id,
+      bookingModel: effectiveModel,
+    });
   }
 
   if (pendingClassCreditRedemption) {

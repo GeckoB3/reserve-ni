@@ -12,7 +12,7 @@ const joinSchema = z.object({
   party_size: z.number().int().min(1).max(50),
   first_name: z.string().min(1).max(100),
   last_name: z.string().min(1).max(100),
-  guest_email: z.string().email().optional().or(z.literal('')),
+  guest_email: z.string().trim().email(),
   guest_phone: z.string().min(1).max(24),
   service_id: z.string().uuid().optional(),
   notes: z.string().max(500).optional(),
@@ -63,7 +63,7 @@ export async function POST(request: NextRequest) {
         party_size: parsed.data.party_size,
         guest_first_name: guestFirst,
         guest_last_name: guestLast,
-        guest_email: parsed.data.guest_email || null,
+        guest_email: parsed.data.guest_email.trim().toLowerCase(),
         guest_phone: guestPhoneE164,
         notes: parsed.data.notes || null,
       })

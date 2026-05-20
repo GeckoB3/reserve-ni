@@ -28,6 +28,7 @@ import { OperationsToolbarGuestSearchPanel } from '@/components/dashboard/Operat
 import { ClampedFixedDropdown } from '@/components/ui/ClampedFixedDropdown';
 import { ContactDetailPanel } from '@/components/dashboard/contacts/ContactDetailPanel';
 import { MergeContactsModal } from '@/components/dashboard/contacts/MergeContactsModal';
+import { useVenuePostgresLiveSync } from '@/lib/realtime/useVenuePostgresLiveSync';
 import { BulkGuestMessageModal } from '@/components/booking/BulkGuestMessageModal';
 import type { GuestMessageChannel } from '@/lib/booking/guest-message-channel';
 import { useToast } from '@/components/ui/Toast';
@@ -562,8 +563,11 @@ export function ContactsDashboard({
     }
   }, [guests, selectedIds]);
 
-  const loadList = useCallback(async () => {
-    setLoading(true);
+  const loadList = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent ?? false;
+    if (!silent) {
+      setLoading(true);
+    }
     setError(null);
     try {
       const params = new URLSearchParams({
@@ -601,7 +605,9 @@ export function ContactsDashboard({
       setError(e instanceof Error ? e.message : 'Failed to load');
       setGuests([]);
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   }, [
     sort,
@@ -619,6 +625,19 @@ export function ContactsDashboard({
     lastServiceKind,
     normalisedSegmentTagFilter,
   ]);
+
+  const refreshContacts = useCallback(() => {
+    void loadList({ silent: true });
+  }, [loadList]);
+
+  const liveState = useVenuePostgresLiveSync({
+    venueId,
+    onRefresh: refreshContacts,
+    subscriptions: [
+      { table: 'guests', filter: `venue_id=eq.${venueId}` },
+      { table: 'bookings', filter: `venue_id=eq.${venueId}` },
+    ],
+  });
 
   useEffect(() => {
     void loadList();
@@ -1549,7 +1568,7 @@ export function ContactsDashboard({
             date={toolbarDatePlaceholder}
             onDateChange={() => {}}
             datePickerPanel={null}
-            liveState="live"
+            liveState={liveState}
             onRefresh={() => void loadList()}
             onNewBooking={() => {}}
             onWalkIn={() => {}}

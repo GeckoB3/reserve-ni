@@ -95,4 +95,12 @@ describe('offer-appointment-waitlist-on-cancel matching', () => {
     );
     expect(picked).toBeNull();
   });
+
+  it('matches when booking and entry use different service id columns', () => {
+    const picked = pickFirstMatchingWaitlistEntry(
+      [entry({ service_item_id: 'svc-1', appointment_service_id: null })],
+      { ...baseBooking, appointment_service_id: null, service_item_id: 'svc-1' },
+    );
+    expect(picked?.id).toBe('w1');
+  });
 });

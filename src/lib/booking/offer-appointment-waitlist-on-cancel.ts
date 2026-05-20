@@ -1,6 +1,6 @@
 /**
- * Phase 1a.3: when an appointment booking is cancelled, auto-offer the freed slot
- * to the first matching appointment waitlist entry and notify the guest.
+ * When an appointment booking is cancelled, process the freed slot according to the
+ * venue's waitlist mode (staff alert, notify in order, or notify all).
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
@@ -9,7 +9,18 @@ import {
 } from '@/lib/feature-flags';
 import { inferBookingRowModel } from '@/lib/booking/infer-booking-row-model';
 import { notifyAppointmentWaitlistOfferForEntry } from '@/lib/booking/notify-appointment-waitlist-offer';
-import { APPOINTMENT_WAITLIST_OFFER_TTL_MS } from '@/lib/booking/waitlist-offer-constants';
+import { APPOINTMENT_WAITLIST_COMPLETED_STATUS } from '@/lib/booking/waitlist-offer-constants';
+import { parseWaitlistConfig, type AppointmentWaitlistMode } from '@/lib/booking/waitlist-config';
+import { recordWaitlistSlotOpportunity } from '@/lib/booking/record-waitlist-slot-opportunity';
+import {
+  freedSlotFromCancelledBooking,
+} from '@/lib/booking/waitlist-freed-slot';
+import {
+  hasActiveWaitlistOfferForSlot,
+  offerWaitlistEntryInOrder,
+} from '@/lib/booking/waitlist-offer-in-order';
+import { markWaitlistOpportunitiesFilledForSlot } from '@/lib/booking/waitlist-slot-opportunity-service';
+import { isWaitlistFreedSlotStillUnbooked } from '@/lib/booking/is-waitlist-freed-slot-unbooked';
 import {
   waitlistTimeMatchesFreedSlot,
   type WaitlistTimeFields,
@@ -50,11 +61,24 @@ export interface WaitlistEntryCandidate {
 export type OfferAppointmentWaitlistOnCancelResult =
   | {
       offered: true;
+      mode: 'notify_in_order';
       waitlistEntryId: string;
       emailSent: boolean;
       smsSent: boolean;
     }
-  | { offered: false; reason: string };
+  | {
+      offered: true;
+      mode: 'notify_all';
+      notifiedCount: number;
+      emailSentCount: number;
+      smsSentCount: number;
+    }
+  | {
+      offered: false;
+      mode: AppointmentWaitlistMode;
+      reason: string;
+      staffAlertId?: string;
+    };
 
 const APPOINTMENT_MODELS: BookingModel[] = ['practitioner_appointment', 'unified_scheduling'];
 
@@ -80,9 +104,10 @@ export function waitlistServiceMatchesFreedSlot(
   entry: Pick<WaitlistEntryCandidate, 'service_item_id' | 'appointment_service_id'>,
   freed: ReturnType<typeof freedServiceIds>,
 ): boolean {
-  const freedId = freed.serviceItemId ?? freed.appointmentServiceId;
-  if (!freedId) return false;
-  return entry.service_item_id === freedId || entry.appointment_service_id === freedId;
+  const entryIds = [entry.service_item_id, entry.appointment_service_id].filter(Boolean) as string[];
+  const freedIds = [freed.serviceItemId, freed.appointmentServiceId].filter(Boolean) as string[];
+  if (entryIds.length === 0 || freedIds.length === 0) return false;
+  return entryIds.some((entryId) => freedIds.includes(entryId));
 }
 
 export function waitlistPractitionerMatchesFreedSlot(
@@ -94,36 +119,116 @@ export function waitlistPractitionerMatchesFreedSlot(
   return entryPractitionerId === freedPractitioner;
 }
 
-export function pickFirstMatchingWaitlistEntry(
+export function findMatchingWaitlistEntries(
   entries: WaitlistEntryCandidate[],
   booking: CancelledBookingForWaitlistOffer,
-): WaitlistEntryCandidate | null {
+): WaitlistEntryCandidate[] {
   const freedTimeHm =
     typeof booking.booking_time === 'string' ? booking.booking_time.slice(0, 5) : '';
   const practitioner = freedPractitionerId(booking);
   const serviceIds = freedServiceIds(booking);
 
-  for (const entry of entries) {
-    if (!waitlistServiceMatchesFreedSlot(entry, serviceIds)) continue;
-    if (!waitlistPractitionerMatchesFreedSlot(entry.practitioner_id, practitioner)) continue;
+  return entries.filter((entry) => {
+    if (!waitlistServiceMatchesFreedSlot(entry, serviceIds)) return false;
+    if (!waitlistPractitionerMatchesFreedSlot(entry.practitioner_id, practitioner)) return false;
     const timeFields: WaitlistTimeFields = {
       desired_time: entry.desired_time,
       desired_time_end: entry.desired_time_end ?? null,
     };
-    if (!waitlistTimeMatchesFreedSlot(timeFields, freedTimeHm)) continue;
-    return entry;
-  }
-  return null;
+    return waitlistTimeMatchesFreedSlot(timeFields, freedTimeHm);
+  });
 }
 
-function publicBookingUrl(slug: string | null | undefined): string | null {
-  if (!slug?.trim()) return null;
-  const base = (process.env.NEXT_PUBLIC_BASE_URL ?? 'https://www.reserveni.com').replace(/\/$/, '');
-  return `${base}/book/${slug.trim()}`;
+/** @deprecated Use findMatchingWaitlistEntries — returns first FIFO match. */
+export function pickFirstMatchingWaitlistEntry(
+  entries: WaitlistEntryCandidate[],
+  booking: CancelledBookingForWaitlistOffer,
+): WaitlistEntryCandidate | null {
+  return findMatchingWaitlistEntries(entries, booking)[0] ?? null;
+}
+
+async function loadWaitingAppointmentWaitlistEntries(
+  admin: SupabaseClient,
+  venueId: string,
+  bookingDate: string,
+): Promise<WaitlistEntryCandidate[]> {
+  const { data: waitingRows, error: listErr } = await admin
+    .from('waitlist_entries')
+    .select(
+      'id, desired_date, desired_time, desired_time_end, practitioner_id, appointment_service_id, service_item_id, guest_first_name, guest_last_name, guest_email, guest_phone, created_at',
+    )
+    .eq('venue_id', venueId)
+    .eq('waitlist_kind', 'appointment')
+    .eq('desired_date', bookingDate)
+    .eq('status', 'waiting')
+    .order('created_at', { ascending: true });
+
+  if (listErr) {
+    console.error('[offerAppointmentWaitlistOnCancel] waitlist query failed:', listErr);
+    return [];
+  }
+
+  return (waitingRows ?? []) as WaitlistEntryCandidate[];
+}
+
+async function notifyAllMatchingGuests(
+  admin: SupabaseClient,
+  venueId: string,
+  bookingDate: string,
+  matches: WaitlistEntryCandidate[],
+): Promise<OfferAppointmentWaitlistOnCancelResult> {
+  let emailSentCount = 0;
+  let smsSentCount = 0;
+
+  for (const match of matches) {
+    const notify = await notifyAppointmentWaitlistOfferForEntry(
+      admin,
+      venueId,
+      {
+        waitlistEntryId: match.id,
+        desired_date: bookingDate,
+        desired_time: match.desired_time,
+        desired_time_end: match.desired_time_end ?? null,
+        guest_first_name: match.guest_first_name,
+        guest_last_name: match.guest_last_name,
+        guest_email: match.guest_email,
+        guest_phone: match.guest_phone,
+      },
+      null,
+    );
+    if (notify.emailSent) emailSentCount += 1;
+    if (notify.smsSent) smsSentCount += 1;
+
+    const { error: completeErr } = await admin
+      .from('waitlist_entries')
+      .update({
+        status: APPOINTMENT_WAITLIST_COMPLETED_STATUS,
+        offered_at: new Date().toISOString(),
+        expires_at: null,
+      })
+      .eq('id', match.id)
+      .eq('venue_id', venueId)
+      .eq('status', 'waiting');
+
+    if (completeErr) {
+      console.error('[notifyAllMatchingGuests] complete update failed:', completeErr, {
+        waitlistEntryId: match.id,
+        venueId,
+      });
+    }
+  }
+
+  return {
+    offered: true,
+    mode: 'notify_all',
+    notifiedCount: matches.length,
+    emailSentCount,
+    smsSentCount,
+  };
 }
 
 /**
- * Offers the freed appointment slot to the oldest matching waitlist guest (FIFO).
+ * Processes the freed appointment slot according to the venue waitlist mode.
  * Gated on `waitlist_v2`. Safe to call after cancel; no-ops when not applicable.
  */
 export async function offerAppointmentWaitlistOnCancel(
@@ -131,18 +236,18 @@ export async function offerAppointmentWaitlistOnCancel(
   booking: CancelledBookingForWaitlistOffer,
 ): Promise<OfferAppointmentWaitlistOnCancelResult> {
   if (!isAppointmentBookingForWaitlistOffer(booking)) {
-    return { offered: false, reason: 'not_appointment_booking' };
+    return { offered: false, mode: 'notify_in_order', reason: 'not_appointment_booking' };
   }
 
   const freedTimeHm =
     typeof booking.booking_time === 'string' ? booking.booking_time.slice(0, 5) : '';
   if (!freedTimeHm) {
-    return { offered: false, reason: 'missing_booking_time' };
+    return { offered: false, mode: 'notify_in_order', reason: 'missing_booking_time' };
   }
 
   const serviceIds = freedServiceIds(booking);
   if (!serviceIds.serviceItemId && !serviceIds.appointmentServiceId) {
-    return { offered: false, reason: 'missing_service' };
+    return { offered: false, mode: 'notify_in_order', reason: 'missing_service' };
   }
 
   const { data: venueRow, error: venueErr } = await admin
@@ -156,103 +261,85 @@ export async function offerAppointmentWaitlistOnCancel(
       venueId: booking.venue_id,
       bookingId: booking.id,
     });
-    return { offered: false, reason: 'venue_not_found' };
+    return { offered: false, mode: 'notify_in_order', reason: 'venue_not_found' };
   }
 
   const venueFlags = parseVenueFeatureFlags(
     (venueRow as { feature_flags?: unknown }).feature_flags,
   );
   if (!resolveAppointmentsFeatureFlag('waitlist_v2', venueFlags)) {
-    return { offered: false, reason: 'waitlist_v2_disabled' };
+    return { offered: false, mode: 'notify_in_order', reason: 'waitlist_v2_disabled' };
   }
 
-  const timeForDb = `${freedTimeHm}:00`;
+  const waitlistConfig = parseWaitlistConfig(venueFlags);
+  const mode = waitlistConfig.mode;
+  const freedSlot = freedSlotFromCancelledBooking(booking);
 
-  const { count: offeredCount } = await admin
-    .from('waitlist_entries')
-    .select('id', { count: 'exact', head: true })
-    .eq('venue_id', booking.venue_id)
-    .eq('waitlist_kind', 'appointment')
-    .eq('status', 'offered')
-    .eq('desired_date', booking.booking_date)
-    .eq('desired_time', timeForDb);
-
-  if ((offeredCount ?? 0) > 0) {
-    return { offered: false, reason: 'slot_already_offered' };
-  }
-
-  const { data: waitingRows, error: listErr } = await admin
-    .from('waitlist_entries')
-    .select(
-      'id, desired_date, desired_time, desired_time_end, practitioner_id, appointment_service_id, service_item_id, guest_first_name, guest_last_name, guest_email, guest_phone, created_at',
-    )
-    .eq('venue_id', booking.venue_id)
-    .eq('waitlist_kind', 'appointment')
-    .eq('desired_date', booking.booking_date)
-    .eq('status', 'waiting')
-    .order('created_at', { ascending: true });
-
-  if (listErr) {
-    console.error('[offerAppointmentWaitlistOnCancel] waitlist query failed:', listErr, {
-      bookingId: booking.id,
-    });
-    return { offered: false, reason: 'waitlist_query_failed' };
-  }
-
-  const match = pickFirstMatchingWaitlistEntry(
-    (waitingRows ?? []) as WaitlistEntryCandidate[],
-    booking,
-  );
-  if (!match) {
-    return { offered: false, reason: 'no_matching_waitlist' };
-  }
-
-  const now = new Date();
-  const expiresAt = new Date(now.getTime() + APPOINTMENT_WAITLIST_OFFER_TTL_MS).toISOString();
-  const updatePayload: Record<string, unknown> = {
-    status: 'offered',
-    offered_at: now.toISOString(),
-    expires_at: expiresAt,
-  };
-  if (!match.desired_time) {
-    updatePayload.desired_time = timeForDb;
-  }
-
-  const { data: updated, error: updateErr } = await admin
-    .from('waitlist_entries')
-    .update(updatePayload)
-    .eq('id', match.id)
-    .eq('venue_id', booking.venue_id)
-    .eq('status', 'waiting')
-    .select('id')
-    .maybeSingle();
-
-  if (updateErr || !updated) {
-    console.error('[offerAppointmentWaitlistOnCancel] offer update failed:', updateErr, {
-      waitlistEntryId: match.id,
-      bookingId: booking.id,
-    });
-    return { offered: false, reason: 'offer_update_failed' };
-  }
-
-  const notify = await notifyAppointmentWaitlistOfferForEntry(
+  const waitingRows = await loadWaitingAppointmentWaitlistEntries(
     admin,
     booking.venue_id,
-    {
-      desired_date: booking.booking_date,
-      desired_time: match.desired_time ?? timeForDb,
-      guest_first_name: match.guest_first_name,
-      guest_last_name: match.guest_last_name,
-      guest_email: match.guest_email,
-      guest_phone: match.guest_phone,
-    },
-    expiresAt,
+    booking.booking_date,
   );
+  const matches = findMatchingWaitlistEntries(waitingRows, booking);
+
+  if (mode === 'staff_choose') {
+    const alert = await recordWaitlistSlotOpportunity(admin, booking);
+    if (!alert.created) {
+      return {
+        offered: false,
+        mode,
+        reason: alert.reason ?? 'staff_alert_failed',
+        staffAlertId: alert.opportunityId,
+      };
+    }
+    return {
+      offered: false,
+      mode,
+      reason: matches.length > 0 ? 'staff_choose_pending' : 'staff_choose_pending_no_match_yet',
+      staffAlertId: alert.opportunityId,
+    };
+  }
+
+  if (matches.length === 0) {
+    return { offered: false, mode, reason: 'no_matching_waitlist' };
+  }
+
+  if (mode === 'notify_all') {
+    const result = await notifyAllMatchingGuests(admin, booking.venue_id, booking.booking_date, matches);
+    const stillUnbooked = await isWaitlistFreedSlotStillUnbooked(admin, freedSlot);
+    if (!stillUnbooked) {
+      await markWaitlistOpportunitiesFilledForSlot(admin, freedSlot);
+    }
+    return result;
+  }
+
+  // notify_in_order (default)
+  const slotAlreadyOffered = await hasActiveWaitlistOfferForSlot(
+    admin,
+    booking.venue_id,
+    booking.booking_date,
+    booking.booking_time,
+    freedSlot.calendarId,
+  );
+  if (slotAlreadyOffered) {
+    return { offered: false, mode, reason: 'slot_already_offered' };
+  }
+
+  const match = matches[0];
+  if (!match) {
+    return { offered: false, mode, reason: 'no_matching_waitlist' };
+  }
+
+  const offer = await offerWaitlistEntryInOrder(admin, freedSlot, match);
+  if (!offer.ok) {
+    return { offered: false, mode, reason: offer.reason };
+  }
 
   return {
     offered: true,
-    waitlistEntryId: match.id,
-    emailSent: notify.emailSent,
-    smsSent: notify.smsSent,
+    mode: 'notify_in_order',
+    waitlistEntryId: offer.waitlistEntryId,
+    emailSent: offer.emailSent,
+    smsSent: offer.smsSent,
   };
 }

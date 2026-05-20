@@ -3,6 +3,8 @@ import { createClient } from '@/lib/supabase/server';
 import { getDashboardStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { loadWaitlistVenueCapabilities } from '@/lib/booking/load-waitlist-venue-capabilities';
+import { shouldShowWaitlistNav } from '@/lib/booking/waitlist-venue-capabilities';
+import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlags } from '@/lib/feature-flags';
 import { WaitlistPageClient } from './WaitlistPageClient';
 
 export default async function WaitlistPage() {
@@ -20,9 +22,22 @@ export default async function WaitlistPage() {
 
   const admin = getSupabaseAdminClient();
   const capabilities = await loadWaitlistVenueCapabilities(admin, venueId);
-  if (!capabilities?.showTableWaitlist && !capabilities?.showAppointmentWaitlist) {
+  if (!capabilities) {
     redirect('/dashboard');
   }
 
-  return <WaitlistPageClient capabilities={capabilities} />;
+  const { data: venueFlagsRow } = await admin
+    .from('venues')
+    .select('feature_flags')
+    .eq('id', venueId)
+    .maybeSingle();
+  const appointmentWaitlistEnabled = resolveAppointmentsFeatureFlags(
+    parseVenueFeatureFlags((venueFlagsRow as { feature_flags?: unknown } | null)?.feature_flags),
+  ).waitlist_v2;
+
+  if (!shouldShowWaitlistNav(capabilities, appointmentWaitlistEnabled)) {
+    redirect('/dashboard');
+  }
+
+  return <WaitlistPageClient venueId={venueId} capabilities={capabilities} />;
 }

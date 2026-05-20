@@ -70,6 +70,8 @@ export interface VenueSettings {
   feature_flags?: VenueFeatureFlags;
   /** Resolved flags (includes env overrides). */
   feature_flags_resolved?: ResolvedAppointmentsFeatureFlags;
+  /** 6-digit hex (no #) for guest embed widget accent (`?accent=` on iframe URL). */
+  embed_accent_colour?: string | null;
 }
 
 export type OpeningHoursDaySettings =

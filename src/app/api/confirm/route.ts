@@ -513,6 +513,17 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      if (canRefund && !refundSucceeded) {
+        return NextResponse.json(
+          {
+            error:
+              'We could not process your refund right now. Your booking has not been cancelled. Please try again or contact the venue.',
+            code: 'REFUND_FAILED',
+          },
+          { status: 502 },
+        );
+      }
+
       await supabase
         .from("bookings")
         .update({
@@ -574,6 +585,43 @@ export async function POST(request: NextRequest) {
         refund_message = "";
       }
 
+      const cancelledBookingForWaitlist = {
+        id: bookingId,
+        venue_id: booking.venue_id as string,
+        booking_date: String(booking.booking_date),
+        booking_time: String(booking.booking_time),
+        practitioner_id: booking.practitioner_id as string | null | undefined,
+        calendar_id: booking.calendar_id as string | null | undefined,
+        appointment_service_id: booking.appointment_service_id as string | null | undefined,
+        service_item_id: booking.service_item_id as string | null | undefined,
+        experience_event_id: booking.experience_event_id as string | null | undefined,
+        class_instance_id: booking.class_instance_id as string | null | undefined,
+        resource_id: booking.resource_id as string | null | undefined,
+        event_session_id: booking.event_session_id as string | null | undefined,
+      };
+
+      try {
+        const offerResult = await offerAppointmentWaitlistOnCancel(
+          supabase,
+          cancelledBookingForWaitlist,
+        );
+        if (offerResult.offered) {
+          console.info("[confirm cancel] waitlist offer sent", {
+            bookingId,
+            mode: offerResult.mode,
+            ...(offerResult.mode === 'notify_in_order'
+              ? { waitlistEntryId: offerResult.waitlistEntryId }
+              : offerResult.mode === 'notify_all'
+                ? { notifiedCount: offerResult.notifiedCount }
+                : {}),
+          });
+        }
+      } catch (waitlistErr) {
+        console.error("[confirm cancel] waitlist offer failed:", waitlistErr, {
+          bookingId,
+        });
+      }
+
       if (guest && venue?.name) {
         const cancelBookingEmail: BookingEmailData = {
           id: bookingId,
@@ -595,20 +643,6 @@ export async function POST(request: NextRequest) {
         });
         const vid = booking.venue_id;
         const refundMsg = refund_message || null;
-        const cancelledBookingForWaitlist = {
-          id: bookingId,
-          venue_id: booking.venue_id as string,
-          booking_date: String(booking.booking_date),
-          booking_time: String(booking.booking_time),
-          practitioner_id: booking.practitioner_id as string | null | undefined,
-          calendar_id: booking.calendar_id as string | null | undefined,
-          appointment_service_id: booking.appointment_service_id as string | null | undefined,
-          service_item_id: booking.service_item_id as string | null | undefined,
-          experience_event_id: booking.experience_event_id as string | null | undefined,
-          class_instance_id: booking.class_instance_id as string | null | undefined,
-          resource_id: booking.resource_id as string | null | undefined,
-          event_session_id: booking.event_session_id as string | null | undefined,
-        };
         after(async () => {
           try {
             const enriched = await enrichBookingEmailForComms(
@@ -624,22 +658,6 @@ export async function POST(request: NextRequest) {
             );
           } catch (commsErr) {
             console.error("Cancellation confirmation comms failed:", commsErr);
-          }
-          try {
-            const offerResult = await offerAppointmentWaitlistOnCancel(
-              supabase,
-              cancelledBookingForWaitlist,
-            );
-            if (offerResult.offered) {
-              console.info("[confirm cancel] waitlist offer sent", {
-                bookingId,
-                waitlistEntryId: offerResult.waitlistEntryId,
-              });
-            }
-          } catch (waitlistErr) {
-            console.error("[confirm cancel] waitlist offer failed:", waitlistErr, {
-              bookingId,
-            });
           }
         });
       }

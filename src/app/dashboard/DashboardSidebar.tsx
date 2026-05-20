@@ -14,7 +14,7 @@ import {
   shouldShowAppointmentAvailabilitySettings,
 } from '@/lib/booking/schedule-calendar-eligibility';
 import { isAppointmentPlanTier, isRestaurantTableProductTier } from '@/lib/tier-enforcement';
-import { resolveWaitlistVenueCapabilities } from '@/lib/booking/waitlist-venue-capabilities';
+import { resolveWaitlistVenueCapabilities, shouldShowWaitlistNav } from '@/lib/booking/waitlist-venue-capabilities';
 
 /**
  * Sidebar visibility matrix (maintainers: keep in sync with route guards and `lib/booking/schedule-calendar-eligibility.ts`).
@@ -35,7 +35,7 @@ import { resolveWaitlistVenueCapabilities } from '@/lib/booking/waitlist-venue-c
  * **Model links:** Services, Events, Classes, Resources from `MODEL_NAV_ITEMS` + `mergeModelNavEntries` by primary and `enabled_models`.
  * Placed after **Contacts** (and below New Booking), before Waitlist when present.
  *
- * **Waitlist:** when venue supports table and/or appointment waitlist (`resolveWaitlistVenueCapabilities`).
+ * **Waitlist:** table-only restaurants always; appointment/hybrid when `waitlist_v2` is enabled in settings.
  */
 type NavItem = { href: string; label: string; icon: React.ComponentType<{ className?: string }> };
 
@@ -80,6 +80,8 @@ export interface DashboardSidebarProps {
   isAdmin?: boolean;
   /** Venue `terminology` JSONB - drives booking list / new-booking labels (plan §6.4). */
   venueTerminology?: Record<string, unknown> | null;
+  /** Settings → Features → Appointment waitlist (`waitlist_v2`). */
+  appointmentWaitlistEnabled?: boolean;
 }
 
 const ADMIN_ONLY_HREFS = new Set(['/dashboard/reports', '/dashboard/settings']);
@@ -162,6 +164,7 @@ export function DashboardSidebar({
   enabledModels = [],
   isAdmin = false,
   venueTerminology: _venueTerminology = null,
+  appointmentWaitlistEnabled = false,
 }: DashboardSidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
@@ -243,8 +246,7 @@ export function DashboardSidebar({
       bookingModel,
       enabledModels,
     });
-    const showWaitlistNav =
-      waitlistCapabilities.showTableWaitlist || waitlistCapabilities.showAppointmentWaitlist;
+    const showWaitlistNav = shouldShowWaitlistNav(waitlistCapabilities, appointmentWaitlistEnabled);
 
     let items = BASE_NAV_ITEMS.filter((item) => {
       if (item.href === '/dashboard/waitlist' && !showWaitlistNav) return false;
@@ -327,6 +329,7 @@ export function DashboardSidebar({
     pricingTier,
     isAppointment,
     navPrimaryBookingModel,
+    appointmentWaitlistEnabled,
   ]);
 
   async function handleSignOut() {

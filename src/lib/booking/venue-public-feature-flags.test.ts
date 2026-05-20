@@ -24,6 +24,7 @@ describe('mapVenueFeatureFlagsForPublic', () => {
     const result = mapVenueFeatureFlagsForPublic({ any_available_practitioner: true });
     expect(result?.resolved?.any_available_practitioner).toBe(true);
     expect(result?.resolved?.waitlist_v2).toBe(false);
+    expect(result?.resolved?.guest_self_reschedule).toBe(true);
   });
 
   it('returns undefined for null', () => {

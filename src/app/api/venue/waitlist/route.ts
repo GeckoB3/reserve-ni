@@ -7,15 +7,17 @@ import { autoAssignTable } from '@/lib/table-availability';
 import { resolveVenueMode } from '@/lib/venue-mode';
 import { syncTableStatusesForBooking } from '@/lib/table-management/lifecycle';
 import { resolveTableAssignmentDurationBuffer } from '@/lib/table-management/booking-table-duration';
-import { createAppointmentBookingFromWaitlistEntry } from '@/lib/booking/create-appointment-from-waitlist';
-import { APPOINTMENT_WAITLIST_OFFER_TTL_MS } from '@/lib/booking/waitlist-offer-constants';
+import {
+  APPOINTMENT_WAITLIST_OFFER_TTL_MS,
+} from '@/lib/booking/waitlist-offer-constants';
 import { formatGuestDisplayName } from '@/lib/guests/name';
 import { loadWaitlistVenueCapabilities } from '@/lib/booking/load-waitlist-venue-capabilities';
 import { logWaitlistConvertedEvent } from '@/lib/booking/log-waitlist-converted-event';
-import { notifyAppointmentWaitlistOfferForEntry } from '@/lib/booking/notify-appointment-waitlist-offer';
 import { enrichWaitlistEntriesForDisplay } from '@/lib/booking/waitlist-entry-display';
-import { findAppointmentWaitlistAvailability } from '@/lib/booking/waitlist-offer-availability';
 import { formatWaitlistTimeWindowLabel } from '@/lib/booking/waitlist-time-window';
+import { offerAppointmentWaitlistEntryManually } from '@/lib/booking/manual-appointment-waitlist-offer';
+import { findAppointmentWaitlistAvailability } from '@/lib/booking/waitlist-offer-availability';
+import type { WaitlistEntryCandidate } from '@/lib/booking/offer-appointment-waitlist-on-cancel';
 import {
   isWaitlistKindAllowed,
   normalizeWaitlistKindQuery,
@@ -24,6 +26,7 @@ import {
   assertAppointmentsFeatureEnabled,
   parseVenueFeatureFlags,
 } from '@/lib/feature-flags';
+import { parseWaitlistConfig, type AppointmentWaitlistMode } from '@/lib/booking/waitlist-config';
 
 /**
  * Table waitlist: restaurant venues. Appointment waitlist: Appointments plan or restaurant + USE.
@@ -45,6 +48,16 @@ export async function GET(request: NextRequest) {
     if (!capabilities.showTableWaitlist && !capabilities.showAppointmentWaitlist) {
       return NextResponse.json({ error: 'Waitlist is not available for this venue' }, { status: 403 });
     }
+
+    const { data: venueFlagsRow } = await admin
+      .from('venues')
+      .select('feature_flags')
+      .eq('id', staff.venue_id)
+      .maybeSingle();
+    const venueFlags = parseVenueFeatureFlags(
+      (venueFlagsRow as { feature_flags?: unknown } | null)?.feature_flags,
+    );
+    const waitlistMode: AppointmentWaitlistMode = parseWaitlistConfig(venueFlags).mode;
 
     const kindParam = request.nextUrl.searchParams.get('kind');
     if (
@@ -136,7 +149,7 @@ export async function GET(request: NextRequest) {
       }),
     );
 
-    return NextResponse.json({ entries });
+    return NextResponse.json({ entries, waitlist_mode: waitlistMode });
   } catch (err) {
     console.error('GET /api/venue/waitlist failed:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
@@ -179,57 +192,109 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: 'Waitlist type is not available for this venue' }, { status: 403 });
     }
 
-    if (entryKind === 'appointment' && status === 'offered') {
-      const availability = await findAppointmentWaitlistAvailability(admin, staff.venue_id, {
-        desired_date: String(existingEntry.desired_date),
-        desired_time: existingEntry.desired_time
-          ? String(existingEntry.desired_time)
-          : null,
-        desired_time_end: (existingEntry as { desired_time_end?: string | null }).desired_time_end
-          ? String((existingEntry as { desired_time_end?: string | null }).desired_time_end)
-          : null,
-        appointment_service_id:
-          (existingEntry as { appointment_service_id?: string | null }).appointment_service_id ??
-          null,
-        service_item_id:
-          (existingEntry as { service_item_id?: string | null }).service_item_id ?? null,
-        practitioner_id:
-          (existingEntry as { practitioner_id?: string | null }).practitioner_id ?? null,
-      });
-      if (!availability.available) {
-        return NextResponse.json(
-          {
-            error:
-              availability.reason ??
-              'No appointment availability matches this guest’s requested date and time window.',
-          },
-          { status: 409 },
-        );
-      }
-    }
+    const previousStatus = (existingEntry as { status?: string }).status;
 
-    if (entryKind === 'appointment' && (status === 'offered' || status === 'confirmed')) {
+    let waitlistMode: AppointmentWaitlistMode = 'notify_in_order';
+    if (entryKind === 'appointment') {
       const { data: venueFlagsRow } = await admin
         .from('venues')
         .select('feature_flags')
         .eq('id', staff.venue_id)
         .maybeSingle();
-      try {
-        assertAppointmentsFeatureEnabled(
-          'waitlist_v2',
-          parseVenueFeatureFlags(
-            (venueFlagsRow as { feature_flags?: unknown } | null)?.feature_flags,
-          ),
+      const venueFlags = parseVenueFeatureFlags(
+        (venueFlagsRow as { feature_flags?: unknown } | null)?.feature_flags,
+      );
+      waitlistMode = parseWaitlistConfig(venueFlags).mode;
+
+      if (status === 'offered' || status === 'confirmed') {
+        try {
+          assertAppointmentsFeatureEnabled('waitlist_v2', venueFlags);
+        } catch {
+          return NextResponse.json(
+            { error: 'Appointment waitlist is not enabled for this venue', code: 'feature_disabled' },
+            { status: 403 },
+          );
+        }
+      }
+
+      if (status === 'offered' && previousStatus === 'waiting') {
+        const row = existingEntry as WaitlistEntryCandidate & {
+          desired_date: string;
+          desired_time?: string | null;
+          desired_time_end?: string | null;
+          appointment_service_id?: string | null;
+          service_item_id?: string | null;
+          practitioner_id?: string | null;
+          guest_first_name?: string | null;
+          guest_last_name?: string | null;
+          guest_email?: string | null;
+          guest_phone?: string | null;
+          created_at?: string;
+        };
+
+        const offerResult = await offerAppointmentWaitlistEntryManually(
+          admin,
+          staff.venue_id,
+          waitlistMode,
+          {
+            id: String(row.id),
+            desired_date: String(row.desired_date),
+            desired_time: row.desired_time ? String(row.desired_time) : null,
+            desired_time_end: row.desired_time_end ? String(row.desired_time_end) : null,
+            appointment_service_id: row.appointment_service_id ?? null,
+            service_item_id: row.service_item_id ?? null,
+            practitioner_id: row.practitioner_id ?? null,
+            guest_first_name: row.guest_first_name ?? null,
+            guest_last_name: row.guest_last_name ?? null,
+            guest_email: row.guest_email ?? null,
+            guest_phone: String(row.guest_phone ?? ''),
+            created_at: String(row.created_at ?? new Date().toISOString()),
+          },
         );
-      } catch {
-        return NextResponse.json(
-          { error: 'Appointment waitlist is not enabled for this venue', code: 'feature_disabled' },
-          { status: 403 },
-        );
+
+        if (!offerResult.ok) {
+          return NextResponse.json({ error: offerResult.reason }, { status: offerResult.status });
+        }
+
+        const { data: updatedEntry, error: reloadErr } = await admin
+          .from('waitlist_entries')
+          .select('*')
+          .eq('id', id)
+          .eq('venue_id', staff.venue_id)
+          .single();
+
+        if (reloadErr || !updatedEntry) {
+          return NextResponse.json({ error: 'Failed to load updated entry' }, { status: 500 });
+        }
+
+        const display = await enrichWaitlistEntriesForDisplay(admin, [
+          {
+            id: updatedEntry.id as string,
+            service_item_id: (updatedEntry as { service_item_id?: string | null }).service_item_id,
+            appointment_service_id: (updatedEntry as { appointment_service_id?: string | null })
+              .appointment_service_id,
+            practitioner_id: (updatedEntry as { practitioner_id?: string | null }).practitioner_id,
+          },
+        ]);
+        const rowDisplay = display.get(updatedEntry.id as string);
+
+        return NextResponse.json({
+          entry: {
+            ...updatedEntry,
+            guest_name:
+              (updatedEntry as { guest_name?: string | null }).guest_name ??
+              formatGuestDisplayName(
+                (updatedEntry as { guest_first_name?: string | null }).guest_first_name,
+                (updatedEntry as { guest_last_name?: string | null }).guest_last_name,
+                'guest',
+              ),
+            service_name: rowDisplay?.service_name ?? null,
+            practitioner_name: rowDisplay?.practitioner_name ?? null,
+          },
+        });
       }
     }
 
-    const previousStatus = (existingEntry as { status?: string }).status;
     let createdBookingId: string | null = null;
     let createdBookingModel: string | undefined;
 
@@ -237,45 +302,10 @@ export async function PATCH(request: NextRequest) {
       const waitlistKind = entryKind;
 
       if (waitlistKind === 'appointment') {
-        const apptResult = await createAppointmentBookingFromWaitlistEntry(
-          admin,
-          staff.venue_id,
-          staff.id,
-          {
-            desired_date: String(existingEntry.desired_date),
-            desired_time: existingEntry.desired_time
-              ? String(existingEntry.desired_time)
-              : null,
-            desired_time_end: (existingEntry as { desired_time_end?: string | null })
-              .desired_time_end
-              ? String((existingEntry as { desired_time_end?: string | null }).desired_time_end)
-              : null,
-            appointment_service_id:
-              (existingEntry as { appointment_service_id?: string | null }).appointment_service_id ??
-              null,
-            service_item_id:
-              (existingEntry as { service_item_id?: string | null }).service_item_id ?? null,
-            practitioner_id:
-              (existingEntry as { practitioner_id?: string | null }).practitioner_id ?? null,
-            guest_first_name:
-              typeof existingEntry.guest_first_name === 'string'
-                ? existingEntry.guest_first_name
-                : null,
-            guest_last_name:
-              typeof existingEntry.guest_last_name === 'string'
-                ? existingEntry.guest_last_name
-                : null,
-            guest_email:
-              typeof existingEntry.guest_email === 'string' ? existingEntry.guest_email : null,
-            guest_phone: String(existingEntry.guest_phone),
-            notes: typeof existingEntry.notes === 'string' ? existingEntry.notes : null,
-          },
+        return NextResponse.json(
+          { error: 'Appointment waitlist entries are completed when a spot is offered.' },
+          { status: 400 },
         );
-        if (!apptResult.ok) {
-          return NextResponse.json({ error: apptResult.error }, { status: apptResult.status });
-        }
-        createdBookingId = apptResult.bookingId;
-        createdBookingModel = 'unified_scheduling';
       } else {
         if (!existingEntry.desired_time) {
           return NextResponse.json(
@@ -396,7 +426,14 @@ export async function PATCH(request: NextRequest) {
     const updateFields: Record<string, unknown> = { status };
     const offerExpiresAt =
       expires_at ?? new Date(Date.now() + APPOINTMENT_WAITLIST_OFFER_TTL_MS).toISOString();
+
     if (status === 'offered') {
+      if (entryKind === 'appointment') {
+        return NextResponse.json(
+          { error: 'Appointment waitlist entries can only be offered from waiting status.' },
+          { status: 409 },
+        );
+      }
       updateFields.offered_at = new Date().toISOString();
       updateFields.expires_at = offerExpiresAt;
     }
@@ -412,37 +449,6 @@ export async function PATCH(request: NextRequest) {
     if (error) {
       console.error('PATCH /api/venue/waitlist failed:', error);
       return NextResponse.json({ error: 'Failed to update entry' }, { status: 500 });
-    }
-
-    let notifyFailed = false;
-    if (
-      entryKind === 'appointment' &&
-      status === 'offered' &&
-      previousStatus === 'waiting' &&
-      data
-    ) {
-      const notify = await notifyAppointmentWaitlistOfferForEntry(
-        admin,
-        staff.venue_id,
-        {
-          desired_date: String(data.desired_date),
-          desired_time: data.desired_time ? String(data.desired_time) : null,
-          guest_first_name:
-            typeof data.guest_first_name === 'string' ? data.guest_first_name : null,
-          guest_last_name:
-            typeof data.guest_last_name === 'string' ? data.guest_last_name : null,
-          guest_email: typeof data.guest_email === 'string' ? data.guest_email : null,
-          guest_phone: String(data.guest_phone),
-        },
-        String(data.expires_at ?? offerExpiresAt),
-      );
-      if (!notify.skipped && !notify.emailSent && !notify.smsSent) {
-        notifyFailed = true;
-        console.warn('[PATCH /api/venue/waitlist] offer recorded but guest was not notified', {
-          waitlistEntryId: id,
-          venueId: staff.venue_id,
-        });
-      }
     }
 
     if (createdBookingId && status === 'confirmed') {
@@ -480,7 +486,6 @@ export async function PATCH(request: NextRequest) {
         practitioner_name: rowDisplay?.practitioner_name ?? null,
       },
       ...(createdBookingId ? { booking_id: createdBookingId } : {}),
-      ...(notifyFailed ? { notify_failed: true } : {}),
     });
   } catch (err) {
     console.error('PATCH /api/venue/waitlist failed:', err);

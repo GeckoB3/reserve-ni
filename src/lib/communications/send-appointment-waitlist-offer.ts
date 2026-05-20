@@ -4,6 +4,7 @@ import { assertSmsSendWithinFreeAccessQuota, estimateSmsSegments, recordOutbound
 import { formatGuestDisplayName } from '@/lib/guests/name';
 import { renderAppointmentWaitlistOfferEmail } from '@/lib/emails/templates/appointment-waitlist-offer-email';
 import { renderAppointmentWaitlistOfferSms } from '@/lib/emails/templates/appointment-waitlist-offer-sms';
+import { resolveCommPolicy } from '@/lib/communications/policy-resolver';
 
 export interface AppointmentWaitlistOfferNotifyInput {
   venueId: string;
@@ -18,32 +19,43 @@ export interface AppointmentWaitlistOfferNotifyInput {
   guestPhone: string;
   desiredDate: string;
   desiredTimeHm: string;
-  expiresAtIso: string;
+  /** Internal offer expiry for notify_in_order; not shown to guests. */
+  expiresAtIso: string | null;
 }
 
 export interface AppointmentWaitlistOfferNotifyResult {
   emailSent: boolean;
   smsSent: boolean;
-}
-
-function formatOfferExpiry(iso: string): string {
-  return new Date(iso).toLocaleString('en-GB', {
-    day: 'numeric',
-    month: 'short',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  skipped?: boolean;
+  skipReason?: string;
 }
 
 /**
- * Notifies a waitlisted guest that a slot opened (Phase 1a.3 offer-on-cancel).
+ * Notifies a waitlisted guest that availability has opened.
  * Uses direct email/SMS — not tied to a booking row yet.
+ * Respects venue communication policies for `appointment_waitlist_offer`.
  */
 export async function sendAppointmentWaitlistOfferNotification(
   input: AppointmentWaitlistOfferNotifyInput,
 ): Promise<AppointmentWaitlistOfferNotifyResult> {
+  const resolved = await resolveCommPolicy({
+    venueId: input.venueId,
+    messageKey: 'appointment_waitlist_offer',
+    lane: 'appointments_other',
+  });
+
+  if (!resolved.enabled) {
+    return { emailSent: false, smsSent: false, skipped: true, skipReason: 'disabled' };
+  }
+
+  const sendEmailChannel = resolved.channels.includes('email');
+  const sendSmsChannel = resolved.channels.includes('sms');
+
+  if (!sendEmailChannel && !sendSmsChannel) {
+    return { emailSent: false, smsSent: false, skipped: true, skipReason: 'no_channels' };
+  }
+
   const guestName = formatGuestDisplayName(input.guestFirstName, input.guestLastName, 'guest');
-  const expiresAtLabel = formatOfferExpiry(input.expiresAtIso);
 
   const { subject, html, text } = renderAppointmentWaitlistOfferEmail({
     venueName: input.venueName,
@@ -53,14 +65,13 @@ export async function sendAppointmentWaitlistOfferNotification(
     guestName,
     desiredDate: input.desiredDate,
     timeWindowLabel: input.desiredTimeHm,
-    expiresAtLabel,
     bookingPageUrl: input.bookingPageUrl,
   });
 
   let emailSent = false;
   let smsSent = false;
 
-  if (input.guestEmail?.trim()) {
+  if (sendEmailChannel && input.guestEmail?.trim()) {
     try {
       await sendEmail({
         to: input.guestEmail.trim(),
@@ -77,8 +88,11 @@ export async function sendAppointmentWaitlistOfferNotification(
   }
 
   const bookingUrl = input.bookingPageUrl?.trim();
-  if (input.guestPhone?.trim() && bookingUrl) {
-    const { body: smsText } = renderAppointmentWaitlistOfferSms(bookingUrl);
+  if (sendSmsChannel && input.guestPhone?.trim() && bookingUrl) {
+    const { body: smsText } = renderAppointmentWaitlistOfferSms({
+      venueName: input.venueName,
+      bookingPageUrl: bookingUrl,
+    });
     try {
       const quota = await assertSmsSendWithinFreeAccessQuota({
         venueId: input.venueId,

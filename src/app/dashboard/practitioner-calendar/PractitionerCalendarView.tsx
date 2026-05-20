@@ -109,6 +109,7 @@ import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { HorizontalScrollHint } from '@/components/ui/HorizontalScrollHint';
 import type { VenuePublic } from '@/components/booking/types';
 import { mapApiVenueToVenuePublic } from '@/lib/booking/map-api-venue-to-public';
+import { scheduleWaitlistAlertsRefresh } from '@/lib/booking/waitlist-alerts-events';
 import { formatIsoDateInTimeZone } from '@/lib/date/format-iso-date-in-timezone';
 import { readSessionPreference, writeSessionPreference } from '@/lib/ui/session-preferences';
 import {
@@ -3258,6 +3259,9 @@ export function PractitionerCalendarView({
         const j = await res.json().catch(() => ({}));
         addToast((j as { error?: string }).error ?? 'Update failed', 'error');
         return;
+      }
+      if (body.status === 'Cancelled') {
+        scheduleWaitlistAlertsRefresh();
       }
       void fetchData({ silent: true });
     } catch {

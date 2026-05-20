@@ -241,6 +241,7 @@ export function AppointmentDetailSheet({
   const [busy, setBusy] = useState(false);
   const [notesDraft, setNotesDraft] = useState('');
   const [graceMinutes, setGraceMinutes] = useState(15);
+  const [venueTimezone, setVenueTimezone] = useState('Europe/London');
   const [editOpen, setEditOpen] = useState(false);
   const [editDate, setEditDate] = useState('');
   const [editTime, setEditTime] = useState('');
@@ -328,6 +329,8 @@ export function AppointmentDetailSheet({
           const v = await res.json();
           const g = (v as { no_show_grace_minutes?: number }).no_show_grace_minutes;
           if (typeof g === 'number' && g >= 10 && g <= 60) setGraceMinutes(g);
+          const tz = (v as { timezone?: string }).timezone;
+          if (typeof tz === 'string' && tz.trim() !== '') setVenueTimezone(tz.trim());
         }
       } catch {
         /* keep default */
@@ -481,11 +484,11 @@ export function AppointmentDetailSheet({
     detail?.status === 'Confirmed' || detail?.status === 'Booked';
   const canNoShow =
     isHeldStatus &&
-    canMarkNoShowForSlot(detail.booking_date, detail.booking_time, graceMinutes);
+    canMarkNoShowForSlot(detail.booking_date, detail.booking_time, graceMinutes, venueTimezone);
   const noShowGraceResult =
     isHeldStatus &&
-    !canMarkNoShowForSlot(detail.booking_date, detail.booking_time, graceMinutes)
-      ? validateNoShowGracePeriod(detail.booking_date, detail.booking_time, graceMinutes)
+    !canMarkNoShowForSlot(detail.booking_date, detail.booking_time, graceMinutes, venueTimezone)
+      ? validateNoShowGracePeriod(detail.booking_date, detail.booking_time, graceMinutes, venueTimezone)
       : null;
   const noShowGraceBlockedReason =
     noShowGraceResult && !noShowGraceResult.ok ? noShowGraceResult.error : undefined;

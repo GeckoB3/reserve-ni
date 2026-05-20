@@ -254,26 +254,30 @@ describe("renderAppointmentWaitlistOfferEmail", () => {
       guestName: "Alex Smith",
       desiredDate: "2026-06-15",
       timeWindowLabel: "10:00 – 14:00",
-      expiresAtLabel: "15 Jun, 14:30",
       bookingPageUrl: "https://www.reserveni.com/book/golden-whisk",
     });
-    expect(result.subject).toContain("Appointment available");
+    expect(result.subject).toContain("Appointment availability");
     expect(result.html).toContain("<!DOCTYPE html>");
-    expect(result.html).toContain("An appointment is available");
-    expect(result.html).toContain("Book appointment");
+    expect(result.html).toContain("availability has opened");
+    expect(result.html).toContain("View availability");
     expect(result.html).toContain("10:00 – 14:00");
+    expect(result.html).not.toContain("held for you");
     expect(result.text).toContain("Book online:");
     expect(result.text).toContain("028 9000 0000");
   });
 });
 
 describe("renderAppointmentWaitlistOfferSms", () => {
-  it("returns only the booking page URL", () => {
+  it("includes venue name and booking link", () => {
     const url = "https://www.reserveni.com/book/golden-whisk";
-    const result = renderAppointmentWaitlistOfferSms(url);
-    expect(result.body).toBe(url);
+    const result = renderAppointmentWaitlistOfferSms({
+      venueName: "The Golden Whisk",
+      bookingPageUrl: url,
+    });
+    expect(result.body).toContain(url);
+    expect(result.body).toContain("The Golden Whisk");
     expect(result.body).not.toContain("028");
-    expect(result.body).not.toContain("Call");
+    expect(result.body).not.toContain("held");
   });
 });
 
@@ -306,7 +310,10 @@ describe("all templates produce valid structure", () => {
       "https://pay.link",
     );
     const sms2 = renderDayOfReminderSms(SAMPLE_BOOKING, SAMPLE_VENUE);
-    const sms3 = renderAppointmentWaitlistOfferSms("https://www.reserveni.com/book/demo");
+    const sms3 = renderAppointmentWaitlistOfferSms({
+      venueName: "Demo Salon",
+      bookingPageUrl: "https://www.reserveni.com/book/demo",
+    });
     expect(typeof sms1.body).toBe("string");
     expect(sms1.body.length).toBeGreaterThan(0);
     expect(typeof sms2.body).toBe("string");

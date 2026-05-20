@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { anyAvailablePractitionerConfigSchema } from '@/lib/feature-flags/any-available-practitioner-config';
+import { waitlistConfigSchema } from '@/lib/booking/waitlist-config';
 
 /**
  * Appointments Phase 0 / 1a rollout flags (P0.3).
@@ -13,10 +14,11 @@ export const APPOINTMENTS_FEATURE_FLAG_KEYS = [
 
 export type AppointmentsFeatureFlagKey = (typeof APPOINTMENTS_FEATURE_FLAG_KEYS)[number];
 
-/** Stored on `venues.feature_flags` — only `true` keys are persisted; omitted = off. */
+/** Stored on `venues.feature_flags` — most flags persist only `true`; omitted = off. `guest_self_reschedule` persists explicit `false`; omitted = on. */
 export const venueFeatureFlagsSchema = z
   .object({
     waitlist_v2: z.boolean().optional(),
+    waitlist_config: waitlistConfigSchema.optional(),
     guest_self_reschedule: z.boolean().optional(),
     any_available_practitioner: z.boolean().optional(),
     any_available_practitioner_config: anyAvailablePractitionerConfigSchema.optional(),

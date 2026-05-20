@@ -45,6 +45,9 @@ import {
   APPOINTMENT_TIME_SLOT_LABEL_CLASS,
   APPOINTMENT_DETAILS_SUBMIT_CLASS,
   APPOINTMENT_DETAILS_INPUT_CLASS,
+  APPOINTMENT_PUBLIC_CHEVRON_SM,
+  APPOINTMENT_PUBLIC_PRICE,
+  AppointmentSummaryStrip,
 } from './appointment-public-ui';
 import type { StaffRebookBootstrapPayloadV1 } from '@/lib/booking/staff-rebook-bootstrap';
 import {
@@ -280,6 +283,8 @@ interface AppointmentBookingFlowProps {
   initialDate?: string;
   initialTime?: string;
   preselectedPractitionerId?: string;
+  preselectedServiceId?: string;
+  waitlistOfferEntryId?: string;
   /** Staff walk-ins: optional guest contact (defaults name to Walk In). */
   staffBookingSource?: 'phone' | 'walk-in';
   editBooking?: {
@@ -358,6 +363,8 @@ export function AppointmentBookingFlow({
   initialDate,
   initialTime,
   preselectedPractitionerId,
+  preselectedServiceId,
+  waitlistOfferEntryId,
   staffBookingSource = 'phone',
   editBooking,
   staffRebookBootstrap = null,
@@ -427,7 +434,7 @@ export function AppointmentBookingFlow({
   const [submitting, setSubmitting] = useState(false);
 
   // Single booking state
-  const [selectedServiceId, setSelectedServiceId] = useState<string | null>(() => editBooking?.service_id ?? null);
+  const [selectedServiceId, setSelectedServiceId] = useState<string | null>(() => editBooking?.service_id ?? preselectedServiceId ?? null);
   /** When the chosen service has variants, this is the picked variant id; null otherwise. */
   const [selectedVariantId, setSelectedVariantId] = useState<string | null>(null);
   /** Staff-created appointments can override duration for this booking only. Keyed by parent service id. */
@@ -583,6 +590,14 @@ export function AppointmentBookingFlow({
   }, [initialTime, editBooking]);
 
   useEffect(() => {
+    if (editBooking || !preselectedServiceId || catalogStaff.length === 0) return;
+    const hasService = catalogStaff.some((p) => p.services.some((s) => s.id === preselectedServiceId));
+    if (hasService) {
+      setSelectedServiceId(preselectedServiceId);
+    }
+  }, [editBooking, preselectedServiceId, catalogStaff]);
+
+  useEffect(() => {
     if (editBooking || !preselectedPractitionerId || catalogStaff.length === 0 || lockedPractitioner) return;
     if (catalogStaff.some((p) => p.id === preselectedPractitionerId)) {
       setSelectedPractitionerId(preselectedPractitionerId);
@@ -605,6 +620,9 @@ export function AppointmentBookingFlow({
         if (phantomBookings.length > 0) {
           params.set('phantoms', JSON.stringify(phantomBookings));
         }
+        if (waitlistOfferEntryId) {
+          params.set('waitlist_offer', waitlistOfferEntryId);
+        }
         const res = await fetch(bookingAvailabilityUrl(params));
         const data = await res.json();
         setSlotPractitioners(data.practitioners ?? []);
@@ -614,7 +632,7 @@ export function AppointmentBookingFlow({
         setLoading(false);
       }
     },
-    [venue.id, date, phantomBookings],
+    [venue.id, date, phantomBookings, waitlistOfferEntryId],
   );
 
   /** Month grid for the date picker (public or staff calendar API). */
@@ -1665,6 +1683,7 @@ export function AppointmentBookingFlow({
             occasion: details.occasion,
             marketing_consent: details.marketing_consent,
             collective_id: collectiveId,
+            ...(waitlistOfferEntryId ? { waitlist_offer_id: waitlistOfferEntryId } : {}),
           }),
         });
         const data = await res.json();
@@ -2044,7 +2063,6 @@ export function AppointmentBookingFlow({
               onClick={() => setStep('group_review')}
               title="Group appointment"
               description="Different services for multiple people"
-              tone="group"
               icon={
                 <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" aria-hidden>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12 6.375a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0Zm8.25 2.25a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z" />
@@ -2150,8 +2168,8 @@ export function AppointmentBookingFlow({
                           <ServiceCatalogDescription description={svc.description} />
                         </div>
                         <div className="flex flex-shrink-0 items-center gap-2">
-                          <span className="text-sm font-semibold text-brand-600">{formatFromPrice(svc.minPricePence)}</span>
-                          <svg className="h-4 w-4 text-slate-300" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                          <span className={APPOINTMENT_PUBLIC_PRICE}>{formatFromPrice(svc.minPricePence)}</span>
+                          <svg className={APPOINTMENT_PUBLIC_CHEVRON_SM} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
                           </svg>
                         </div>
@@ -2331,7 +2349,7 @@ export function AppointmentBookingFlow({
                         <ServiceCatalogDescription description={variant.description} />
                       </div>
                       <svg
-                        className="h-4 w-4 flex-shrink-0 text-slate-300"
+                        className={`${APPOINTMENT_PUBLIC_CHEVRON_SM} flex-shrink-0`}
                         fill="none"
                         viewBox="0 0 24 24"
                         strokeWidth={2}
@@ -2511,7 +2529,7 @@ export function AppointmentBookingFlow({
                         <p className="text-xs text-slate-500">First available time across the team</p>
                       </div>
                     </div>
-                    <svg className="h-4 w-4 text-slate-300" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg>
+                    <svg className={APPOINTMENT_PUBLIC_CHEVRON_SM} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg>
                   </div>
                 </button>
               ) : null}
@@ -2541,8 +2559,8 @@ export function AppointmentBookingFlow({
                         <div className="font-medium text-slate-900">{prac.name}</div>
                       </div>
                       <div className="flex flex-shrink-0 items-center gap-2">
-                        <span className="text-sm font-semibold text-brand-600">{formatPrice(offer?.price_pence ?? null)}</span>
-                        <svg className="h-4 w-4 text-slate-300" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg>
+                        <span className={APPOINTMENT_PUBLIC_PRICE}>{formatPrice(offer?.price_pence ?? null)}</span>
+                        <svg className={APPOINTMENT_PUBLIC_CHEVRON_SM} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg>
                       </div>
                     </div>
                   </button>
@@ -2555,47 +2573,93 @@ export function AppointmentBookingFlow({
 
       {step === 'slot' && (
         <div>
-          <button
-            type="button"
-            onClick={() => {
-              setSelectedTime(null);
-              setMultiServiceSegments(null);
-              if (isLockedPractitionerFlow) {
-                if (serviceHasVariants) {
-                  setStep('variant');
-                  return;
+          {isPublicGuest ? (
+            <AppointmentBackLink
+              onClick={() => {
+                setSelectedTime(null);
+                setMultiServiceSegments(null);
+                if (isLockedPractitionerFlow) {
+                  if (serviceHasVariants) {
+                    setStep('variant');
+                    return;
+                  }
+                  setSelectedServiceId(null);
+                  setSelectedVariantId(null);
+                  setDurationPopoverServiceId(null);
+                  setDurationPopoverOpenForKey(null);
+                  setStep('service');
+                } else {
+                  setSelectedPractitionerId(null);
+                  setStep('practitioner');
                 }
-                setSelectedServiceId(null);
-                setSelectedVariantId(null);
-                setDurationPopoverServiceId(null);
-                setDurationPopoverOpenForKey(null);
-                setStep('service');
-              } else {
-                setSelectedPractitionerId(null);
-                setStep('practitioner');
-              }
-            }}
-            className="mb-3 inline-flex items-center gap-1 text-sm text-brand-600 hover:text-brand-700"
-          >
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>
-            Back
-          </button>
-          <div className="mb-4 rounded-xl border border-brand-100 bg-brand-50/50 px-4 py-2.5 text-sm">
-            <div className="flex items-center gap-2 text-brand-700">
-              <span className="font-medium">
-                {selectedService?.name}
-                {selectedVariant ? ` - ${selectedVariant.name}` : ''}
-              </span>
-              <span className="text-brand-400">&middot;</span>
-              <span>{assignedStaffDisplayName || selectedPrac?.name}</span>
-              {effectiveOfferForBooking?.duration_minutes ? (
-                <>
-                  <span className="text-brand-400">&middot;</span>
-                  <span>{effectiveOfferForBooking.duration_minutes} min</span>
-                </>
-              ) : null}
+              }}
+            />
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedTime(null);
+                setMultiServiceSegments(null);
+                if (isLockedPractitionerFlow) {
+                  if (serviceHasVariants) {
+                    setStep('variant');
+                    return;
+                  }
+                  setSelectedServiceId(null);
+                  setSelectedVariantId(null);
+                  setDurationPopoverServiceId(null);
+                  setDurationPopoverOpenForKey(null);
+                  setStep('service');
+                } else {
+                  setSelectedPractitionerId(null);
+                  setStep('practitioner');
+                }
+              }}
+              className="mb-3 inline-flex items-center gap-1 text-sm text-brand-600 hover:text-brand-700"
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>
+              Back
+            </button>
+          )}
+          {isPublicGuest ? (
+            <AppointmentSummaryStrip>
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <span className="font-medium">
+                  {selectedService?.name}
+                  {selectedVariant ? ` - ${selectedVariant.name}` : ''}
+                </span>
+                <span className="ap-context-muted" aria-hidden>
+                  &middot;
+                </span>
+                <span>{assignedStaffDisplayName || selectedPrac?.name}</span>
+                {effectiveOfferForBooking?.duration_minutes ? (
+                  <>
+                    <span className="ap-context-muted" aria-hidden>
+                      &middot;
+                    </span>
+                    <span>{effectiveOfferForBooking.duration_minutes} min</span>
+                  </>
+                ) : null}
+              </div>
+            </AppointmentSummaryStrip>
+          ) : (
+            <div className="mb-4 rounded-xl border border-brand-100 bg-brand-50/50 px-4 py-2.5 text-sm">
+              <div className="flex items-center gap-2 text-brand-700">
+                <span className="font-medium">
+                  {selectedService?.name}
+                  {selectedVariant ? ` - ${selectedVariant.name}` : ''}
+                </span>
+                <span className="text-brand-400">&middot;</span>
+                <span>{assignedStaffDisplayName || selectedPrac?.name}</span>
+                {effectiveOfferForBooking?.duration_minutes ? (
+                  <>
+                    <span className="text-brand-400">&middot;</span>
+                    <span>{effectiveOfferForBooking.duration_minutes} min</span>
+                  </>
+                ) : null}
+              </div>
             </div>
-          </div>
+          )}
           <h2 className="mb-1 text-lg font-semibold text-slate-900">Date and time</h2>
           <p className="mb-4 text-sm text-slate-500">Green days have at least one bookable time. Select a day to see times.</p>
           <div className="mb-4">
@@ -2653,12 +2717,18 @@ export function AppointmentBookingFlow({
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-8 text-center">
               <p className="text-sm font-medium text-slate-600">No times available on {formatDateHuman(date)}</p>
               <p className="mt-1 text-xs text-slate-400">Try a different date above.</p>
-              {appointmentWaitlistEnabled && selectedServiceId && isPublicGuest ? (
+              {appointmentWaitlistEnabled && isPublicGuest ? (
                 <AppointmentWaitlistJoin
                   venueId={venue.id}
-                  serviceId={selectedServiceId}
-                  date={date}
-                  practitionerId={isAnyAvailablePractitionerId(selectedPractitionerId) ? null : selectedPractitionerId}
+                  initialServiceId={selectedServiceId ?? undefined}
+                  initialDate={date}
+                  initialPractitionerId={
+                    selectedPractitionerId && !isAnyAvailablePractitionerId(selectedPractitionerId)
+                      ? selectedPractitionerId
+                      : null
+                  }
+                  catalogStaff={catalogStaff}
+                  catalogLoading={catalogLoading}
                   currency={venue.currency}
                 />
               ) : null}

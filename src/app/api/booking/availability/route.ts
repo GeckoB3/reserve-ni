@@ -43,6 +43,7 @@ import type { BookingModel } from '@/types/booking-models';
 import { DEFAULT_ENTITY_BOOKING_WINDOW, loadServiceEntityBookingWindow } from '@/lib/booking/entity-booking-window';
 import { listActiveAreasForVenue } from '@/lib/areas/resolve-default-area';
 import { nextResponseIfPublicBookingBlockedForVenue } from '@/lib/booking/light-plan-public-block';
+import { loadActiveWaitlistOfferForGuestAccess } from '@/lib/booking/validate-waitlist-offer-access';
 import type { EngineServiceResult, ServiceAvailableSlot } from '@/types/availability';
 
 /** Public availability can request C/D/E explicitly when the venue primary is another model (multi-tab embed). */
@@ -544,6 +545,16 @@ async function handleAppointmentAvailability(
 
   const variantId = searchParams.get('variant_id');
   const durationParam = searchParams.get('duration_minutes');
+  const waitlistOfferId = searchParams.get('waitlist_offer');
+  let skipPastSlotFilter = false;
+
+  if (waitlistOfferId) {
+    const offer = await loadActiveWaitlistOfferForGuestAccess(supabase, waitlistOfferId, venueId);
+    if (offer) {
+      skipPastSlotFilter = true;
+    }
+  }
+
   const customDurationMinutes = durationParam ? parseInt(durationParam, 10) : null;
   if (customDurationMinutes != null && (!Number.isInteger(customDurationMinutes) || customDurationMinutes < 15 || customDurationMinutes > 14 * 60)) {
     return NextResponse.json({ error: 'Invalid duration_minutes' }, { status: 400 });
@@ -587,6 +598,9 @@ async function handleAppointmentAvailability(
       applyVariantToAppointmentInput({ services: input.services, serviceId, variant: variantOverride });
     }
     attachVenueClockToAppointmentInput(input, venueClock ?? {}, bookingWindow);
+    if (skipPastSlotFilter) {
+      input.skipPastSlotFilter = true;
+    }
     const result = computeAppointmentAvailability(input);
     if (customDurationMinutes != null && serviceId) {
       result.practitioners = result.practitioners.map((practitioner) => ({

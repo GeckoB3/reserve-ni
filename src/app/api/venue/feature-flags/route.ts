@@ -11,6 +11,11 @@ import { createClient } from '@/lib/supabase/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { listVenueCalendarSortOrder } from '@/lib/availability/appointment-any-practitioner';
 import { parseAnyAvailablePractitionerConfig } from '@/lib/feature-flags/any-available-practitioner-config';
+import {
+  clearCommunicationPoliciesCache,
+  communicationPoliciesWithWaitlistOfferEmailDefaults,
+  getVenueCommunicationPolicies,
+} from '@/lib/communications/policies';
 
 const patchSchema = venueFeatureFlagsSchema.partial();
 
@@ -129,6 +134,9 @@ export async function PATCH(request: NextRequest) {
     const merged = mergeVenueFeatureFlagsPatch(current, parsed.data);
     const stored = venueFeatureFlagsForStorage(merged);
 
+    const waitlistWasEnabled = resolveAppointmentsFeatureFlags(current).waitlist_v2;
+    const waitlistNowEnabled = resolveAppointmentsFeatureFlags(merged).waitlist_v2;
+
     const { error: updateErr } = await staff.db
       .from('venues')
       .update({ feature_flags: stored })
@@ -137,6 +145,30 @@ export async function PATCH(request: NextRequest) {
     if (updateErr) {
       console.error('PATCH /api/venue/feature-flags update failed:', updateErr.message);
       return NextResponse.json({ error: 'Failed to update feature flags' }, { status: 500 });
+    }
+
+    if (!waitlistWasEnabled && waitlistNowEnabled) {
+      try {
+        const admin = getSupabaseAdminClient();
+        const commCurrent = await getVenueCommunicationPolicies(staff.venue_id);
+        const commNext = communicationPoliciesWithWaitlistOfferEmailDefaults(commCurrent);
+        const { error: commErr } = await admin
+          .from('venues')
+          .update({
+            communication_policies: commNext as unknown as Record<string, never>,
+          })
+          .eq('id', staff.venue_id);
+        if (commErr) {
+          console.error(
+            'PATCH /api/venue/feature-flags waitlist comm defaults failed:',
+            commErr.message,
+          );
+        } else {
+          clearCommunicationPoliciesCache(staff.venue_id);
+        }
+      } catch (commSetupErr) {
+        console.error('PATCH /api/venue/feature-flags waitlist comm defaults failed:', commSetupErr);
+      }
     }
 
     const admin = getSupabaseAdminClient();

@@ -1,11 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useDismissibleLayer } from '@/lib/ui/use-dismissible-layer';
 import type { AvailableSlot, ServiceGroup } from './types';
 import type { CountryCode } from 'libphonenumber-js';
 import { PhoneWithCountryField } from '@/components/phone/PhoneWithCountryField';
 import { normalizeToE164 } from '@/lib/phone/e164';
+import { WaitlistFieldLabel, WaitlistRequiredLegend } from '@/components/booking/WaitlistFormField';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -734,11 +735,23 @@ function WaitlistForm({
   const [desiredTime, setDesiredTime] = useState('');
   const [status, setStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');
   const [message, setMessage] = useState('');
+  const firstNameId = useId();
+  const lastNameId = useId();
+  const phoneId = useId();
+  const emailId = useId();
+  const desiredTimeId = useId();
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const guestPhone = normalizeToE164(phone, phoneDefaultCountry);
-    if (!firstName.trim() || !lastName.trim() || !guestPhone) return;
+    const trimmedEmail = email.trim();
+    if (!firstName.trim() || !lastName.trim() || !guestPhone || !trimmedEmail) {
+      if (!trimmedEmail) {
+        setStatus('error');
+        setMessage('Please enter your email address.');
+      }
+      return;
+    }
     setStatus('submitting');
     try {
       const res = await fetch('/api/booking/waitlist', {
@@ -752,7 +765,7 @@ function WaitlistForm({
           first_name: firstName.trim(),
           last_name: lastName.trim(),
           guest_phone: guestPhone,
-          guest_email: email || undefined,
+          guest_email: trimmedEmail,
         }),
       });
       const data = await res.json();
@@ -787,35 +800,76 @@ function WaitlistForm({
   return (
     <form onSubmit={handleSubmit} className="mt-4 w-full space-y-3 rounded-xl border border-slate-200 bg-white p-4 text-left">
       <p className="text-xs font-medium text-slate-600">We&apos;ll notify you if a spot opens up.</p>
+      <WaitlistRequiredLegend />
       {status === 'error' && <p className="text-xs text-red-600">{message}</p>}
       <div className="grid gap-2 sm:grid-cols-2">
-        <input
-          type="text"
-          value={firstName}
-          onChange={(e) => setFirstName(e.target.value)}
-          placeholder="First name"
-          required
-          autoComplete="given-name"
-          className="min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-base placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+        <div>
+          <WaitlistFieldLabel htmlFor={firstNameId} required>
+            First name
+          </WaitlistFieldLabel>
+          <input
+            id={firstNameId}
+            type="text"
+            value={firstName}
+            onChange={(e) => setFirstName(e.target.value)}
+            required
+            autoComplete="given-name"
+            className="min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-base placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+          />
+        </div>
+        <div>
+          <WaitlistFieldLabel htmlFor={lastNameId} required>
+            Surname
+          </WaitlistFieldLabel>
+          <input
+            id={lastNameId}
+            type="text"
+            value={lastName}
+            onChange={(e) => setLastName(e.target.value)}
+            required
+            autoComplete="family-name"
+            className="min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-base placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+          />
+        </div>
+      </div>
+      <div>
+        <WaitlistFieldLabel htmlFor={phoneId} required>
+          Mobile number
+        </WaitlistFieldLabel>
+        <PhoneWithCountryField
+          id={phoneId}
+          value={phone}
+          onChange={setPhone}
+          defaultCountry={phoneDefaultCountry}
+          inputClassName="min-h-[44px] w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-base placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
         />
+      </div>
+      <div>
+        <WaitlistFieldLabel htmlFor={emailId} required>
+          Email
+        </WaitlistFieldLabel>
         <input
-          type="text"
-          value={lastName}
-          onChange={(e) => setLastName(e.target.value)}
-          placeholder="Surname"
+          id={emailId}
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
           required
-          autoComplete="family-name"
+          autoComplete="email"
           className="min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-base placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
         />
       </div>
-      <PhoneWithCountryField
-        value={phone}
-        onChange={setPhone}
-        defaultCountry={phoneDefaultCountry}
-        inputClassName="min-h-[44px] w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-base placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-      />
-      <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email (optional)" className="min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-base placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
-      <input type="time" value={desiredTime} onChange={(e) => setDesiredTime(e.target.value)} className="min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-base focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
+      <div>
+        <WaitlistFieldLabel htmlFor={desiredTimeId}>
+          Preferred time <span className="font-normal normal-case text-slate-400">(optional)</span>
+        </WaitlistFieldLabel>
+        <input
+          id={desiredTimeId}
+          type="time"
+          value={desiredTime}
+          onChange={(e) => setDesiredTime(e.target.value)}
+          className="min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-base focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+        />
+      </div>
       <div className="flex gap-2">
         <button
           type="submit"
@@ -823,6 +877,7 @@ function WaitlistForm({
             status === 'submitting' ||
             !firstName.trim() ||
             !lastName.trim() ||
+            !email.trim() ||
             !normalizeToE164(phone, phoneDefaultCountry)
           }
           className="flex-1 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"

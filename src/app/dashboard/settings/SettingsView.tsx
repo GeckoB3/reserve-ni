@@ -54,6 +54,7 @@ import { WidgetSection } from './widget/WidgetSection';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { FeatureFlagsSection } from './sections/FeatureFlagsSection';
 import type { ResolvedAppointmentsFeatureFlags, VenueFeatureFlags } from '@/lib/feature-flags';
+import { DEFAULT_RESOLVED_APPOINTMENTS_FEATURE_FLAGS } from '@/lib/feature-flags';
 interface SettingsViewProps {
   initialVenue: VenueSettings | null;
   isAdmin: boolean;
@@ -76,7 +77,12 @@ const TABS = [
   {
     key: 'profile',
     label: 'Profile',
-    description: 'Your account, business contact details, and which booking types guests can use.',
+    description: 'Your account and business contact details used across the dashboard.',
+  },
+  {
+    key: 'booking-settings',
+    label: 'Booking Settings',
+    description: 'Active booking models, guest sign-in requirements, and optional appointment features.',
   },
   {
     key: 'booking-page',
@@ -114,11 +120,6 @@ const TABS = [
     description:
       'Link with other ReserveNI venues to share calendar visibility and booking access.',
   },
-  {
-    key: 'data-import',
-    label: 'Data import',
-    description: 'CSV imports for clients and bookings with validation and undo.',
-  },
 ] as const;
 
 type TabKey = typeof TABS[number]['key'];
@@ -130,7 +131,7 @@ function resolveInitialTab(
   const t = initialTab as TabKey | undefined;
   if (t && TABS.some((x) => x.key === t)) {
     if (t === 'staff' && !isAdmin) return 'profile';
-    if (t === 'data-import' && !isAdmin) return 'profile';
+    if (t === 'booking-settings' && !isAdmin) return 'profile';
     if (t === 'linked-accounts' && !linkedAccountsAvailable) return 'profile';
     return t;
   }
@@ -1073,11 +1074,7 @@ function SettingsViewInner({
   smsCountUsesStripePeriod = false,
   publicBaseUrl,
   initialFeatureFlagsRaw = {},
-  initialFeatureFlagsResolved = {
-    waitlist_v2: false,
-    guest_self_reschedule: false,
-    any_available_practitioner: false,
-  },
+  initialFeatureFlagsResolved = DEFAULT_RESOLVED_APPOINTMENTS_FEATURE_FLAGS,
 }: SettingsViewProps) {
   const router = useRouter();
   const pathname = usePathname() ?? '/dashboard/settings';
@@ -1103,7 +1100,7 @@ function SettingsViewInner({
   const visibleTabs = useMemo(
     () =>
       TABS.filter((x) => {
-        if (x.key === 'data-import' && !isAdmin) return false;
+        if (x.key === 'booking-settings' && !isAdmin) return false;
         if (x.key === 'linked-accounts' && !linkedAccountsAvailable) return false;
         return true;
       }),
@@ -1198,7 +1195,10 @@ function SettingsViewInner({
 
   useEffect(() => {
     const raw = searchParams.get('tab');
-    if (!isAdmin && (raw === 'staff' || raw === 'data-import')) {
+    if (!isAdmin && (raw === 'staff' || raw === 'booking-settings')) {
+      queueMicrotask(() => replaceWithTab('profile'));
+    }
+    if (raw === 'data-import') {
       queueMicrotask(() => replaceWithTab('profile'));
     }
     if (raw === 'linked-accounts' && !linkedAccountsAvailable) {
@@ -1212,10 +1212,13 @@ function SettingsViewInner({
     if (hash === '#booking-widget' && selectedTab === 'profile') {
       queueMicrotask(() => replaceWithTab('booking-page'));
     }
+    if (hash === '#additional-booking-types' && selectedTab === 'profile') {
+      queueMicrotask(() => replaceWithTab('booking-settings'));
+    }
   }, [selectedTab, replaceWithTab]);
 
   useEffect(() => {
-    if (selectedTab === 'profile') {
+    if (selectedTab === 'booking-settings') {
       const timer = window.setTimeout(() => {
         if (typeof window === 'undefined') return;
         if (window.location.hash === '#additional-booking-types') {
@@ -1387,24 +1390,6 @@ function SettingsViewInner({
             />
           </SettingsProfileGroup>
 
-          <SettingsProfileGroup
-            id="additional-booking-types"
-            eyebrow="Booking types"
-            title="Models on your public page"
-            description="Choose which booking experiences are active for guests and which tools appear in your dashboard."
-          >
-            <BookingTypesSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
-            <RequireAccountLoginSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
-          </SettingsProfileGroup>
-
-          {isAppointmentsProduct && isAdmin ? (
-            <FeatureFlagsSection
-              initialRaw={initialFeatureFlagsRaw}
-              initialResolved={initialFeatureFlagsResolved}
-              onSaved={() => {}}
-            />
-          ) : null}
-
           {showRestaurantTableProfileSections && !isAppointmentsProduct && (
             <SettingsProfileGroup
               eyebrow="Dining"
@@ -1428,6 +1413,49 @@ function SettingsViewInner({
             </SettingsProfileGroup>
           )}
 
+          {isAdmin ? (
+            <SettingsProfileGroup
+              id="data-import"
+              eyebrow="Operations"
+              title="Data import"
+              description="Import clients and bookings from CSV exports of your previous booking system. The tool runs column mapping, validation, and a reversible import with a 24-hour undo window."
+            >
+              <SectionCard elevated>
+                <SectionCard.Body>
+                  <Link
+                    href="/dashboard/import"
+                    className="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700"
+                  >
+                    Open Data Import
+                  </Link>
+                </SectionCard.Body>
+              </SectionCard>
+            </SettingsProfileGroup>
+          ) : null}
+
+        </div>
+
+        <div
+          className={selectedTab === 'booking-settings' ? 'space-y-10' : 'hidden'}
+          aria-hidden={selectedTab !== 'booking-settings'}
+        >
+          <SettingsProfileGroup
+            id="additional-booking-types"
+            eyebrow="Booking types"
+            title="Models on your public page"
+            description="Choose which booking experiences are active for guests and which tools appear in your dashboard."
+          >
+            <BookingTypesSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
+            <RequireAccountLoginSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
+          </SettingsProfileGroup>
+
+          {isAppointmentsProduct && isAdmin ? (
+            <FeatureFlagsSection
+              initialRaw={initialFeatureFlagsRaw}
+              initialResolved={initialFeatureFlagsResolved}
+              onSaved={() => {}}
+            />
+          ) : null}
         </div>
 
         <div className={selectedTab === 'booking-page' ? 'space-y-10' : 'hidden'} aria-hidden={selectedTab !== 'booking-page'}>
@@ -1457,7 +1485,12 @@ function SettingsViewInner({
                 description="Copy the iframe snippet for your site and download a QR code that opens your public booking page."
               />
               <SectionCard.Body className="pt-0">
-                <WidgetSection venueName={venue.name ?? 'Venue'} venueSlug={venue.slug} baseUrl={publicBaseUrl} />
+                <WidgetSection
+                  venueName={venue.name ?? 'Venue'}
+                  venueSlug={venue.slug}
+                  baseUrl={publicBaseUrl}
+                  initialEmbedAccentColour={venue.embed_accent_colour ?? ''}
+                />
               </SectionCard.Body>
             </SectionCard>
           </SettingsProfileGroup>
@@ -1499,6 +1532,7 @@ function SettingsViewInner({
             depositConfig={venue.deposit_config}
             serviceEngineTable={showRestaurantTableProfileSections && !isAppointmentsProduct && hasServiceConfig}
             hasStripeSubscription={Boolean(venue.stripe_subscription_id?.trim())}
+            waitlistV2Enabled={initialFeatureFlagsResolved.waitlist_v2}
           />
         </div>
 
@@ -1522,26 +1556,6 @@ function SettingsViewInner({
             {selectedTab === 'linked-accounts' ? (
               <LinkedAccountsSection venueName={venue.name ?? 'Your venue'} />
             ) : null}
-          </div>
-        ) : null}
-
-        {isAdmin ? (
-          <div className={selectedTab === 'data-import' ? '' : 'hidden'} aria-hidden={selectedTab !== 'data-import'}>
-            <SectionCard elevated>
-              <SectionCard.Header
-                eyebrow="Operations"
-                title="Data import"
-                description="Import clients and bookings from CSV exports of your previous booking system. The tool runs column mapping, validation, and a reversible import with a 24-hour undo window."
-              />
-              <SectionCard.Body>
-                <Link
-                  href="/dashboard/import"
-                  className="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700"
-                >
-                  Open Data Import
-                </Link>
-              </SectionCard.Body>
-            </SectionCard>
           </div>
         ) : null}
       </div>

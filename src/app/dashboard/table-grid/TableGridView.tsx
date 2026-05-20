@@ -1487,7 +1487,7 @@ export function TableGridView({
     }
     if (nextStatus === 'No-Show') {
       const startTime = gridDataRef.current?.cells.find((cell) => cell.booking_id === bookingId)?.booking_details?.start_time ?? '00:00';
-      if (!canMarkNoShowForSlot(date, startTime, noShowGraceMinutes)) {
+      if (!canMarkNoShowForSlot(date, startTime, noShowGraceMinutes, venueTimezone)) {
         addToast('No-show can only be marked after booking start time', 'error');
         return;
       }

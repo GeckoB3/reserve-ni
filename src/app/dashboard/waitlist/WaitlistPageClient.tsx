@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { PageFrame } from '@/components/ui/dashboard/PageFrame';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
@@ -11,10 +12,12 @@ import { Pill, type PillVariant } from '@/components/ui/dashboard/Pill';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { DashboardListSkeleton, DashboardTabRowSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
+import type { AppointmentWaitlistMode } from '@/lib/booking/waitlist-config';
 import type {
   WaitlistKindFilter,
   WaitlistVenueCapabilities,
 } from '@/lib/booking/waitlist-venue-capabilities';
+import { useVenuePostgresLiveSync } from '@/lib/realtime/useVenuePostgresLiveSync';
 
 type WaitlistKind = 'table' | 'appointment';
 
@@ -92,14 +95,43 @@ function formatWaitlistDate(dateIso: string): string {
   });
 }
 
+function formatJoinedWaitlistAt(iso: string): string {
+  return new Date(iso).toLocaleString('en-GB', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function showsTimedOfferExpiry(entry: WaitlistEntry): boolean {
+  if (!entry.expires_at) return false;
+  if (entryKind(entry) === 'table') return entry.status === 'offered';
+  return entry.status === 'offered' || entry.status === 'confirmed';
+}
+
+function statusDisplayLabel(entry: WaitlistEntry): string {
+  if (entryKind(entry) === 'appointment' && entry.status === 'confirmed') {
+    return 'Complete';
+  }
+  return entry.status.charAt(0).toUpperCase() + entry.status.slice(1);
+}
+
+function isActiveWaitlistEntry(entry: WaitlistEntry): boolean {
+  if (entry.status === 'waiting') return true;
+  return entryKind(entry) === 'table' && entry.status === 'offered';
+}
+
 function appointmentStaffLabel(entry: WaitlistEntry): string | null {
   if (entry.practitioner_name) return entry.practitioner_name;
   return 'Any team member';
 }
 
-function entrySubtitle(entry: WaitlistEntry): string {
+function entrySubtitleParts(entry: WaitlistEntry): string[] {
   const kind = entryKind(entry);
-  const parts: Array<string | null | undefined> = [
+  return [
     entryKindLabel(kind),
     kind === 'appointment' && entry.service_name ? entry.service_name : null,
     kind === 'appointment' ? appointmentStaffLabel(entry) : null,
@@ -109,14 +141,27 @@ function entrySubtitle(entry: WaitlistEntry): string {
     kind === 'table'
       ? `${entry.party_size} ${entry.party_size === 1 ? 'guest' : 'guests'}`
       : null,
+    entry.created_at ? `Joined ${formatJoinedWaitlistAt(entry.created_at)}` : null,
     entry.guest_phone,
     entry.guest_email ?? undefined,
-  ];
-  return parts.filter(Boolean).join(' · ');
+  ].filter(Boolean) as string[];
 }
 
-function confirmButtonLabel(entry: WaitlistEntry): string {
-  return entryKind(entry) === 'appointment' ? 'Book appointment' : 'Confirm booking';
+function WaitlistEntrySubtitle({ entry, notes }: { entry: WaitlistEntry; notes?: boolean }) {
+  const parts = entrySubtitleParts(entry);
+  return (
+    <span className="flex flex-col gap-1">
+      <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+        {parts.map((part, index) => (
+          <Fragment key={`${part}-${index}`}>
+            {index > 0 ? <span className="text-slate-300" aria-hidden>·</span> : null}
+            <span>{part}</span>
+          </Fragment>
+        ))}
+      </span>
+      {notes && entry.notes ? <span className="break-words">{entry.notes}</span> : null}
+    </span>
+  );
 }
 
 function entryTimeLabel(entry: WaitlistEntry): string {
@@ -131,6 +176,109 @@ function appointmentOfferDisabled(entry: WaitlistEntry): boolean {
     entryKind(entry) === 'appointment' &&
     entry.status === 'waiting' &&
     entry.can_offer === false
+  );
+}
+
+const WAITLIST_ACTION_BTN =
+  'inline-flex min-h-10 items-center justify-center rounded-lg px-3 py-2 text-sm font-semibold shadow-sm transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 active:scale-[0.98] motion-reduce:transition-colors motion-reduce:active:scale-100 disabled:cursor-not-allowed disabled:opacity-50 disabled:active:scale-100';
+
+const WAITLIST_BTN_PRIMARY = `${WAITLIST_ACTION_BTN} border border-brand-800/15 bg-brand-600 text-white hover:bg-brand-700 hover:shadow-md active:bg-brand-800 active:shadow-inner focus-visible:ring-brand-500/40`;
+
+const WAITLIST_BTN_SUCCESS = `${WAITLIST_ACTION_BTN} border border-emerald-800/15 bg-emerald-600 text-white hover:bg-emerald-700 hover:shadow-md active:bg-emerald-800 active:shadow-inner focus-visible:ring-emerald-500/40`;
+
+const WAITLIST_BTN_SECONDARY = `${WAITLIST_ACTION_BTN} border border-slate-200 bg-white font-medium text-slate-600 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-700 active:border-slate-400 active:bg-slate-100 active:shadow-inner focus-visible:ring-brand-500/30`;
+
+const WAITLIST_BTN_ICON =
+  'inline-flex min-h-10 min-w-10 items-center justify-center rounded-lg text-slate-400 transition-[color,background-color,transform] duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400/40 focus-visible:ring-offset-2 hover:bg-rose-50 hover:text-rose-600 active:scale-[0.97] active:bg-rose-100 motion-reduce:transition-colors motion-reduce:active:scale-100';
+
+function WaitlistDeleteIcon() {
+  return (
+    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"
+      />
+    </svg>
+  );
+}
+
+function WaitlistEntryTrailing({
+  entry,
+  compact = false,
+  showOfferExpiry,
+  onOffer,
+  onConfirm,
+  onCancel,
+  onDelete,
+}: {
+  entry: WaitlistEntry;
+  compact?: boolean;
+  showOfferExpiry: boolean;
+  onOffer: (entry: WaitlistEntry) => void;
+  onConfirm: (entry: WaitlistEntry) => void;
+  onCancel: (entry: WaitlistEntry) => void;
+  onDelete: (id: string) => void;
+}) {
+  const offerDisabled = appointmentOfferDisabled(entry);
+  const isTableOffered = entryKind(entry) === 'table' && entry.status === 'offered';
+  const canCancel =
+    entry.status === 'waiting' || (entryKind(entry) === 'table' && entry.status === 'offered');
+
+  return (
+    <div className="flex flex-wrap items-center justify-end gap-1.5">
+      <Pill variant={statusPillVariant(entry.status)} size="sm">
+        {statusDisplayLabel(entry)}
+      </Pill>
+      {offerDisabled && entry.offer_unavailable_reason ? (
+        <span
+          className="text-right text-[10px] font-medium text-amber-800"
+          title={entry.offer_unavailable_reason}
+        >
+          {entry.offer_unavailable_reason}
+        </span>
+      ) : null}
+      {showOfferExpiry && entry.expires_at != null && showsTimedOfferExpiry(entry) ? (
+        <span className="text-[10px] font-medium text-amber-700">
+          Expires{' '}
+          {new Date(entry.expires_at).toLocaleTimeString('en-GB', {
+            hour: '2-digit',
+            minute: '2-digit',
+          })}
+        </span>
+      ) : null}
+      {entry.status === 'waiting' ? (
+        <button
+          type="button"
+          onClick={() => onOffer(entry)}
+          disabled={offerDisabled}
+          title={offerDisabled ? entry.offer_unavailable_reason ?? undefined : undefined}
+          className={WAITLIST_BTN_PRIMARY}
+        >
+          {compact ? 'Offer' : 'Offer spot'}
+        </button>
+      ) : null}
+      {isTableOffered ? (
+        <button type="button" onClick={() => onConfirm(entry)} className={WAITLIST_BTN_SUCCESS}>
+          {compact ? 'Confirm' : 'Confirm booking'}
+        </button>
+      ) : null}
+      {canCancel ? (
+        <button type="button" onClick={() => onCancel(entry)} className={WAITLIST_BTN_SECONDARY}>
+          Cancel
+        </button>
+      ) : null}
+      {entry.status === 'expired' || entry.status === 'cancelled' ? (
+        <button
+          type="button"
+          onClick={() => onDelete(entry.id)}
+          className={WAITLIST_BTN_ICON}
+          aria-label="Remove entry"
+        >
+          <WaitlistDeleteIcon />
+        </button>
+      ) : null}
+    </div>
   );
 }
 
@@ -156,11 +304,35 @@ function apiKindParam(kindFilter: WaitlistKindFilter, capabilities: WaitlistVenu
   return kindFilter;
 }
 
-export function WaitlistPageClient({ capabilities }: { capabilities: WaitlistVenueCapabilities }) {
+export function WaitlistPageClient({
+  venueId,
+  capabilities,
+}: {
+  venueId: string;
+  capabilities: WaitlistVenueCapabilities;
+}) {
+  const searchParams = useSearchParams();
+  const initialKindFromUrl = searchParams.get('kind');
+  const urlKindFilter: WaitlistKindFilter | null =
+    initialKindFromUrl === 'appointment' || initialKindFromUrl === 'table'
+      ? initialKindFromUrl
+      : null;
+
   const [entries, setEntries] = useState<WaitlistEntry[]>([]);
+  const [waitlistMode, setWaitlistMode] = useState<AppointmentWaitlistMode>('notify_in_order');
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'active' | 'all'>('active');
-  const [kindFilter, setKindFilter] = useState<WaitlistKindFilter>(capabilities.defaultKindFilter);
+  const [kindFilter, setKindFilter] = useState<WaitlistKindFilter>(() => {
+    if (
+      urlKindFilter &&
+      (urlKindFilter === 'appointment'
+        ? capabilities.showAppointmentWaitlist
+        : capabilities.showTableWaitlist)
+    ) {
+      return urlKindFilter;
+    }
+    return capabilities.defaultKindFilter;
+  });
   const [error, setError] = useState<string | null>(null);
 
   const kindTabs = useMemo(() => {
@@ -172,7 +344,11 @@ export function WaitlistPageClient({ capabilities }: { capabilities: WaitlistVen
     ];
   }, [capabilities.showKindTabs]);
 
-  const loadEntries = useCallback(async () => {
+  const loadEntries = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent ?? false;
+    if (!silent) {
+      setLoading(true);
+    }
     try {
       const params = new URLSearchParams();
       const kind = apiKindParam(kindFilter, capabilities);
@@ -184,14 +360,29 @@ export function WaitlistPageClient({ capabilities }: { capabilities: WaitlistVen
       if (res.ok) {
         const data = await res.json();
         setEntries(data.entries ?? []);
+        if (typeof data.waitlist_mode === 'string') {
+          setWaitlistMode(data.waitlist_mode as AppointmentWaitlistMode);
+        }
         setError(null);
       } else {
         setError(await readApiError(res, 'Failed to load waitlist entries'));
       }
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   }, [kindFilter, capabilities]);
+
+  const refreshWaitlist = useCallback(() => {
+    void loadEntries({ silent: true });
+  }, [loadEntries]);
+
+  const liveState = useVenuePostgresLiveSync({
+    venueId,
+    onRefresh: refreshWaitlist,
+    subscriptions: [{ table: 'waitlist_entries', filter: `venue_id=eq.${venueId}` }],
+  });
 
   useEffect(() => {
     setLoading(true);
@@ -279,10 +470,7 @@ export function WaitlistPageClient({ capabilities }: { capabilities: WaitlistVen
   }
 
   const filteredEntries = useMemo(
-    () =>
-      filter === 'active'
-        ? entries.filter((e) => e.status === 'waiting' || e.status === 'offered')
-        : entries,
+    () => (filter === 'active' ? entries.filter(isActiveWaitlistEntry) : entries),
     [entries, filter],
   );
 
@@ -320,6 +508,9 @@ export function WaitlistPageClient({ capabilities }: { capabilities: WaitlistVen
           subtitle={pageSubtitle(capabilities)}
           actions={
             <div className="flex flex-col items-stretch gap-2 sm:items-end">
+              <Pill variant={liveState === 'live' ? 'success' : 'warning'} dot>
+                {liveState === 'live' ? 'Live' : 'Reconnecting'}
+              </Pill>
               {kindTabs.length > 0 ? (
                 <TabBar tabs={kindTabs} value={kindFilter} onChange={setKindFilter} />
               ) : null}
@@ -338,8 +529,8 @@ export function WaitlistPageClient({ capabilities }: { capabilities: WaitlistVen
             title={filter === 'active' ? 'Active requests' : 'All entries'}
             description={
               filter === 'active'
-                ? 'Waiting and offered spots only.'
-                : 'Full history including confirmed, expired, and cancelled.'
+                ? 'Guests still waiting, or table spots awaiting confirmation.'
+                : 'Full history including completed, expired, and cancelled.'
             }
             right={
               <span className="text-xs font-medium tabular-nums text-slate-500">
@@ -368,80 +559,17 @@ export function WaitlistPageClient({ capabilities }: { capabilities: WaitlistVen
                   <ScheduleRow
                     timeLabel={entryTimeLabel(entry)}
                     title={entry.guest_name}
-                    subtitle={entrySubtitle(entry)}
+                    subtitle={<WaitlistEntrySubtitle entry={entry} />}
                     stripClassName={statusStripClass(entry.status)}
                     trailing={
-                      <div className="flex flex-wrap items-center justify-end gap-1.5">
-                        <Pill variant={statusPillVariant(entry.status)} size="sm">
-                          {entry.status.charAt(0).toUpperCase() + entry.status.slice(1)}
-                        </Pill>
-                        {appointmentOfferDisabled(entry) && entry.offer_unavailable_reason ? (
-                          <span
-                            className="max-w-[14rem] text-right text-[10px] font-medium text-amber-800"
-                            title={entry.offer_unavailable_reason}
-                          >
-                            {entry.offer_unavailable_reason}
-                          </span>
-                        ) : null}
-                        {entry.expires_at && entry.status === 'offered' && (
-                          <span className="text-[10px] font-medium text-amber-700">
-                            Expires{' '}
-                            {new Date(entry.expires_at).toLocaleTimeString('en-GB', {
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            })}
-                          </span>
-                        )}
-                        {entry.status === 'waiting' && (
-                          <button
-                            type="button"
-                            onClick={() => handleOffer(entry)}
-                            disabled={appointmentOfferDisabled(entry)}
-                            title={
-                              appointmentOfferDisabled(entry)
-                                ? entry.offer_unavailable_reason ?? undefined
-                                : undefined
-                            }
-                            className="min-h-10 rounded-lg bg-brand-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            Offer spot
-                          </button>
-                        )}
-                        {entry.status === 'offered' && (
-                          <button
-                            type="button"
-                            onClick={() => handleConfirm(entry)}
-                            className="min-h-10 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700"
-                          >
-                            {confirmButtonLabel(entry)}
-                          </button>
-                        )}
-                        {(entry.status === 'waiting' || entry.status === 'offered') && (
-                          <button
-                            type="button"
-                            onClick={() => handleCancel(entry)}
-                            className="min-h-10 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
-                          >
-                            Cancel
-                          </button>
-                        )}
-                        {(entry.status === 'expired' || entry.status === 'cancelled') && (
-                          <button
-                            type="button"
-                            onClick={() => handleDelete(entry.id)}
-                            className="flex min-h-10 min-w-10 items-center justify-center rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-600"
-                            aria-label="Remove entry"
-                          >
-                            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"
-                              />
-                            </svg>
-                          </button>
-                        )}
-                      </div>
+                      <WaitlistEntryTrailing
+                        entry={entry}
+                        showOfferExpiry={waitlistMode === 'notify_in_order'}
+                        onOffer={handleOffer}
+                        onConfirm={handleConfirm}
+                        onCancel={handleCancel}
+                        onDelete={handleDelete}
+                      />
                     }
                   />
                 )}
@@ -449,74 +577,18 @@ export function WaitlistPageClient({ capabilities }: { capabilities: WaitlistVen
                   <ScheduleRow
                     timeLabel={entryTimeLabel(entry)}
                     title={entry.guest_name}
-                    subtitle={
-                      entry.notes
-                        ? `${entrySubtitle(entry)}\n${entry.notes}`
-                        : entrySubtitle(entry)
-                    }
+                    subtitle={<WaitlistEntrySubtitle entry={entry} notes />}
                     stripClassName={statusStripClass(entry.status)}
                     trailing={
-                      <div className="flex flex-col items-end gap-1.5">
-                        <Pill variant={statusPillVariant(entry.status)} size="sm">
-                          {entry.status.charAt(0).toUpperCase() + entry.status.slice(1)}
-                        </Pill>
-                        {appointmentOfferDisabled(entry) && entry.offer_unavailable_reason ? (
-                          <span className="max-w-[14rem] text-right text-[10px] font-medium text-amber-800">
-                            {entry.offer_unavailable_reason}
-                          </span>
-                        ) : null}
-                        <div className="flex flex-wrap justify-end gap-1">
-                          {entry.status === 'waiting' && (
-                            <button
-                              type="button"
-                              onClick={() => handleOffer(entry)}
-                              disabled={appointmentOfferDisabled(entry)}
-                              title={
-                                appointmentOfferDisabled(entry)
-                                  ? entry.offer_unavailable_reason ?? undefined
-                                  : undefined
-                              }
-                              className="min-h-10 rounded-lg bg-brand-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                              Offer
-                            </button>
-                          )}
-                          {entry.status === 'offered' && (
-                            <button
-                              type="button"
-                              onClick={() => handleConfirm(entry)}
-                              className="min-h-10 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700"
-                            >
-                              {entryKind(entry) === 'appointment' ? 'Book' : 'Confirm'}
-                            </button>
-                          )}
-                          {(entry.status === 'waiting' || entry.status === 'offered') && (
-                            <button
-                              type="button"
-                              onClick={() => handleCancel(entry)}
-                              className="min-h-10 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
-                            >
-                              Cancel
-                            </button>
-                          )}
-                          {(entry.status === 'expired' || entry.status === 'cancelled') && (
-                            <button
-                              type="button"
-                              onClick={() => handleDelete(entry.id)}
-                              className="flex min-h-10 min-w-10 items-center justify-center rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-600"
-                              aria-label="Remove entry"
-                            >
-                              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-                                <path
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                  d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"
-                                />
-                              </svg>
-                            </button>
-                          )}
-                        </div>
-                      </div>
+                      <WaitlistEntryTrailing
+                        entry={entry}
+                        compact
+                        showOfferExpiry={waitlistMode === 'notify_in_order'}
+                        onOffer={handleOffer}
+                        onConfirm={handleConfirm}
+                        onCancel={handleCancel}
+                        onDelete={handleDelete}
+                      />
                     }
                   />
                 )}

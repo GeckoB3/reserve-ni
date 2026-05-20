@@ -42,6 +42,7 @@ describe('createAppointmentBookingFromWaitlistEntry', () => {
     vi.spyOn(waitlistOfferAvailability, 'findAppointmentWaitlistAvailability').mockResolvedValue({
       available: false,
       sampleSlotStartHm: null,
+      sampleCalendarId: null,
       reason: 'No appointment slots are available in this guest’s requested window.',
     });
 

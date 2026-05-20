@@ -1,13 +1,12 @@
 'use client';
 
 import { createContext, useContext, type ReactNode } from 'react';
-import type { ResolvedAppointmentsFeatureFlags } from '@/lib/feature-flags';
+import {
+  DEFAULT_RESOLVED_APPOINTMENTS_FEATURE_FLAGS,
+  type ResolvedAppointmentsFeatureFlags,
+} from '@/lib/feature-flags';
 
-const DEFAULT_FLAGS: ResolvedAppointmentsFeatureFlags = {
-  waitlist_v2: false,
-  guest_self_reschedule: false,
-  any_available_practitioner: false,
-};
+const DEFAULT_FLAGS: ResolvedAppointmentsFeatureFlags = DEFAULT_RESOLVED_APPOINTMENTS_FEATURE_FLAGS;
 
 const VenueFeatureFlagsContext = createContext<ResolvedAppointmentsFeatureFlags>(DEFAULT_FLAGS);
 
