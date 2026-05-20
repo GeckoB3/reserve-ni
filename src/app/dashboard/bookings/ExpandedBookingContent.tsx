@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BOOKING_PRIMARY_ACTIONS,
   BOOKING_REVERT_ACTIONS,
@@ -21,8 +21,10 @@ import {
 } from '@/lib/booking/infer-booking-row-model';
 import { GuestMessageChannelSelect } from '@/components/booking/GuestMessageChannelSelect';
 import type { GuestMessageChannel, GuestMessageSendResult } from '@/lib/booking/guest-message-channel';
+import { phoneToTelHref } from '@/lib/phone/e164';
 import Link from 'next/link';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
+import { ConfirmDialog } from '@/components/ui/primitives/ConfirmDialog';
 import { Pill } from '@/components/ui/dashboard/Pill';
 import { BookingStatusPill } from '@/components/ui/dashboard/BookingStatusPill';
 import {
@@ -75,7 +77,11 @@ import { useOptionalDashboardDetailCache } from '@/components/providers/Dashboar
 import { bookingDetailLiteFromCachePayload } from '@/lib/booking/resolve-booking-detail-lite';
 import { mapContactGuestHistoryToAccordionRows } from '@/lib/booking/map-contact-guest-history';
 import { guestStubFromBookingRow } from '@/lib/booking/booking-row-guest-stub';
-import { bookingDetailLiteFromListRow, bookingDisplayEndHm } from '@/lib/booking/booking-detail-from-row';
+import {
+  bookingDetailLiteFromListRow,
+  bookingDisplayEndHm,
+  resolveExpandedBookingServiceLine,
+} from '@/lib/booking/booking-detail-from-row';
 import {
   mergeBookingRowOverlay,
   overlayFromPatchBody,
@@ -85,6 +91,7 @@ import {
   retainBookingRowOverlay,
   type BookingRowOverlay,
 } from '@/lib/booking/booking-row-overlay';
+import { formatCommunicationLogLabel } from '@/lib/communications/display-labels';
 
 export interface BookingRow {
   id: string;
@@ -128,6 +135,7 @@ export interface BookingRow {
   processing_time_blocks?: unknown | null;
   booking_model?: string | null;
   service_name?: string | null;
+  booking_item_name?: string | null;
   guest_attendance_confirmed_at?: string | null;
   staff_attendance_confirmed_at?: string | null;
   /** Practitioner calendar / day-sheet "Arrived" indicator; PATCH via `client_arrived`. */
@@ -153,7 +161,15 @@ export interface BookingDetailLite {
     tags?: string[];
     customer_profile_notes?: string | null;
   } | null;
-  communications: Array<{ id: string; message_type: string; channel: string; status: string; created_at: string }>;
+  communications: Array<{
+    id: string;
+    message_type: string;
+    channel: string;
+    status: string;
+    created_at: string;
+    recipient?: string | null;
+    error_message?: string | null;
+  }>;
   events: Array<{ id: string; event_type: string; created_at: string }>;
   combination_staff_notes?: string | null;
   cde_context?: {
@@ -162,6 +178,7 @@ export interface BookingDetailLite {
     subtitle?: string | null;
   } | null;
   inferred_booking_model?: BookingModel;
+  service_variant_name?: string | null;
 }
 
 function formatRelative(value: string | null | undefined): string {
@@ -182,11 +199,16 @@ function formatDateNice(value: string): string {
   return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
 }
 
-/** CDE context repeats the expanded header summary (service line / title) for these models. */
+/**
+ * CDE context card is omitted when the title already appears in the header summary row,
+ * or when the model always surfaces the offering in the list row header.
+ */
 const BOOKING_MODELS_OMITTING_CDE_CONTEXT_CARD: ReadonlySet<BookingModel> = new Set([
   'class_session',
   'event_ticket',
   'resource_booking',
+  'practitioner_appointment',
+  'unified_scheduling',
 ]);
 
 function guestMessageSuccessCaption(channel: GuestMessageChannel): string {
@@ -250,6 +272,7 @@ export function ExpandedBookingContent({
 }) {
   const [showMessageBox, setShowMessageBox] = useState(false);
   const [guestMessageChannel, setGuestMessageChannel] = useState<GuestMessageChannel>('email');
+  const messageTextareaRef = useRef<HTMLTextAreaElement>(null);
   const [guestMessageFeedback, setGuestMessageFeedback] = useState<{
     tone: 'success' | 'error' | 'warning';
     text: string;
@@ -481,6 +504,14 @@ export function ExpandedBookingContent({
     : booking.guest_name;
   const guestPhone = profileGuest?.phone ?? booking.guest_phone;
   const guestEmail = profileGuest?.email ?? booking.guest_email;
+  const guestTelHref = useMemo(() => phoneToTelHref(guestPhone), [guestPhone]);
+
+  const openGuestMessageComposer = useCallback((channel: GuestMessageChannel) => {
+    setModifyBookingOpen(false);
+    setGuestMessageChannel(channel);
+    setShowMessageBox(true);
+    window.requestAnimationFrame(() => messageTextareaRef.current?.focus());
+  }, []);
   const contactsGuestId = profileGuestId;
   const contactsHref = contactsGuestId
     ? `/dashboard/contacts?guest=${encodeURIComponent(contactsGuestId)}`
@@ -493,7 +524,13 @@ export function ExpandedBookingContent({
     ? `£${(effectiveBooking.deposit_amount_pence / 100).toFixed(2)}`
     : null;
   const endTime = bookingDisplayEndHm(booking);
-  const serviceLine = booking.service_name ?? activeDetail?.cde_context?.title ?? null;
+  const serviceLine = resolveExpandedBookingServiceLine(booking, activeDetail);
+  const cdeContextForCard =
+    activeDetail?.cde_context &&
+    !BOOKING_MODELS_OMITTING_CDE_CONTEXT_CARD.has(inferredBookingModel) &&
+    (!serviceLine || activeDetail.cde_context.title.trim() !== serviceLine)
+      ? activeDetail.cde_context
+      : null;
   const guestProfileAndNotesCount = [
     ...(activeDetail?.guest?.tags ?? []),
     activeDetail?.guest?.customer_profile_notes,
@@ -502,9 +539,6 @@ export function ExpandedBookingContent({
     activeDetail?.special_requests,
     activeDetail?.internal_notes,
   ].filter(Boolean).length;
-  const confirmationSentAt = activeDetail?.communications.find(
-    (comm) => comm.message_type === 'booking_confirmation_email' || comm.message_type === 'booking_confirmation_sms',
-  )?.created_at;
 
   const patchBookingQuick = async (body: Record<string, unknown>, loadingKey: string) => {
     setInlineActionLoading(loadingKey);
@@ -596,10 +630,15 @@ export function ExpandedBookingContent({
 
   const canCancel = canTransitionBookingStatus(effectiveBooking.status, 'Cancelled');
   const canNoShow = canTransitionBookingStatus(effectiveBooking.status, 'No-Show');
+  const canUndoNoShow =
+    effectiveBooking.status === 'No-Show' &&
+    canTransitionBookingStatus(effectiveBooking.status, 'Booked');
   const revertFromBookingStatus = BOOKING_REVERT_ACTIONS[effectiveBooking.status as BookingStatus];
   /** Suppress rarely-used Booked → Pending (“Mark pending”) in this dense inline bar. */
   const revertAction =
-    revertFromBookingStatus?.target === 'Pending' ? undefined : revertFromBookingStatus;
+    revertFromBookingStatus?.target === 'Pending' || canUndoNoShow
+      ? undefined
+      : revertFromBookingStatus;
   const forwardPrimaryLabel = (target: BookingStatus, defaultLabel: string) => {
     if (target === 'Seated' && !tableStyle) return 'Start';
     return defaultLabel;
@@ -791,15 +830,26 @@ export function ExpandedBookingContent({
               </div>
             </div>
             <div className="grid grid-cols-2 gap-1.5 sm:flex sm:shrink-0 sm:items-center">
-              {guestPhone ? (
-                <a href={`tel:${guestPhone}`} className="inline-flex min-h-8 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 text-[11px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50">
+              {guestTelHref ? (
+                <a
+                  href={guestTelHref}
+                  onClick={(e) => e.stopPropagation()}
+                  className="inline-flex min-h-8 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 text-[11px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+                >
                   Call
                 </a>
               ) : null}
               {guestEmail ? (
-                <a href={`mailto:${guestEmail}`} className="inline-flex min-h-8 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 text-[11px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openGuestMessageComposer('email');
+                  }}
+                  className="inline-flex min-h-8 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 text-[11px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+                >
                   Email
-                </a>
+                </button>
               ) : null}
             </div>
           </div>
@@ -807,12 +857,16 @@ export function ExpandedBookingContent({
             <div className="min-w-0 rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
               <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Email</p>
               {guestEmail ? (
-                <a
-                  href={`mailto:${guestEmail}`}
-                  className="block min-w-0 break-words text-xs font-bold leading-snug text-slate-800 [overflow-wrap:anywhere] hover:text-brand-700"
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openGuestMessageComposer('email');
+                  }}
+                  className="block min-w-0 break-words text-left text-xs font-bold leading-snug text-slate-800 [overflow-wrap:anywhere] hover:text-brand-700"
                 >
                   {guestEmail}
-                </a>
+                </button>
               ) : (
                 <p className="text-xs font-bold leading-snug text-slate-400">Not provided</p>
               )}
@@ -874,12 +928,6 @@ export function ExpandedBookingContent({
               <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
                 <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Checked in</p>
                 <p className="truncate text-xs font-bold text-slate-700">{formatRelative(activeDetail.checked_in_at)}</p>
-              </div>
-            ) : null}
-            {confirmationSentAt ? (
-              <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
-                <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Confirmation</p>
-                <p className="truncate text-xs font-bold text-slate-700">Sent {formatRelative(confirmationSentAt)}</p>
               </div>
             ) : null}
             <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
@@ -1080,6 +1128,19 @@ export function ExpandedBookingContent({
                 No-Show
               </button>
             )}
+            {canUndoNoShow && (
+              <button
+                type="button"
+                disabled={toolbarBusy}
+                onClick={() => handleStatusClick('Booked', 'Undo No-Show')}
+                className={`${EXP_BOOKING_BTN} font-semibold ${BOOKING_BOOKED_LIGHT_BUTTON}`}
+              >
+                <svg className={EXP_BOOKING_ICO} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 15 3 9m0 0 6-6M3 9h12a6 6 0 0 1 0 12h-3" />
+                </svg>
+                Undo No-Show
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -1203,6 +1264,7 @@ export function ExpandedBookingContent({
             )}
           </div>
           <textarea
+            ref={messageTextareaRef}
             value={draftMessage}
             onChange={(e) => onMessageDraftChange(e.target.value)}
             rows={3}
@@ -1325,7 +1387,7 @@ export function ExpandedBookingContent({
       ) : null}
 
       {/* CDE context — omitted when title already appears in the summary row */}
-      {activeDetail?.cde_context && !BOOKING_MODELS_OMITTING_CDE_CONTEXT_CARD.has(inferredBookingModel) && (
+      {cdeContextForCard ? (
         <SectionCard className="border-emerald-200 bg-emerald-50/30">
           <SectionCard.Body className="p-4">
             <div className="flex items-start gap-3">
@@ -1333,15 +1395,15 @@ export function ExpandedBookingContent({
                 <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" /></svg>
               </div>
               <div>
-                <p className="text-sm font-semibold text-slate-900">{activeDetail.cde_context.title}</p>
-                {activeDetail.cde_context.subtitle && (
-                  <p className="mt-0.5 text-xs text-slate-600">{activeDetail.cde_context.subtitle}</p>
-                )}
+                <p className="text-sm font-semibold text-slate-900">{cdeContextForCard.title}</p>
+                {cdeContextForCard.subtitle ? (
+                  <p className="mt-0.5 text-xs text-slate-600">{cdeContextForCard.subtitle}</p>
+                ) : null}
               </div>
             </div>
           </SectionCard.Body>
         </SectionCard>
-      )}
+      ) : null}
 
       {/* Group booking */}
       {booking.group_booking_id && (
@@ -1370,89 +1432,147 @@ export function ExpandedBookingContent({
         </SectionCard>
       )}
 
-      {/* Communications and booking activity — header always present to avoid layout shift when data arrives */}
+      {/* Timeline — booking status / staff activity events */}
       <details className={bookingExpandAccordionDetailsClass}>
-          <summary className={bookingExpandAccordionSummaryClass}>
-            <span>Activity</span>
-            <span className="text-[11px] font-medium text-slate-400 group-open:hidden">
-              {`${(activeDetail?.communications ?? []).length} comms · ${(activeDetail?.events ?? []).length} events`}
-            </span>
-            <svg className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-open:rotate-180" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
-            </svg>
-          </summary>
-          <div className={`${bookingExpandAccordionBodyClass} space-y-3`}>
-            {(activeDetail?.communications ?? []).length > 0 ? (
-              <div>
-                <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">Communications</p>
-                <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                  {(activeDetail?.communications ?? []).slice(0, 6).map((comm) => (
-                    <div key={comm.id} className="flex min-w-0 items-center justify-between gap-2 rounded-lg border border-slate-200/90 bg-white px-2.5 py-2 text-[11px] text-slate-600 shadow-sm ring-1 ring-slate-900/[0.03]">
-                      <span className="min-w-0 truncate">
-                        <span className={`mr-1.5 inline-block h-1.5 w-1.5 rounded-full ${comm.status === 'sent' ? 'bg-emerald-400' : comm.status === 'failed' ? 'bg-red-400' : 'bg-amber-400'}`} />
-                        {comm.message_type.replace(/_/g, ' ')}
-                      </span>
-                      <span className="shrink-0 text-slate-400">{comm.channel} · {formatRelative(comm.created_at)}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-            {(activeDetail?.events ?? []).length > 0 ? (
-              <div>
-                <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">Timeline</p>
-                <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                  {(activeDetail?.events ?? []).slice(0, 6).map((event) => (
-                    <div key={event.id} className="flex min-w-0 items-center justify-between gap-2 rounded-lg border border-slate-200/90 bg-white px-2.5 py-2 text-[11px] text-slate-600 shadow-sm ring-1 ring-slate-900/[0.03]">
-                      <span className="min-w-0 truncate font-medium">{event.event_type.replace(/_/g, ' ')}</span>
-                      <span className="shrink-0 text-slate-400">{formatRelative(event.created_at)}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-          </div>
-        </details>
-
-      {/* Inline confirmation dialog */}
-      {confirmAction && (
-        <SectionCard className="border-red-200 bg-red-50/40">
-          <SectionCard.Body className="p-4">
-            <p className="text-sm font-bold text-red-800">{confirmAction.label}</p>
-            <p className="mt-1 text-xs text-red-700">
-              Confirm {confirmAction.label.toLowerCase()} for {guestName}
-              {' '}({booking.party_size} {tableStyle ? `cover${booking.party_size !== 1 ? 's' : ''}` : `person${booking.party_size !== 1 ? 's' : ''}`}) at {booking.booking_time.slice(0, 5)}?
+        <summary className={bookingExpandAccordionSummaryClass}>
+          <span>Timeline</span>
+          <span className="text-[11px] font-medium text-slate-400 group-open:hidden">
+            {(activeDetail?.events ?? []).length > 0
+              ? `${activeDetail!.events.length} event${activeDetail!.events.length === 1 ? '' : 's'}`
+              : detailLoading
+                ? 'Loading…'
+                : 'No events'}
+          </span>
+          <svg className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-open:rotate-180" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+          </svg>
+        </summary>
+        <div className={bookingExpandAccordionBodyClass}>
+          {(activeDetail?.events ?? []).length > 0 ? (
+            <ul className="space-y-2">
+              {(activeDetail?.events ?? []).map((event) => (
+                <li
+                  key={event.id}
+                  className="flex min-w-0 items-center justify-between gap-2 rounded-lg border border-slate-200/90 bg-white px-2.5 py-2 text-[11px] text-slate-600 shadow-sm ring-1 ring-slate-900/[0.03]"
+                >
+                  <span className="min-w-0 truncate font-medium capitalize">
+                    {event.event_type.replace(/_/g, ' ')}
+                  </span>
+                  <span className="shrink-0 text-slate-400">{formatRelative(event.created_at)}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-xs text-slate-500">
+              {detailLoading ? 'Loading timeline…' : 'No booking activity recorded yet.'}
             </p>
-            <div className="mt-3 flex gap-1.5">
-              <button
-                type="button"
-                onClick={() => {
-                  const fromStatus = effectiveBooking.status as BookingStatus;
-                  setRowOverlay((prev) =>
-                    mergeBookingRowOverlay(
-                      prev,
-                      overlayFromStatusTransition(fromStatus, confirmAction.status, tableStyle),
-                    ),
-                  );
-                  setStatusActionPending(true);
-                  onStatusAction(confirmAction.status);
-                  setConfirmAction(null);
-                }}
-                className="rounded-xl bg-red-600 px-[15px] py-2 text-xs font-semibold text-white hover:bg-red-700"
-              >
-                {confirmAction.label}
-              </button>
-              <button
-                type="button"
-                onClick={() => setConfirmAction(null)}
-                className="rounded-xl border border-slate-200 bg-white px-[15px] py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
-              >
-                Keep as is
-              </button>
-            </div>
-          </SectionCard.Body>
-        </SectionCard>
-      )}
+          )}
+        </div>
+      </details>
+
+      {/* Communications — emails and SMS sent to the guest for this booking */}
+      <details className={bookingExpandAccordionDetailsClass}>
+        <summary className={bookingExpandAccordionSummaryClass}>
+          <span>Communications</span>
+          <span className="text-[11px] font-medium text-slate-400 group-open:hidden">
+            {(activeDetail?.communications ?? []).length > 0
+              ? `${activeDetail!.communications.length} message${activeDetail!.communications.length === 1 ? '' : 's'}`
+              : detailLoading
+                ? 'Loading…'
+                : 'None sent'}
+          </span>
+          <svg className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-open:rotate-180" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+          </svg>
+        </summary>
+        <div className={bookingExpandAccordionBodyClass}>
+          {(activeDetail?.communications ?? []).length > 0 ? (
+            <ul className="space-y-2">
+              {(activeDetail?.communications ?? []).map((comm) => (
+                <li
+                  key={comm.id}
+                  className="rounded-lg border border-slate-200/90 bg-white px-2.5 py-2 text-[11px] text-slate-600 shadow-sm ring-1 ring-slate-900/[0.03]"
+                >
+                  <div className="flex min-w-0 items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span
+                          className={`rounded px-1 py-0.5 text-[10px] font-semibold uppercase ${
+                            comm.channel === 'email'
+                              ? 'bg-blue-50 text-blue-800'
+                              : 'bg-emerald-50 text-emerald-800'
+                          }`}
+                        >
+                          {comm.channel}
+                        </span>
+                        <span className="font-medium text-slate-800">
+                          {formatCommunicationLogLabel(comm.message_type)}
+                        </span>
+                        <span
+                          className={`rounded px-1 py-0.5 text-[10px] font-semibold capitalize ${
+                            comm.status === 'sent' || comm.status === 'delivered'
+                              ? 'bg-emerald-50 text-emerald-700'
+                              : comm.status === 'failed' || comm.status === 'bounced'
+                                ? 'bg-red-50 text-red-700'
+                                : 'bg-amber-50 text-amber-800'
+                          }`}
+                        >
+                          {comm.status}
+                        </span>
+                      </div>
+                      {comm.recipient ? (
+                        <p className="mt-0.5 truncate text-[10px] text-slate-400">To {comm.recipient}</p>
+                      ) : null}
+                      {comm.error_message && comm.status === 'failed' ? (
+                        <p className="mt-0.5 text-[10px] text-red-600">{comm.error_message}</p>
+                      ) : null}
+                    </div>
+                    <span className="shrink-0 text-slate-400">{formatRelative(comm.created_at)}</span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-xs text-slate-500">
+              {detailLoading
+                ? 'Loading communications…'
+                : 'No emails or SMS have been sent to the guest for this booking yet.'}
+            </p>
+          )}
+        </div>
+      </details>
+
+      <ConfirmDialog
+        open={confirmAction !== null}
+        onOpenChange={(open) => {
+          if (!open) setConfirmAction(null);
+        }}
+        title={confirmAction?.label ?? ''}
+        message={
+          confirmAction
+            ? `Confirm ${confirmAction.label.toLowerCase()} for ${guestName} (${booking.party_size} ${
+                tableStyle
+                  ? `cover${booking.party_size !== 1 ? 's' : ''}`
+                  : `person${booking.party_size !== 1 ? 's' : ''}`
+              }) at ${booking.booking_time.slice(0, 5)}?`
+            : ''
+        }
+        confirmLabel={confirmAction?.label ?? 'Confirm'}
+        cancelLabel="Keep as is"
+        onConfirm={() => {
+          if (!confirmAction) return;
+          const fromStatus = effectiveBooking.status as BookingStatus;
+          setRowOverlay((prev) =>
+            mergeBookingRowOverlay(
+              prev,
+              overlayFromStatusTransition(fromStatus, confirmAction.status, tableStyle),
+            ),
+          );
+          setStatusActionPending(true);
+          onStatusAction(confirmAction.status);
+        }}
+        destructive={confirmAction ? isDestructiveBookingStatus(confirmAction.status) : false}
+      />
 
       {modifyBookingOpen && (
         <StaffExpandedBookingModifyModal

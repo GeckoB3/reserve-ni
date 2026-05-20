@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import {
+  parseVenueFeatureFlags,
+  resolveAppointmentsFeatureFlag,
+} from '@/lib/feature-flags';
 import type { CommunicationChannel, CommunicationLane, CommunicationMessageKey } from '@/lib/communications/policies';
 import { resolveCommPolicy } from '@/lib/communications/policy-resolver';
 import {
@@ -13,6 +17,8 @@ import {
   renderCommunicationEmail,
   renderCommunicationSms,
 } from '@/lib/communications/renderer';
+import { renderAppointmentWaitlistOfferEmail } from '@/lib/emails/templates/appointment-waitlist-offer-email';
+import { renderAppointmentWaitlistOfferSms } from '@/lib/emails/templates/appointment-waitlist-offer-sms';
 
 /**
  * POST /api/venue/communication-preview
@@ -43,9 +49,17 @@ export async function POST(request: NextRequest) {
     const admin = getSupabaseAdminClient();
     const { data: venue } = await admin
       .from('venues')
-      .select('name, address, booking_model')
+      .select('name, address, booking_model, feature_flags')
       .eq('id', staff.venue_id)
       .single();
+
+    const venueFlags = parseVenueFeatureFlags(
+      (venue as { feature_flags?: unknown } | null)?.feature_flags,
+    );
+    const guestSelfRescheduleEnabled = resolveAppointmentsFeatureFlag(
+      'guest_self_reschedule',
+      venueFlags,
+    );
 
     const bookingModel =
       (venue as { booking_model?: string | null } | null)?.booking_model ?? null;
@@ -62,6 +76,46 @@ export async function POST(request: NextRequest) {
       lane,
       sampleVariant,
     );
+
+    if (messageKey === 'appointment_waitlist_offer') {
+      const bookingPageUrl = venueData.booking_page_url ?? 'https://www.reserveni.com/book/preview';
+      if (channel === 'email') {
+        const email = renderAppointmentWaitlistOfferEmail({
+          venueName: venueData.name,
+          venueLogoUrl: venueData.logo_url,
+          venueAddress: venueData.address,
+          venuePhone: venueData.phone,
+          guestName: 'Alex Smith',
+          desiredDate: booking.booking_date,
+          timeWindowLabel: booking.booking_time.slice(0, 5),
+          bookingPageUrl,
+        });
+        return NextResponse.json({
+          messageKey,
+          channel,
+          lane,
+          subject: email.subject,
+          html: email.html,
+          text: email.text,
+          previewSampleKind: sampleVariant ?? lane,
+        });
+      }
+
+      const sms = renderAppointmentWaitlistOfferSms({
+        venueName: venueData.name,
+        bookingPageUrl,
+      });
+      return NextResponse.json({
+        messageKey,
+        channel,
+        lane,
+        subject: null,
+        html: null,
+        text: sms.body,
+        previewSampleKind: sampleVariant ?? lane,
+      });
+    }
+
     const emailCustomMessage =
       channel === 'email'
         ? customMessage
@@ -94,6 +148,7 @@ export async function POST(request: NextRequest) {
             changeSummary: 'Time moved by 30 minutes.',
             message:
               'We have a quick update about your booking. Please contact us if you need anything else.',
+            guestSelfRescheduleEnabled,
           })
         : null;
     const smsPreview =
@@ -119,6 +174,7 @@ export async function POST(request: NextRequest) {
             changeSummary: 'Time moved by 30 minutes.',
             message:
               'We have a quick update about your booking. Please contact us if you need anything else.',
+            guestSelfRescheduleEnabled,
           })
         : null;
 

@@ -7,8 +7,11 @@ import { enrichBookingEmailForAppointment } from '@/lib/emails/booking-email-enr
 import { getVenueCommunicationPolicies } from '@/lib/communications/policies';
 import { sendPolicyMessage } from '@/lib/communications/outbound';
 import { isCdeBookingRow } from '@/lib/booking/cde-booking';
+import { inferBookingRowModel } from '@/lib/booking/infer-booking-row-model';
+import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import type { CronGuestInfo as GuestInfo, CronBookingRow as BookingRow } from '@/lib/cron/comms-types';
 import { formatGuestDisplayName } from '@/lib/guests/name';
+import { isAppointmentPlanTier } from '@/lib/tier-enforcement';
 import {
   CRON_COMMS_TOLERANCE_MS,
   bookingCivilDatesForPostVisitWindow,
@@ -17,10 +20,13 @@ import {
   msUntilBookingStartUtc,
 } from '@/lib/cron/comms-timing';
 
+const BOOKING_APPOINTMENT_FK_COLUMNS =
+  'event_session_id, calendar_id, service_item_id, practitioner_id, appointment_service_id';
+
 const BOOKING_SELECT_BASE =
-  'id, venue_id, guest_id, booking_model, guest_email, booking_date, booking_time, party_size, special_requests, dietary_notes, deposit_amount_pence, deposit_status, cancellation_deadline, status, experience_event_id, class_instance_id, resource_id, guest:guests(first_name, last_name, email, phone)';
+  `id, venue_id, guest_id, booking_model, guest_email, booking_date, booking_time, party_size, special_requests, dietary_notes, deposit_amount_pence, deposit_status, cancellation_deadline, status, experience_event_id, class_instance_id, resource_id, ${BOOKING_APPOINTMENT_FK_COLUMNS}, guest:guests(first_name, last_name, email, phone)`;
 const BOOKING_SELECT_WITH_SUPPRESS =
-  'id, venue_id, guest_id, booking_model, guest_email, booking_date, booking_time, party_size, special_requests, dietary_notes, deposit_amount_pence, deposit_status, cancellation_deadline, status, experience_event_id, class_instance_id, resource_id, suppress_import_comms, guest:guests(first_name, last_name, email, phone)';
+  `id, venue_id, guest_id, booking_model, guest_email, booking_date, booking_time, party_size, special_requests, dietary_notes, deposit_amount_pence, deposit_status, cancellation_deadline, status, experience_event_id, class_instance_id, resource_id, suppress_import_comms, ${BOOKING_APPOINTMENT_FK_COLUMNS}, guest:guests(first_name, last_name, email, phone)`;
 
 export interface UnifiedCommsResults {
   unified_reminder_1: number;
@@ -89,24 +95,51 @@ async function fetchCronBookings(opts: {
   return normalizeBookings(fallback.data ?? []);
 }
 
+/** Appointment FKs on a row stored as `table_reservation` (legacy mis-tag) at an appointment venue. */
+function rowHasAppointmentProductFks(row: BookingRow): boolean {
+  return Boolean(
+    row.event_session_id ||
+    (row.calendar_id && row.service_item_id) ||
+    (row.practitioner_id && row.appointment_service_id),
+  );
+}
+
 function deriveBookingModel(
   row: BookingRow,
   venuePrimaryModel: string | null | undefined,
 ): BookingModel {
-  if (row.booking_model && typeof row.booking_model === 'string') {
-    return row.booking_model as BookingModel;
+  const stored = row.booking_model;
+  if (
+    stored === 'table_reservation' &&
+    isUnifiedSchedulingVenue(venuePrimaryModel) &&
+    rowHasAppointmentProductFks(row)
+  ) {
+    if (row.event_session_id || (row.calendar_id && row.service_item_id)) {
+      return 'unified_scheduling';
+    }
+    if (row.practitioner_id && row.appointment_service_id) {
+      return 'practitioner_appointment';
+    }
   }
-  if (row.experience_event_id) return 'event_ticket';
-  if (row.class_instance_id) return 'class_session';
-  if (row.resource_id) return 'resource_booking';
-  if (venuePrimaryModel === 'practitioner_appointment') {
-    return 'practitioner_appointment';
-  }
-  return 'unified_scheduling';
+  return inferBookingRowModel({
+    booking_model: row.booking_model,
+    experience_event_id: row.experience_event_id,
+    class_instance_id: row.class_instance_id,
+    resource_id: row.resource_id,
+    event_session_id: row.event_session_id,
+    calendar_id: row.calendar_id,
+    service_item_id: row.service_item_id,
+    practitioner_id: row.practitioner_id,
+    appointment_service_id: row.appointment_service_id,
+  });
 }
 
-function isUnifiedAppointmentBookingRow(row: BookingRow): boolean {
-  return row.booking_model === 'unified_scheduling' || row.booking_model === 'practitioner_appointment';
+function isUnifiedAppointmentBookingRow(
+  row: BookingRow,
+  venuePrimaryModel: string | null | undefined,
+): boolean {
+  const model = deriveBookingModel(row, venuePrimaryModel);
+  return model === 'unified_scheduling' || model === 'practitioner_appointment';
 }
 
 function modelListIncludes(raw: unknown, model: BookingModel): boolean {
@@ -117,7 +150,9 @@ function venueSupportsUnifiedSchedulingComms(venue: {
   booking_model?: string | null;
   enabled_models?: unknown;
   active_booking_models?: unknown;
+  pricing_tier?: string | null;
 }): boolean {
+  if (isAppointmentPlanTier(venue.pricing_tier)) return true;
   if (venue.booking_model === 'practitioner_appointment' || venue.booking_model === 'unified_scheduling') {
     return true;
   }
@@ -135,7 +170,7 @@ function buildBookingData(
   return {
     id: row.id,
     guest_name: formatGuestDisplayName(row.guest?.first_name, row.guest?.last_name),
-    guest_email: row.guest_email ?? row.guest?.email ?? null,
+    guest_email: row.guest?.email ?? row.guest_email ?? null,
     guest_phone: row.guest?.phone ?? null,
     booking_date: row.booking_date,
     booking_time: row.booking_time.slice(0, 5),
@@ -193,7 +228,7 @@ async function runLaneReminder(opts: {
       if (row.suppress_import_comms) continue;
       const isCde = isCdeBookingRow(row);
       if (opts.cdeOnly !== isCde) continue;
-      if (!opts.cdeOnly && !isUnifiedAppointmentBookingRow(row)) continue;
+      if (!opts.cdeOnly && !isUnifiedAppointmentBookingRow(row, opts.venue.booking_model)) continue;
 
       const delta = msUntilBookingStartUtc(row.booking_date, row.booking_time, tz, nowMs);
       if (delta < targetMs - CRON_COMMS_TOLERANCE_MS || delta > targetMs + CRON_COMMS_TOLERANCE_MS) {
@@ -304,7 +339,7 @@ async function runLanePostVisit(opts: {
       if (row.suppress_import_comms) continue;
       const isCde = isCdeBookingRow(row);
       if (opts.cdeOnly !== isCde) continue;
-      if (!opts.cdeOnly && !isUnifiedAppointmentBookingRow(row)) continue;
+      if (!opts.cdeOnly && !isUnifiedAppointmentBookingRow(row, opts.venue.booking_model)) continue;
 
       const delta = msSinceBookingStartUtc(row.booking_date, row.booking_time, tz, nowMs);
       if (delta < targetMs - CRON_COMMS_TOLERANCE_MS || delta > targetMs + CRON_COMMS_TOLERANCE_MS) {
@@ -346,7 +381,7 @@ export async function runUnifiedSchedulingComms(
 ): Promise<void> {
   const { data: venues } = await supabase
     .from('venues')
-    .select('id, name, address, phone, timezone, booking_model, enabled_models, active_booking_models, email, reply_to_email');
+    .select('id, name, address, phone, timezone, booking_model, pricing_tier, enabled_models, active_booking_models, email, reply_to_email');
 
   for (const venue of venues ?? []) {
     if (!venueSupportsUnifiedSchedulingComms(venue)) continue;

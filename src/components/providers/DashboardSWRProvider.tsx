@@ -1,18 +1,18 @@
 'use client';
 
 import { SWRConfig } from 'swr';
-import { VENUE_DETAIL_STALE_MS } from '@/lib/dashboard/venue-detail-swr';
+import { VENUE_DETAIL_DEDUPE_MS } from '@/lib/dashboard/venue-detail-swr';
 
 /**
- * Shared SWR defaults for staff dashboard: dedupe requests and avoid refetch on every tab focus.
+ * Shared SWR defaults for staff dashboard: coalesce duplicate requests without blocking
+ * per-hook focus/interval revalidation on detail caches.
  */
 export function DashboardSWRProvider({ children }: { children: React.ReactNode }) {
   return (
     <SWRConfig
       value={{
         revalidateOnFocus: false,
-        /** Coalesce duplicate in-flight requests; aligns with ~60s “fresh enough” staff dashboard reads. */
-        dedupingInterval: VENUE_DETAIL_STALE_MS,
+        dedupingInterval: VENUE_DETAIL_DEDUPE_MS,
         errorRetryCount: 2,
         keepPreviousData: true,
       }}

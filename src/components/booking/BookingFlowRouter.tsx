@@ -55,6 +55,11 @@ interface Props {
   lockedPractitioner?: LockedPractitionerBooking | null;
   /** §7.7: set when this flow is mounted inside a venue collective page. */
   collectiveId?: string;
+  /** Waitlist offer deep link — pre-fills booking and bypasses min-notice for offered slots. */
+  waitlistOfferEntryId?: string;
+  preselectedServiceId?: string;
+  initialDate?: string;
+  initialTime?: string;
 }
 
 /**
@@ -79,6 +84,10 @@ export function BookingFlowRouter({
   accentColour,
   lockedPractitioner,
   collectiveId,
+  waitlistOfferEntryId,
+  preselectedServiceId,
+  initialDate,
+  initialTime,
 }: Props) {
   const model: BookingModel =
     activeBookingModel ?? ((venue.booking_model as BookingModel | undefined) ?? 'table_reservation');
@@ -95,6 +104,10 @@ export function BookingFlowRouter({
           accentColour={accentColour}
           lockedPractitioner={lockedPractitioner ?? undefined}
           collectiveId={collectiveId}
+          waitlistOfferEntryId={waitlistOfferEntryId}
+          preselectedServiceId={preselectedServiceId}
+          initialDate={initialDate}
+          initialTime={initialTime}
         />
       );
     case 'event_ticket':

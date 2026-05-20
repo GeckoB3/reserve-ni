@@ -1,8 +1,11 @@
 import type { GuestDetailResponse } from '@/types/contacts';
 import type { VenueBookingDetailPayload } from '@/components/providers/DashboardDetailCacheProvider';
 
-/** Staff dashboard detail reads stay warm for 60s before background revalidation. */
+/** Staff dashboard detail reads background-refresh on this interval when a panel is open. */
 export const VENUE_DETAIL_STALE_MS = 60_000;
+
+/** Coalesce duplicate detail fetches within this window. */
+export const VENUE_DETAIL_DEDUPE_MS = 5_000;
 
 export const GUEST_DETAIL_HISTORY_LIMIT_PREFETCH = 25;
 export const GUEST_DETAIL_HISTORY_LIMIT_FULL = 80;

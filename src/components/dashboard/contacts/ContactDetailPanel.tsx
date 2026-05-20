@@ -731,7 +731,25 @@ export function ContactDetailPanel({
           </SubBlock>
         </div>
       </details>
-    </div>
+
+      {relatedGuestHistoryBooking ? (
+        <BookingDetailPanel
+          key={relatedGuestHistoryBooking.bookingId}
+          bookingId={relatedGuestHistoryBooking.bookingId}
+          venueId={venueId}
+          venueCurrency={venueCurrency}
+          initialSnapshot={relatedGuestHistoryBooking.snapshot}
+          isAppointment={relatedGuestHistoryBooking.isAppointment}
+          presentation="modal"
+          stackDepth={0}
+          venueTimezone={venueTimezone}
+          onClose={() => setRelatedGuestHistoryBooking(null)}
+          onUpdated={() => {
+            void loadDetail(g.id);
+            void loadList();
+          }}
+        />
+      ) : null}
 
       {relatedGuestHistoryBooking ? (
         <BookingDetailPanel
@@ -784,6 +802,7 @@ export function ContactDetailPanel({
         }}
         onConfirmErase={() => onEraseGuest(g.id)}
       />
+    </div>
     </>
   );
 }

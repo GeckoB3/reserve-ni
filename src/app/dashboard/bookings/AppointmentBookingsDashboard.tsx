@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { scheduleWaitlistAlertsRefresh } from '@/lib/booking/waitlist-alerts-events';
 import type { RefObject } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/browser';
@@ -884,6 +885,9 @@ export function AppointmentBookingsDashboard({
         );
       }
       void fetchBookingsForStats();
+      if (nextStatus === 'Cancelled') {
+        scheduleWaitlistAlertsRefresh();
+      }
     } catch {
       addToast('Could not update status', 'error');
       setBookings((rows) => rows.map((r) => (r.id === bookingId ? prev : r)));
@@ -982,7 +986,7 @@ export function AppointmentBookingsDashboard({
           addToast(`Message sent to ${okCount} guest(s)`, 'success');
         } else if (okCount > 0) {
           setError(
-            `Sent to ${okCount}/${ids.length}. ${failureSummaries.slice(0, 3).join(' Â· ')}`,
+            `Sent to ${okCount}/${ids.length}. ${failureSummaries.slice(0, 3).join(' · ')}`,
           );
           addToast(`Sent to ${okCount}/${ids.length}`, 'error');
         } else {
@@ -1225,7 +1229,7 @@ export function AppointmentBookingsDashboard({
                     : 'hidden shrink-0 text-slate-300 sm:inline'
                 }
               >
-                Â·
+                ·
               </span>
               <span
                 className={
@@ -1243,7 +1247,7 @@ export function AppointmentBookingsDashboard({
                     : 'hidden shrink-0 text-slate-300 sm:inline'
                 }
               >
-                Â·
+                ·
               </span>
               <span
                 className={
@@ -1261,7 +1265,7 @@ export function AppointmentBookingsDashboard({
                     : 'hidden shrink-0 text-slate-300 md:inline'
                 }
               >
-                Â·
+                ·
               </span>
               <span
                 className={
@@ -1319,7 +1323,7 @@ export function AppointmentBookingsDashboard({
               {priceDisplay && (
                 <span className={expanded ? 'inline-flex' : 'hidden sm:inline-flex'}>
                   <Pill variant={depositPillVariant(b.deposit_status)} size="sm" dot>
-                    {priceDisplay} Â· {b.deposit_status}
+                    {priceDisplay} · {b.deposit_status}
                   </Pill>
                 </span>
               )}

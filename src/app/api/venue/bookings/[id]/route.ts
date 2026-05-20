@@ -42,9 +42,12 @@ import { resolveVenueMode } from '@/lib/venue-mode';
 import { z } from 'zod';
 import { normalizeToE164 } from '@/lib/phone/e164';
 import { communicationService } from '@/lib/communications';
+import { COMMUNICATION_LOG_TYPES_RESET_ON_BOOKING_START_CHANGE } from '@/lib/communications/scheduled-log-reset';
 import { inferBookingRowModel } from '@/lib/booking/infer-booking-row-model';
+import { offerAppointmentWaitlistOnCancel } from '@/lib/booking/offer-appointment-waitlist-on-cancel';
 import { logBookingOp } from '@/lib/observability/booking-ops-log';
 import { resolveCdeBookingContext } from '@/lib/booking/cde-booking-context';
+import { loadBookingDetailCommunications } from '@/lib/booking/booking-detail-communications';
 import { resolveBookingScopedCalendarId } from '@/lib/booking/staff-booking-calendar-scope';
 import { tableGroupKeyFromIds } from '@/lib/table-management/combination-rules';
 import type { BookingModel } from '@/types/booking-models';
@@ -128,11 +131,7 @@ export async function GET(
         .select('id, event_type, payload, created_at')
         .eq('booking_id', id)
         .order('created_at', { ascending: true }),
-      staff.db
-        .from('communications')
-        .select('id, message_type, channel, status, created_at')
-        .eq('booking_id', id)
-        .order('created_at', { ascending: true }),
+      loadBookingDetailCommunications(staff.db, id),
       staff.db
         .from('booking_table_assignments')
         .select('table_id, table:venue_tables(id, name)')
@@ -152,7 +151,7 @@ export async function GET(
 
     const guest = guestResult.data;
     const events = eventsResult.data;
-    const communications = communicationsResult.data;
+    const communications = communicationsResult;
     const tableAssignments = tableAssignmentsResult.data;
 
     const assignedTables = (tableAssignments ?? []).map((a: { table_id: string; table: unknown }) => {
@@ -462,10 +461,23 @@ export async function PATCH(
       }
 
       if (newStatus === 'No-Show') {
-        const { data: venueGrace } = await admin.from('venues').select('no_show_grace_minutes').eq('id', staff.venue_id).single();
+        const { data: venueGrace } = await admin
+          .from('venues')
+          .select('no_show_grace_minutes, timezone')
+          .eq('id', staff.venue_id)
+          .single();
         const graceMinutes = venueGrace?.no_show_grace_minutes ?? 15;
+        const venueTimezone =
+          typeof venueGrace?.timezone === 'string' && venueGrace.timezone.trim() !== ''
+            ? venueGrace.timezone.trim()
+            : 'Europe/London';
         const bookingTimeStr = typeof booking.booking_time === 'string' ? booking.booking_time.slice(0, 5) : '00:00';
-        const graceCheck = validateNoShowGracePeriod(booking.booking_date, bookingTimeStr, graceMinutes);
+        const graceCheck = validateNoShowGracePeriod(
+          booking.booking_date,
+          bookingTimeStr,
+          graceMinutes,
+          venueTimezone,
+        );
         if (!graceCheck.ok) {
           return NextResponse.json({ error: graceCheck.error }, { status: 400 });
         }
@@ -535,6 +547,17 @@ export async function PATCH(
           }
         }
 
+        if (canRefund && !refundSucceeded) {
+          return NextResponse.json(
+            {
+              error:
+                'Refund could not be processed. The booking was not cancelled — please try again or refund manually in Stripe.',
+              code: 'REFUND_FAILED',
+            },
+            { status: 502 },
+          );
+        }
+
         if (refundSucceeded) {
           await staff.db
             .from('bookings')
@@ -566,6 +589,52 @@ export async function PATCH(
             booking as Parameters<typeof inferBookingRowModel>[0],
           ),
         });
+
+        const cancelledBookingForWaitlist = {
+          id,
+          venue_id: staff.venue_id,
+          booking_date: String(booking.booking_date),
+          booking_time: String(booking.booking_time),
+          practitioner_id: booking.practitioner_id as string | null | undefined,
+          calendar_id: booking.calendar_id as string | null | undefined,
+          appointment_service_id: booking.appointment_service_id as string | null | undefined,
+          service_item_id: booking.service_item_id as string | null | undefined,
+          booking_model: booking.booking_model as string | null | undefined,
+          experience_event_id: booking.experience_event_id as string | null | undefined,
+          class_instance_id: booking.class_instance_id as string | null | undefined,
+          resource_id: booking.resource_id as string | null | undefined,
+          event_session_id: booking.event_session_id as string | null | undefined,
+        };
+
+        try {
+          const offerResult = await offerAppointmentWaitlistOnCancel(
+            admin,
+            cancelledBookingForWaitlist,
+          );
+          if (offerResult.offered) {
+            console.info('[PATCH booking cancel] waitlist offer sent', {
+              bookingId: id,
+              mode: offerResult.mode,
+              ...(offerResult.mode === 'notify_in_order'
+                ? {
+                    waitlistEntryId: offerResult.waitlistEntryId,
+                    emailSent: offerResult.emailSent,
+                    smsSent: offerResult.smsSent,
+                  }
+                : offerResult.mode === 'notify_all'
+                  ? {
+                      notifiedCount: offerResult.notifiedCount,
+                      emailSentCount: offerResult.emailSentCount,
+                      smsSentCount: offerResult.smsSentCount,
+                    }
+                  : {}),
+            });
+          }
+        } catch (waitlistErr) {
+          console.error('[PATCH booking cancel] waitlist offer failed:', waitlistErr, {
+            bookingId: id,
+          });
+        }
 
         const { data: guestRow } = await staff.db
           .from('guests')
@@ -701,6 +770,13 @@ export async function PATCH(
         }
         if (booking.status === 'Completed' && newStatus === 'Seated') {
           statusPayload.actual_departed_time = null;
+        }
+        if (
+          booking.status === 'No-Show' &&
+          (newStatus === 'Booked' || newStatus === 'Confirmed') &&
+          booking.deposit_status === 'Forfeited'
+        ) {
+          statusPayload.deposit_status = 'Paid';
         }
         await staff.db.from('bookings').update(statusPayload).eq('id', id);
 
@@ -908,6 +984,19 @@ export async function PATCH(
           guestUpdatePayload.email = typeof body.guest_email === 'string' && body.guest_email.trim() ? body.guest_email.trim() : null;
         }
         await staff.db.from('guests').update(guestUpdatePayload).eq('id', booking.guest_id);
+
+        if (body.guest_email !== undefined || body.guest_phone !== undefined) {
+          const contactSnap: Record<string, unknown> = {
+            updated_at: new Date().toISOString(),
+          };
+          if (body.guest_email !== undefined) {
+            contactSnap.guest_email = guestUpdatePayload.email ?? null;
+          }
+          if (body.guest_phone !== undefined) {
+            contactSnap.guest_phone = guestUpdatePayload.phone ?? null;
+          }
+          await staff.db.from('bookings').update(contactSnap).eq('id', id).eq('venue_id', staff.venue_id);
+        }
 
         if (body.guest_first_name !== undefined || body.guest_last_name !== undefined) {
           const bookingSnap: Record<string, unknown> = {
@@ -1329,18 +1418,17 @@ export async function PATCH(
           ? String(bookingUpdate.booking_end_time).slice(0, 5)
           : beforeEndHm;
 
-      await admin.from('events').insert({
+      const { logBookingModifiedEvent } = await import('@/lib/booking/log-booking-modified-event');
+      await logBookingModifiedEvent(admin, {
         venue_id: staff.venue_id,
         booking_id: id,
-        event_type: 'booking_modified',
-        payload: {
-          before,
-          after: {
-            booking_date: newDate,
-            booking_time: timeStr,
-            party_size: newPartySize,
-            ...(afterEndHm ? { booking_end_time: afterEndHm } : {}),
-          },
+        modification_actor: 'staff',
+        before,
+        after: {
+          booking_date: newDate,
+          booking_time: timeStr,
+          party_size: newPartySize,
+          ...(afterEndHm ? { booking_end_time: afterEndHm } : {}),
         },
       });
 
@@ -1417,17 +1505,7 @@ export async function PATCH(
             .from('communication_logs')
             .delete()
             .eq('booking_id', id)
-            .in('message_type', [
-              'reminder_56h_email',
-              'day_of_reminder_sms',
-              'day_of_reminder_email',
-              'post_visit_email',
-              'reminder_1_email',
-              'reminder_1_sms',
-              'reminder_2_email',
-              'reminder_2_sms',
-              'unified_post_visit_email',
-            ]);
+            .in('message_type', [...COMMUNICATION_LOG_TYPES_RESET_ON_BOOKING_START_CHANGE]);
         } catch (logResetErr) {
           console.error('Communication log reset failed after modification:', logResetErr);
         }

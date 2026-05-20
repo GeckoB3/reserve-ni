@@ -30,8 +30,23 @@ interface CommunicationTemplatesSectionProps {
   onUpdate?: (patch: Record<string, unknown>) => void;
   /** Stripe subscription present — Plan checkout completed; hide Light SMS “add a card” banner. */
   hasStripeSubscription?: boolean;
+  /** Appointment waitlist v2 enabled — shows waitlist invite channel settings. */
+  waitlistV2Enabled?: boolean;
   onInitialLoadComplete?: () => void;
 }
+
+const WAITLIST_OFFER_CARD: {
+  key: CommunicationMessageKey;
+  label: string;
+  description: string;
+  allowedChannels: CommunicationChannel[];
+} = {
+  key: "appointment_waitlist_offer",
+  label: "Waitlist invite",
+  description:
+    "Sent when staff offer an appointment slot to someone on the waitlist.",
+  allowedChannels: ["email", "sms"],
+};
 
 const MESSAGE_CARDS: Array<{
   key: CommunicationMessageKey;
@@ -157,6 +172,7 @@ export function CommunicationTemplatesSection({
   bookingModel,
   enabledModels = [],
   hasStripeSubscription = false,
+  waitlistV2Enabled = false,
   onInitialLoadComplete,
 }: CommunicationTemplatesSectionProps) {
   const primary =
@@ -494,6 +510,26 @@ export function CommunicationTemplatesSection({
           />
         ))}
       </div>
+
+      {waitlistV2Enabled && showAppointmentsLane && activeLane === "appointments_other" ? (
+        <div className="space-y-4 border-t border-slate-200 pt-6">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-900">Waitlist invites</h3>
+            <p className="mt-1 text-sm text-slate-600">
+              Choose how guests are notified when staff offer them an appointment slot from the
+              waitlist.
+            </p>
+          </div>
+          <MessagePolicyCard
+            lane="appointments_other"
+            card={WAITLIST_OFFER_CARD}
+            policy={policies.appointments_other.appointment_waitlist_offer}
+            isAdmin={isAdmin}
+            onUpdate={updateMessagePolicy}
+            onPreview={openPreview}
+          />
+        </div>
+      ) : null}
 
       {previewState && (
         <PreviewModal

@@ -30,6 +30,8 @@ import { Pill, type PillVariant } from '@/components/ui/dashboard/Pill';
 import { OperationsWorkspaceToolbar } from '@/components/dashboard/OperationsWorkspaceToolbar';
 import { OperationsToolbarGuestSearchPanel } from '@/components/dashboard/OperationsToolbarGuestSearchPanel';
 import { ClampedFixedDropdown } from '@/components/ui/ClampedFixedDropdown';
+import { ConfirmDialog } from '@/components/ui/primitives/ConfirmDialog';
+import { Dialog } from '@/components/ui/primitives/Dialog';
 import type { ViewToolbarSummary } from '@/components/dashboard/ViewToolbar';
 import type { BookingModel } from '@/types/booking-models';
 import { BOOKING_MODEL_ORDER } from '@/lib/booking/enabled-models';
@@ -64,6 +66,7 @@ import { readSessionPreference, writeSessionPreference } from '@/lib/ui/session-
 import type { GuestHistoryRelatedBookingPayload } from '@/app/dashboard/bookings/GuestBookingsForGuestAccordion';
 import { expandedBookingRowShellClass } from '@/app/dashboard/bookings/booking-expand-accordion-classes';
 import { bindDetailPrefetchHandlers } from '@/lib/dashboard/detail-prefetch-intent';
+import { scheduleWaitlistAlertsRefresh } from '@/lib/booking/waitlist-alerts-events';
 import { bookingDetailLiteFromCachePayload } from '@/lib/booking/resolve-booking-detail-lite';
 import { bookingDetailLiteFromListRow } from '@/lib/booking/booking-detail-from-row';
 import { warmIdsWithConcurrency } from '@/lib/dashboard/venue-detail-swr';
@@ -1025,6 +1028,9 @@ export function BookingsDashboard({
         current_state: { bookingId, status: newStatus },
       });
       addToast('Booking status updated', 'success');
+      if (newStatus === 'Cancelled') {
+        scheduleWaitlistAlertsRefresh();
+      }
     } catch {
       setBookings((prev) => prev.map((booking) => booking.id === bookingId ? { ...booking, status: previous } : booking));
       setError(`Could not update booking status for ${bookingId.slice(0, 8).toUpperCase()}.`);
@@ -1165,7 +1171,7 @@ export function BookingsDashboard({
 
   const requestStatusChange = useCallback((booking: BookingRow, nextStatus: BookingStatus) => {
     if (!canTransitionBookingStatus(booking.status, nextStatus)) return;
-    if (nextStatus === 'No-Show' && !canMarkNoShowForSlot(booking.booking_date, booking.booking_time, noShowGraceMinutes)) {
+    if (nextStatus === 'No-Show' && !canMarkNoShowForSlot(booking.booking_date, booking.booking_time, noShowGraceMinutes, venueTimezone)) {
       setError(`No-show can only be marked ${noShowGraceMinutes} minutes after the booking start time.`);
       return;
     }
@@ -1201,7 +1207,7 @@ export function BookingsDashboard({
       return;
     }
     void updateBookingStatus(booking.id, nextStatus);
-  }, [updateBookingStatus, noShowGraceMinutes]);
+  }, [updateBookingStatus, noShowGraceMinutes, venueTimezone]);
 
   const runBulkMessage = useCallback(async (message: string, channel: GuestMessageChannel) => {
     if (selectedIds.length === 0) return;
@@ -1238,7 +1244,7 @@ export function BookingsDashboard({
         addToast(`Message sent to ${okCount} booking(s)`, 'success');
       } else if (okCount > 0) {
         setError(
-          `Sent to ${okCount}/${selectedIds.length}. ${failureSummaries.slice(0, 3).join(' Â· ')}`,
+          `Sent to ${okCount}/${selectedIds.length}. ${failureSummaries.slice(0, 3).join(' · ')}`,
         );
         addToast(`Sent to ${okCount}/${selectedIds.length}`, 'error');
       } else {
@@ -1296,6 +1302,7 @@ export function BookingsDashboard({
         );
       } else {
         addToast(`${okCount} booking(s) cancelled`, 'success');
+        scheduleWaitlistAlertsRefresh();
       }
       setSelectedIds([]);
       void fetchBookings({ silent: true });
@@ -2019,20 +2026,18 @@ export function BookingsDashboard({
           advancedMode={tableManagementEnabled}
         />
       )}
-      {changeTableBooking && (
-        <div
-          className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/30 p-4 backdrop-blur-sm"
-          onClick={() => { if (!changeTableSaving) closeChangeTableModal(); }}
-        >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-label="Change table"
-            className="my-16 w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <h3 className="text-lg font-semibold text-slate-900">Change table</h3>
-            <p className="mt-2 text-sm text-slate-600">
+      <Dialog
+        open={changeTableBooking != null}
+        onOpenChange={(open) => {
+          if (!open && !changeTableSaving) closeChangeTableModal();
+        }}
+        title="Change table"
+        size="md"
+        contentClassName="max-w-md"
+      >
+        {changeTableBooking ? (
+          <>
+            <p className="text-sm text-slate-600">
               Select table(s) for {changeTableBooking.guest_name}. Tables already assigned to this booking are treated as free so you can move or keep them.
             </p>
             {changeTableDayLoading && (
@@ -2055,7 +2060,7 @@ export function BookingsDashboard({
                 />
               </div>
             )}
-            {changeTableSelectorTables.length === 0 && (
+            {changeTableSelectorTables.length === 0 ? (
               <button
                 type="button"
                 onClick={closeChangeTableModal}
@@ -2063,10 +2068,10 @@ export function BookingsDashboard({
               >
                 Close
               </button>
-            )}
-          </div>
-        </div>
-      )}
+            ) : null}
+          </>
+        ) : null}
+      </Dialog>
       {undoAction && (
         <UndoToast
           action={undoAction}
@@ -2074,32 +2079,17 @@ export function BookingsDashboard({
           onDismiss={() => setUndoAction(null)}
         />
       )}
-      {confirmDialog && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/25 p-4 backdrop-blur-[2px]" onClick={() => setConfirmDialog(null)}>
-          <div className="w-full max-w-sm rounded-2xl border border-slate-200/80 bg-white p-6 shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100" onClick={(event) => event.stopPropagation()}>
-            <h3 className="text-base font-semibold text-slate-900">{confirmDialog.title}</h3>
-            <p className="mt-2 text-sm text-slate-600">{confirmDialog.message}</p>
-            <div className="mt-5 flex gap-2.5">
-              <button
-                type="button"
-                onClick={() => { confirmDialog.onConfirm(); setConfirmDialog(null); }}
-                className="flex-1 rounded-xl bg-red-600 px-3 py-2.5 text-sm font-semibold text-white hover:bg-red-700"
-              >
-                {confirmDialog.confirmLabel}
-              </button>
-              <button
-                type="button"
-                onClick={() => setConfirmDialog(null)}
-                className="flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-      </div>
-
+      <ConfirmDialog
+        open={confirmDialog != null}
+        onOpenChange={(open) => {
+          if (!open) setConfirmDialog(null);
+        }}
+        title={confirmDialog?.title ?? ''}
+        message={confirmDialog?.message ?? ''}
+        confirmLabel={confirmDialog?.confirmLabel ?? 'Confirm'}
+        onConfirm={() => confirmDialog?.onConfirm()}
+        destructive
+      />
       {/* Floating bulk-actions tray - appears when rows are selected */}
       {selectedIds.length > 0 && (
         <div className="fixed left-1/2 z-40 max-w-[calc(100vw-1rem)] -translate-x-1/2 px-2 bottom-[max(1rem,env(safe-area-inset-bottom,0px))]">
@@ -2155,6 +2145,7 @@ export function BookingsDashboard({
           </div>
         </div>
       )}
+      </div>
     </PageFrame>
   );
 }
@@ -2176,7 +2167,7 @@ function sourceBadge(s: string) {
 
 function depositBadge(status: string, amountPence: number | null) {
   if (status === 'Not Required') return null;
-  const amt = amountPence ? `Â£${(amountPence / 100).toFixed(2)}` : null;
+  const amt = amountPence ? `£${(amountPence / 100).toFixed(2)}` : null;
   const variantMap: Record<string, PillVariant> = {
     Paid: 'success',
     Refunded: 'brand',
@@ -2316,7 +2307,7 @@ function BookingsAccordionList({
                     <span className="shrink-0 font-semibold tabular-nums text-slate-700">{booking.booking_time.slice(0, 5)}</span>
                     {booking.booking_item_name?.trim() ? (
                       <>
-                        <span className="shrink-0 text-slate-300">Â·</span>
+                        <span className="shrink-0 text-slate-300">·</span>
                         <span className="min-w-0 max-w-[11rem] truncate text-[11px] font-semibold text-slate-800 sm:max-w-[16rem] sm:text-xs">
                           {booking.booking_item_name.trim()}
                         </span>
@@ -2324,14 +2315,14 @@ function BookingsAccordionList({
                     ) : null}
                     {isTableBooking ? (
                       <>
-                        <span className="shrink-0 text-slate-300">Â·</span>
+                        <span className="shrink-0 text-slate-300">·</span>
                         <span className="shrink-0 text-[11px] font-medium text-slate-600 sm:text-xs">
                           {booking.party_size} {booking.party_size === 1 ? 'cover' : 'covers'}
                         </span>
                       </>
                     ) : booking.party_size > 1 ? (
                       <>
-                        <span className="shrink-0 text-slate-300">Â·</span>
+                        <span className="shrink-0 text-slate-300">·</span>
                         <span className="shrink-0 text-[11px] font-medium text-slate-600 sm:text-xs">
                           {booking.party_size} people
                         </span>
@@ -2344,7 +2335,7 @@ function BookingsAccordionList({
                           : 'hidden shrink-0 text-slate-300 sm:inline'
                       }
                     >
-                      Â·
+                      ·
                     </span>
                     <span
                       className={expanded ? 'inline-flex shrink-0' : 'hidden shrink-0 sm:inline-flex'}
@@ -2390,7 +2381,7 @@ function BookingsAccordionList({
                     {booking.group_booking_id && (
                       <span className={expanded ? 'inline-flex' : 'hidden sm:inline-flex'}>
                         <Pill variant="neutral" size="sm">
-                          {booking.person_label ? `Group Â· ${booking.person_label}` : 'Group'}
+                          {booking.person_label ? `Group · ${booking.person_label}` : 'Group'}
                         </Pill>
                       </span>
                     )}

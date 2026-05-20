@@ -12,6 +12,7 @@ import {
 import type { ViewToolbarSummary } from '@/components/dashboard/ViewToolbar';
 import { CALENDAR_PICKER_SUBPOPOVER_SELECTOR } from '@/components/calendar/CalendarDateTimePicker';
 import { ClampedFixedDropdown } from '@/components/ui/ClampedFixedDropdown';
+import { isBookingDetailPopoverDismissExempt } from '@/lib/ui/booking-detail-popover-dismiss';
 import { nextBookingsTileContent } from '@/lib/table-management/next-bookings-slot';
 
 function formatDateInput(d: Date): string {
@@ -350,6 +351,7 @@ export function OperationsWorkspaceToolbar({
     const onPointerDown = (event: PointerEvent) => {
       const t = event.target;
       if (t instanceof Element && t.closest(CALENDAR_PICKER_SUBPOPOVER_SELECTOR)) return;
+      if (isBookingDetailPopoverDismissExempt(t, null)) return;
       if (infoPopoverRef.current?.contains(event.target as Node)) return;
       if (datePopoverRef.current?.contains(event.target as Node)) return;
       if (controlsPopoverRef.current?.contains(event.target as Node)) return;
@@ -552,6 +554,7 @@ export function OperationsWorkspaceToolbar({
             maxWidthPx={400}
             id={`${baseId}-search-panel`}
             onDismiss={close}
+            ignoreDismissIf={(target) => isBookingDetailPopoverDismissExempt(target, null)}
             aria-label={searchAriaLabel}
             className="animate-fade-in z-50 w-[min(100vw-2rem,24rem)] rounded-xl border border-slate-200 bg-white p-3 text-left shadow-xl shadow-slate-900/10 ring-1 ring-slate-100"
           >

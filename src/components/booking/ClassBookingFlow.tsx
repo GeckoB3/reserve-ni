@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 import type { VenuePublic, GuestDetails } from './types';
+import { usePublicBookingAccountGateContext } from '@/components/booking/PublicBookingAccountGate';
 import type { ClassPaymentRequirement } from '@/types/booking-models';
 import { defaultPhoneCountryForVenueCurrency } from '@/lib/phone/default-country';
 import { DetailsStep } from './DetailsStep';
@@ -19,6 +20,7 @@ import {
   venueBookingsCreateUrl,
 } from '@/lib/booking/booking-flow-api';
 import { formatOnlinePaidRefundPolicyLine } from '@/lib/booking/public-deposit-refund-policy';
+import { StaffBookingConfirmationFooter } from '@/components/booking/StaffBookingConfirmationFooter';
 import { RequireAuthModal } from '@/components/auth/RequireAuthModal';
 import { createClient } from '@/lib/supabase/browser';
 import type { ClassOfferingCommerceCatalog } from '@/lib/class-commerce/enrich-class-offerings';
@@ -175,6 +177,11 @@ export function ClassBookingFlow({
   onBookingCreated,
 }: ClassBookingFlowProps) {
   const isStaff = bookingAudience === 'staff';
+  const isPublicGuest = !isStaff;
+  const accountGate = usePublicBookingAccountGateContext();
+  const acknowledgeStaffBooking = useCallback(() => {
+    onBookingCreated?.();
+  }, [onBookingCreated]);
   const isStaffWalkIn = isStaff && staffBookingSource === 'walk-in';
   const detailsAudience =
     isStaff && staffBookingSource === 'walk-in' ? ('staff_walk_in' as const) : isStaff ? ('staff' as const) : ('public' as const);
@@ -184,6 +191,14 @@ export function ClassBookingFlow({
   const sym = symForCurrency(currency);
 
   const [step, setStep] = useState<Step>('pick-class');
+  const advanceToGuestDetails = useCallback(async () => {
+    if (isPublicGuest && !(await accountGate.ensureSignedIn())) return;
+    setStep('details');
+  }, [accountGate, isPublicGuest]);
+  useEffect(() => {
+    if (!isPublicGuest || step !== 'details') return;
+    void accountGate.ensureSignedIn();
+  }, [accountGate, isPublicGuest, step]);
   const [rangeFrom, setRangeFrom] = useState('');
   const [rangeTo, setRangeTo] = useState('');
   const [classSummaries, setClassSummaries] = useState<ClassOfferingSummary[]>([]);
@@ -317,6 +332,13 @@ export function ClassBookingFlow({
     async (details: GuestDetails) => {
       setError(null);
       if (!selectedClass) return;
+      if (isPublicGuest) {
+        const emailError = accountGate.validateGuestEmail(details.email);
+        if (emailError) {
+          setError(emailError);
+          return;
+        }
+      }
       setSubmitting(true);
       try {
         if (isStaff) {
@@ -344,7 +366,6 @@ export function ClassBookingFlow({
             payment_url: data.payment_url,
           });
           setStep('confirmation');
-          onBookingCreated?.();
           return;
         }
 
@@ -383,7 +404,14 @@ export function ClassBookingFlow({
           setSubmitting(false);
           return;
         }
-        if (!res.ok) throw new Error(data.error ?? 'Booking failed');
+        if (!res.ok) {
+          if (isPublicGuest && accountGate.handleCreateResponseError(res.status, data.error)) {
+            setError('Sign in is required to book this venue.');
+            setSubmitting(false);
+            return;
+          }
+          throw new Error(data.error ?? 'Booking failed');
+        }
         setCreateResult({
           booking_id: data.booking_id,
           client_secret: data.client_secret,
@@ -398,7 +426,7 @@ export function ClassBookingFlow({
         setSubmitting(false);
       }
     },
-    [venue.id, selectedClass, spots, isStaff, staffBookingSource, onBookingCreated, payWithClassCredits],
+    [venue.id, selectedClass, spots, isStaff, isPublicGuest, accountGate, staffBookingSource, payWithClassCredits],
   );
 
   const depositPenceForDetails = isStaffWalkIn || payWithClassCredits ? 0 : (summary?.chargePence ?? 0);
@@ -867,7 +895,7 @@ export function ClassBookingFlow({
 
           <button
             type="button"
-            onClick={() => setStep('details')}
+            onClick={() => void advanceToGuestDetails()}
             className="w-full rounded-xl bg-brand-600 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-brand-700"
           >
             Book the class
@@ -919,6 +947,8 @@ export function ClassBookingFlow({
               refundNoticeHours={classRefundNoticeHours}
               phoneDefaultCountry={phoneDefaultCountry}
               audience={detailsAudience}
+              initialDetails={isPublicGuest ? accountGate.guestDetailsPrefill : undefined}
+              emailReadOnly={isPublicGuest && accountGate.emailReadOnly}
             />
           )}
         </div>
@@ -969,6 +999,7 @@ export function ClassBookingFlow({
           ) : (
             <p className="mt-4 text-xs text-green-700">You&apos;ll receive a confirmation email shortly.</p>
           )}
+          {isStaff ? <StaffBookingConfirmationFooter onDone={acknowledgeStaffBooking} /> : null}
         </div>
       )}
 

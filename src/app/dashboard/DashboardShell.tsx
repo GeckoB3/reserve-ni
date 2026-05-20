@@ -13,12 +13,17 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { DashboardSidebar, type DashboardSidebarProps } from './DashboardSidebar';
 import type { BookingModel } from '@/types/booking-models';
 
-export type DashboardShellSidebarRest = Omit<DashboardSidebarProps, 'tableManagementEnabled'>;
+export type DashboardShellSidebarRest = Omit<
+  DashboardSidebarProps,
+  'tableManagementEnabled' | 'appointmentWaitlistEnabled'
+>;
 
 type NavSyncContextValue = {
   setTableManagementEnabled: (value: boolean) => void;
   /** Align sidebar booking-model links with server-derived primary + secondaries (matches dashboard layout). */
   setNavBookingSurface: (next: { bookingModel: BookingModel; enabledModels: BookingModel[] }) => void;
+  /** Settings → Features → Appointment waitlist; updates Waitlist nav without reload. */
+  setAppointmentWaitlistEnabled: (value: boolean) => void;
 };
 
 const DashboardNavSyncContext = createContext<NavSyncContextValue | null>(null);
@@ -39,6 +44,11 @@ export function useDashboardBookingModelsNavSync() {
   return useContext(DashboardNavSyncContext);
 }
 
+/** Call after toggling Appointment waitlist in settings so the Waitlist nav item updates immediately. */
+export function useDashboardWaitlistNavSync() {
+  return useContext(DashboardNavSyncContext);
+}
+
 export function useDashboardTransition() {
   return useContext(DashboardTransitionContext);
 }
@@ -51,12 +61,14 @@ export function useDashboardTransition() {
 export function DashboardShell({
   venueId,
   initialTableManagementEnabled,
+  initialAppointmentWaitlistEnabled = false,
   sidebarRest,
   supportSessionToolbar,
   children,
 }: {
   venueId?: string;
   initialTableManagementEnabled: boolean;
+  initialAppointmentWaitlistEnabled?: boolean;
   sidebarRest: DashboardShellSidebarRest;
   /** Shown above main content when a platform superuser has an active venue support session. */
   supportSessionToolbar?: ReactNode;
@@ -73,6 +85,7 @@ export function DashboardShell({
   } = sidebarRest;
 
   const [tableManagementEnabled, setTableManagementEnabled] = useState(initialTableManagementEnabled);
+  const [appointmentWaitlistEnabled, setAppointmentWaitlistEnabled] = useState(initialAppointmentWaitlistEnabled);
   const [bookingModel, setBookingModel] = useState<BookingModel>(serverBookingModel);
   const [enabledModels, setEnabledModels] = useState<BookingModel[]>(serverEnabledModels ?? []);
   const [transitionLabel, setTransitionLabel] = useState<string | null>(null);
@@ -80,6 +93,10 @@ export function DashboardShell({
   useEffect(() => {
     setTableManagementEnabled(initialTableManagementEnabled);
   }, [initialTableManagementEnabled]);
+
+  useEffect(() => {
+    setAppointmentWaitlistEnabled(initialAppointmentWaitlistEnabled);
+  }, [initialAppointmentWaitlistEnabled]);
 
   const serverBookingNavKey = useMemo(
     () => `${serverBookingModel}\u0000${JSON.stringify(serverEnabledModels ?? [])}`,
@@ -100,12 +117,17 @@ export function DashboardShell({
     setEnabledModels(next.enabledModels);
   }, []);
 
+  const setWaitlistNavEnabled = useCallback((value: boolean) => {
+    setAppointmentWaitlistEnabled(value);
+  }, []);
+
   const ctx = useMemo(
     () => ({
       setTableManagementEnabled: setFlag,
       setNavBookingSurface,
+      setAppointmentWaitlistEnabled: setWaitlistNavEnabled,
     }),
-    [setFlag, setNavBookingSurface],
+    [setFlag, setNavBookingSurface, setWaitlistNavEnabled],
   );
 
   const beginTransition = useCallback((label = 'Loading…') => {
@@ -199,6 +221,8 @@ export function DashboardShell({
           bookingModel={bookingModel}
           enabledModels={enabledModels}
           tableManagementEnabled={tableManagementEnabled}
+          appointmentWaitlistEnabled={appointmentWaitlistEnabled}
+          isAdmin={isAdmin}
         />
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           {supportSessionToolbar}

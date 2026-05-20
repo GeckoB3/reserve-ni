@@ -53,6 +53,8 @@ import { EventInstanceDetailSheet } from '@/components/practitioner-calendar/Eve
 import { EXP_BOOKING_LIFECYCLE_PRIMARY_SURFACE } from '@/lib/booking/expanded-booking-toolbar-surfaces';
 import { EXP_BOOKING_ST_FOCUS } from '@/app/dashboard/bookings/expanded-booking-toolbar-classes';
 import { useToast } from '@/components/ui/Toast';
+import { Dialog } from '@/components/ui/primitives/Dialog';
+import { Button } from '@/components/ui/primitives/Button';
 import { useDashboardDetailCache } from '@/components/providers/DashboardDetailCacheProvider';
 import { bindDetailPrefetchHandlers } from '@/lib/dashboard/detail-prefetch-intent';
 import { warmIdsWithConcurrency } from '@/lib/dashboard/venue-detail-swr';
@@ -81,6 +83,7 @@ import {
   groupScheduleBlocksByDate,
   buildMonthDayScheduleCounts,
 } from '@/lib/calendar/schedule-blocks-grouping';
+import { buildPractitionerBreakBlocks } from '@/lib/calendar/practitioner-break-blocks';
 import { formatWorkingHoursLineForDate } from '@/lib/calendar/format-working-hours-for-date';
 import { formatEventUptakeLine } from '@/lib/calendar/event-block-label';
 import {
@@ -99,12 +102,14 @@ import { WeekScheduleCdeStrip } from './WeekScheduleCdeStrip';
 import { MonthScheduleGrid } from './MonthScheduleGrid';
 import { PractitionerCalendarToolbar } from './PractitionerCalendarToolbar';
 import { OperationsToolbarGuestSearchPanel } from '@/components/dashboard/OperationsToolbarGuestSearchPanel';
-import { BookingCardInfo } from './BookingCardInfo';
+import { BookingCard } from './BookingCard';
+import { formatBookingModificationNotifyToast } from '@/lib/booking/modification-notify-result';
 import { formatPhoneForDisplay } from '@/lib/phone/e164';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { HorizontalScrollHint } from '@/components/ui/HorizontalScrollHint';
 import type { VenuePublic } from '@/components/booking/types';
 import { mapApiVenueToVenuePublic } from '@/lib/booking/map-api-venue-to-public';
+import { scheduleWaitlistAlertsRefresh } from '@/lib/booking/waitlist-alerts-events';
 import { formatIsoDateInTimeZone } from '@/lib/date/format-iso-date-in-timezone';
 import { readSessionPreference, writeSessionPreference } from '@/lib/ui/session-preferences';
 import {
@@ -137,6 +142,9 @@ interface Practitioner {
   sort_order?: number;
   /** Per-day template from Calendar availability (Settings). */
   working_hours?: WorkingHours;
+  break_times?: Array<{ start: string; end: string }>;
+  break_times_by_day?: WorkingHours | null;
+  days_off?: string[];
 }
 
 interface CalendarVariantRow {
@@ -286,9 +294,17 @@ function columnIdForBlock(bl: CalendarBlock): string | null {
   return bl.calendar_id ?? bl.practitioner_id ?? null;
 }
 
-/** Manual blocks staff can drag, resize, and edit (not class-tied blocks). */
+function isBreakCalendarBlock(bl: CalendarBlock): boolean {
+  return bl.block_type === 'break';
+}
+
+/** Manual blocks staff can drag, resize, and edit (not class-tied or schedule breaks). */
 function isManualEditableBlock(bl: CalendarBlock): boolean {
-  return bl.block_type !== 'class_session' && !bl.class_instance_id;
+  return !isBreakCalendarBlock(bl) && bl.block_type !== 'class_session' && !bl.class_instance_id;
+}
+
+function calendarBlockHeading(bl: CalendarBlock): string {
+  return isBreakCalendarBlock(bl) ? 'Break' : 'Blocked';
 }
 
 function blockDurationMinutes(bl: CalendarBlock): number {
@@ -1164,7 +1180,7 @@ function collectBookingRightColumnActionNodes({
           disabled={busy}
           style={buttonStyle}
           onClick={() => onStatus(b.id, 'Completed')}
-            className={`${baseClass} rounded-lg font-semibold shadow-sm outline-none transition-colors duration-150 disabled:opacity-50 ${EXP_BOOKING_ST_FOCUS} ${EXP_BOOKING_LIFECYCLE_PRIMARY_SURFACE}`}
+          className={`${baseClass} rounded-lg font-semibold shadow-sm outline-none transition-colors duration-150 disabled:opacity-50 ${EXP_BOOKING_ST_FOCUS} ${EXP_BOOKING_LIFECYCLE_PRIMARY_SURFACE}`}
         >
           Complete
         </button>,
@@ -1576,11 +1592,19 @@ function DragBlockPreview({
   block: CalendarBlock;
   movePreview?: { label: string; invalid: boolean } | null;
 }) {
-  const label = block.reason?.trim() ? `Blocked: ${block.reason}` : 'Blocked';
+  const label = isBreakCalendarBlock(block)
+    ? 'Break'
+    : block.reason?.trim()
+      ? `Blocked: ${block.reason}`
+      : 'Blocked';
+  const accent = isBreakCalendarBlock(block) ? '#d97706' : '#94a3b8';
+  const shellClass = isBreakCalendarBlock(block)
+    ? 'border-amber-300 bg-amber-50/95'
+    : 'border-slate-400 bg-slate-200/95';
   return (
     <div
-      className="flex max-w-[min(90vw,16rem)] flex-col overflow-hidden rounded-lg border-2 border-dashed border-slate-400 bg-slate-200/95 shadow-2xl shadow-slate-900/15"
-      style={{ borderLeftWidth: 4, borderLeftColor: '#94a3b8' }}
+      className={`flex max-w-[min(90vw,16rem)] flex-col overflow-hidden rounded-lg border-2 border-dashed shadow-2xl shadow-slate-900/15 ${shellClass}`}
+      style={{ borderLeftWidth: 4, borderLeftColor: accent }}
     >
       {movePreview ? (
         <div
@@ -1899,11 +1923,23 @@ export function PractitionerCalendarView({
     prev: Booking;
   } | null>(null);
   const [scheduleUndoPending, setScheduleUndoPending] = useState(false);
+  /** In-flight PATCH for drag-move / resize; undo awaits this to avoid racing the save. */
+  const scheduleEditSaveRef = useRef<{
+    bookingId: string;
+    promise: Promise<'ok' | 'failed'>;
+  } | null>(null);
   /** After a drag-reschedule succeeds, booking bar shows Confirm / Undo until timer or Confirm (toolbar undo may remain). */
   const [dragMoveConfirmBookingId, setDragMoveConfirmBookingId] = useState<string | null>(null);
+  /** Seconds until deferred guest notify fires (drag-reschedule confirm strip). */
+  const [modificationNotifyCountdownSec, setModificationNotifyCountdownSec] = useState<number | null>(
+    null,
+  );
   /** Guest modification notify for drag-reschedule fires after Confirm or {@link BOOKING_MODIFY_NOTIFY_DEFER_MS}. */
   const pendingDeferredModificationNotifyBookingIdRef = useRef<string | null>(null);
   const deferredModificationNotifyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const modificationNotifyCountdownIntervalRef = useRef<ReturnType<typeof globalThis.setInterval> | null>(
+    null,
+  );
   const guestModificationNotifyInFlightRef = useRef(false);
   const [scheduleBlocks, setScheduleBlocks] = useState<ScheduleBlockDTO[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -1930,48 +1966,115 @@ export function PractitionerCalendarView({
     calendarDragTargetRef.current = calendarDragTarget;
   }, [calendarDragTarget]);
 
+  const clearModificationNotifyCountdown = useCallback(() => {
+    if (modificationNotifyCountdownIntervalRef.current != null) {
+      window.clearInterval(modificationNotifyCountdownIntervalRef.current);
+      modificationNotifyCountdownIntervalRef.current = null;
+    }
+    setModificationNotifyCountdownSec(null);
+  }, []);
+
   const clearDeferredModificationGuestNotifyTimer = useCallback(() => {
     if (deferredModificationNotifyTimerRef.current != null) {
       window.clearTimeout(deferredModificationNotifyTimerRef.current);
       deferredModificationNotifyTimerRef.current = null;
     }
-  }, []);
+    clearModificationNotifyCountdown();
+  }, [clearModificationNotifyCountdown]);
 
   const cancelPendingDeferredModificationGuestNotify = useCallback(() => {
     clearDeferredModificationGuestNotifyTimer();
     pendingDeferredModificationNotifyBookingIdRef.current = null;
   }, [clearDeferredModificationGuestNotifyTimer]);
 
-  const postGuestModificationNotify = useCallback(async (bookingId: string) => {
-    if (guestModificationNotifyInFlightRef.current) return;
-    guestModificationNotifyInFlightRef.current = true;
-    try {
-      const res = await fetch(`/api/venue/bookings/${bookingId}/guest-modification-notify`, {
-        method: 'POST',
-      });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        addToast((j as { error?: string }).error ?? 'Could not send booking update to guest', 'error');
+  /** Keep the schedule change; cancel the deferred guest email/SMS only. */
+  const dismissPendingModificationGuestNotify = useCallback(() => {
+    clearDeferredModificationGuestNotifyTimer();
+    pendingDeferredModificationNotifyBookingIdRef.current = null;
+    setDragMoveConfirmBookingId(null);
+  }, [clearDeferredModificationGuestNotifyTimer]);
+
+  const postGuestModificationNotify = useCallback(
+    async (bookingId: string): Promise<boolean> => {
+      if (guestModificationNotifyInFlightRef.current) return false;
+      guestModificationNotifyInFlightRef.current = true;
+      try {
+        const res = await fetch(`/api/venue/bookings/${bookingId}/guest-modification-notify`, {
+          method: 'POST',
+        });
+        const j = (await res.json().catch(() => ({}))) as {
+          error?: string;
+          emailSent?: boolean;
+          smsSent?: boolean;
+          skipped?: boolean;
+          skippedReason?: string;
+        };
+        if (!res.ok) {
+          addToast(j.error ?? 'Could not send booking update to guest', 'error');
+          return false;
+        }
+        const toastMessage = formatBookingModificationNotifyToast({
+          emailSent: Boolean(j.emailSent),
+          smsSent: Boolean(j.smsSent),
+          skipped: Boolean(j.skipped),
+          skippedReason: j.skippedReason,
+        });
+        addToast(toastMessage, j.skipped ? 'info' : 'success');
+        return true;
+      } catch {
+        addToast('Could not send booking update to guest', 'error');
+        return false;
+      } finally {
+        guestModificationNotifyInFlightRef.current = false;
       }
-    } catch {
-      addToast('Could not send booking update to guest', 'error');
-    } finally {
-      guestModificationNotifyInFlightRef.current = false;
-    }
-  }, [addToast]);
+    },
+    [addToast],
+  );
 
   const scheduleDeferredModificationGuestNotify = useCallback(
     (bookingId: string) => {
       clearDeferredModificationGuestNotifyTimer();
       pendingDeferredModificationNotifyBookingIdRef.current = bookingId;
+      const totalSec = Math.ceil(BOOKING_MODIFY_NOTIFY_DEFER_MS / 1000);
+      setModificationNotifyCountdownSec(totalSec);
+      modificationNotifyCountdownIntervalRef.current = setInterval(() => {
+        setModificationNotifyCountdownSec((prev) => {
+          if (prev == null || prev <= 1) return null;
+          return prev - 1;
+        });
+      }, 1000);
       deferredModificationNotifyTimerRef.current = setTimeout(() => {
         deferredModificationNotifyTimerRef.current = null;
         pendingDeferredModificationNotifyBookingIdRef.current = null;
         setDragMoveConfirmBookingId(null);
+        clearModificationNotifyCountdown();
         void postGuestModificationNotify(bookingId);
       }, BOOKING_MODIFY_NOTIFY_DEFER_MS);
     },
-    [clearDeferredModificationGuestNotifyTimer, postGuestModificationNotify],
+    [
+      clearDeferredModificationGuestNotifyTimer,
+      clearModificationNotifyCountdown,
+      postGuestModificationNotify,
+    ],
+  );
+
+  /** Show notify / skip / undo on the booking bar immediately after a move or resize (before PATCH returns). */
+  const beginScheduleEditFollowUp = useCallback(
+    (bookingId: string) => {
+      setDragMoveConfirmBookingId(bookingId);
+      scheduleDeferredModificationGuestNotify(bookingId);
+    },
+    [scheduleDeferredModificationGuestNotify],
+  );
+
+  const clearScheduleEditFollowUpForBooking = useCallback(
+    (bookingId: string) => {
+      setDragMoveConfirmBookingId((current) => (current === bookingId ? null : current));
+      if (pendingDeferredModificationNotifyBookingIdRef.current === bookingId) {
+        cancelPendingDeferredModificationGuestNotify();
+      }
+    },
+    [cancelPendingDeferredModificationGuestNotify],
   );
 
   const confirmInlineDragMove = useCallback(async () => {
@@ -2084,6 +2187,27 @@ export function PractitionerCalendarView({
   /** Fetch schedule feed for events strip (classes render on team columns via `calendar_id`). */
   const showMergedFeeds = showEventsColumn || showClassSessions;
 
+  const listFromTo = useMemo(() => {
+    if (viewMode === 'day') return { from: date, to: date };
+    if (viewMode === 'week') return { from: weekStart, to: addCalendarDays(weekStart, 6) };
+    return monthGridDateRange(monthAnchor);
+  }, [viewMode, date, weekStart, monthAnchor]);
+
+  const practitionerBreakBlocks = useMemo(
+    () =>
+      buildPractitionerBreakBlocks(
+        practitioners.filter((p) => p.is_active && p.calendar_type !== 'resource'),
+        listFromTo.from,
+        listFromTo.to,
+      ),
+    [practitioners, listFromTo.from, listFromTo.to],
+  );
+
+  const displayBlocks = useMemo(
+    () => [...blocks, ...practitionerBreakBlocks],
+    [blocks, practitionerBreakBlocks],
+  );
+
   const activeDayDate = viewMode === 'day' ? date : viewMode === 'week' ? weekStart : monthAnchor;
   const { startHour: derivedStartHour, endHour: derivedEndHour } = useMemo(
     () => {
@@ -2112,7 +2236,7 @@ export function PractitionerCalendarView({
         minM = Math.min(minM, startM);
         maxM = Math.max(maxM, endM);
       }
-      for (const block of blocks) {
+      for (const block of displayBlocks) {
         if (block.block_date !== activeDayDate) continue;
         includeRange(block.start_time, block.end_time, 60);
       }
@@ -2125,7 +2249,7 @@ export function PractitionerCalendarView({
       const endHour = Math.max(startHour + 1, Math.ceil(maxM / 60));
       return { startHour, endHour };
     },
-    [activeDayDate, blocks, bookings, openingHours, scheduleBlocks, services, venueTimezone, viewMode],
+    [activeDayDate, displayBlocks, bookings, openingHours, scheduleBlocks, services, venueTimezone, viewMode],
   );
   const [startHourOverride, setStartHourOverride] = useState<number | null>(null);
   const [endHourOverride, setEndHourOverride] = useState<number | null>(null);
@@ -2192,12 +2316,6 @@ export function PractitionerCalendarView({
     startHourOverride,
     endHourOverride,
   ]);
-
-  const listFromTo = useMemo(() => {
-    if (viewMode === 'day') return { from: date, to: date };
-    if (viewMode === 'week') return { from: weekStart, to: addCalendarDays(weekStart, 6) };
-    return monthGridDateRange(monthAnchor);
-  }, [viewMode, date, weekStart, monthAnchor]);
 
   const fetchData = useCallback(
     async (options?: { silent?: boolean }) => {
@@ -2908,6 +3026,7 @@ export function PractitionerCalendarView({
     const endHm = minutesToTime(timeToMinutes(timeHm) + dur);
     const bookingEndForStore = `${endHm}:00`;
     const estimatedEndForStore = estimatedEndIsoFromSchedule(newDate, timeHm, endHm);
+    setLastScheduleEditUndo({ kind: 'move', prev });
     setBookings((rows) =>
       rows.map((b) =>
         b.id === booking.id
@@ -2922,33 +3041,47 @@ export function PractitionerCalendarView({
           : b,
       ),
     );
-    try {
-      const res = await fetch(`/api/venue/bookings/${booking.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          booking_date: newDate,
-          booking_time: timeForStore,
-          practitioner_id: newPracId,
-          booking_end_time: bookingEndForStore,
-          allow_manual_overlap: true,
-          defer_modification_guest_notification: true,
-        }),
-      });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        addToast((j as { error?: string }).error ?? 'Could not move appointment', 'error');
+    beginScheduleEditFollowUp(booking.id);
+
+    const savePromise = (async (): Promise<'ok' | 'failed'> => {
+      try {
+        const res = await fetch(`/api/venue/bookings/${booking.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            booking_date: newDate,
+            booking_time: timeForStore,
+            practitioner_id: newPracId,
+            booking_end_time: bookingEndForStore,
+            allow_manual_overlap: true,
+            defer_modification_guest_notification: true,
+          }),
+        });
+        if (!res.ok) {
+          const j = await res.json().catch(() => ({}));
+          addToast((j as { error?: string }).error ?? 'Could not move appointment', 'error');
+          setBookings((rows) => rows.map((b) => (b.id === prev.id ? prev : b)));
+          setLastScheduleEditUndo((undo) => (undo?.prev.id === prev.id ? null : undo));
+          clearScheduleEditFollowUpForBooking(booking.id);
+          return 'failed';
+        }
+        void fetchData({ silent: true });
+        return 'ok';
+      } catch {
+        addToast('Could not move appointment', 'error');
         setBookings((rows) => rows.map((b) => (b.id === prev.id ? prev : b)));
-        return;
+        setLastScheduleEditUndo((undo) => (undo?.prev.id === prev.id ? null : undo));
+        clearScheduleEditFollowUpForBooking(booking.id);
+        return 'failed';
       }
-      setLastScheduleEditUndo({ kind: 'move', prev });
-      setDragMoveConfirmBookingId(booking.id);
-      scheduleDeferredModificationGuestNotify(booking.id);
-      void fetchData({ silent: true });
-    } catch {
-      addToast('Could not move appointment', 'error');
-      setBookings((rows) => rows.map((b) => (b.id === prev.id ? prev : b)));
-    }
+    })();
+
+    scheduleEditSaveRef.current = { bookingId: booking.id, promise: savePromise };
+    void savePromise.finally(() => {
+      if (scheduleEditSaveRef.current?.bookingId === booking.id) {
+        scheduleEditSaveRef.current = null;
+      }
+    });
   }
 
   const patchBookingResize = useCallback(
@@ -2963,6 +3096,7 @@ export function PractitionerCalendarView({
         startHm,
         endLen5,
       );
+      setLastScheduleEditUndo({ kind: 'resize', prev });
       setBookings((rows) =>
         rows.map((b) =>
           b.id === booking.id
@@ -2974,40 +3108,70 @@ export function PractitionerCalendarView({
             : b,
         ),
       );
-      try {
-        const res = await fetch(`/api/venue/bookings/${booking.id}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ booking_end_time: bookingEndForStore, allow_manual_overlap: true }),
-        });
-        if (!res.ok) {
-          const j = await res.json().catch(() => ({}));
-          addToast((j as { error?: string }).error ?? 'Could not update duration', 'error');
+      beginScheduleEditFollowUp(booking.id);
+
+      const savePromise = (async (): Promise<'ok' | 'failed'> => {
+        try {
+          const res = await fetch(`/api/venue/bookings/${booking.id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              booking_end_time: bookingEndForStore,
+              allow_manual_overlap: true,
+              defer_modification_guest_notification: true,
+            }),
+          });
+          if (!res.ok) {
+            const j = await res.json().catch(() => ({}));
+            addToast((j as { error?: string }).error ?? 'Could not update duration', 'error');
+            setBookings((rows) => rows.map((b) => (b.id === prev.id ? prev : b)));
+            setLastScheduleEditUndo((undo) => (undo?.prev.id === prev.id ? null : undo));
+            clearScheduleEditFollowUpForBooking(booking.id);
+            return 'failed';
+          }
+          void fetchData({ silent: true });
+          return 'ok';
+        } catch {
+          addToast('Could not update duration', 'error');
           setBookings((rows) => rows.map((b) => (b.id === prev.id ? prev : b)));
-          return;
+          setLastScheduleEditUndo((undo) => (undo?.prev.id === prev.id ? null : undo));
+          clearScheduleEditFollowUpForBooking(booking.id);
+          return 'failed';
         }
-        cancelPendingDeferredModificationGuestNotify();
-        setDragMoveConfirmBookingId(null);
-        setLastScheduleEditUndo({ kind: 'resize', prev });
-        void fetchData({ silent: true });
-      } catch {
-        addToast('Could not update duration', 'error');
-        setBookings((rows) => rows.map((b) => (b.id === prev.id ? prev : b)));
-      }
+      })();
+
+      scheduleEditSaveRef.current = { bookingId: booking.id, promise: savePromise };
+      void savePromise.finally(() => {
+        if (scheduleEditSaveRef.current?.bookingId === booking.id) {
+          scheduleEditSaveRef.current = null;
+        }
+      });
     },
-    [addToast, fetchData, cancelPendingDeferredModificationGuestNotify],
+    [
+      addToast,
+      beginScheduleEditFollowUp,
+      clearScheduleEditFollowUpForBooking,
+      fetchData,
+    ],
   );
 
   const undoLastScheduleEdit = useCallback(async () => {
     if (!lastScheduleEditUndo || scheduleUndoPending) return;
     const { kind, prev } = lastScheduleEditUndo;
+    const bookingId = prev.id;
+
+    const inflight = scheduleEditSaveRef.current;
+    if (inflight?.bookingId === bookingId) {
+      const saveResult = await inflight.promise;
+      if (saveResult === 'failed') return;
+    }
+
     const colId = resolveBookingColumnId(prev, resourceParentById);
     if (!colId) {
       addToast('Cannot undo: calendar column is no longer available', 'error');
       return;
     }
 
-    const bookingId = prev.id;
     const startHm = prev.booking_time.slice(0, 5);
     const bookingEndForStore =
       prev.booking_end_time && prev.booking_end_time.trim() !== ''
@@ -3017,12 +3181,21 @@ export function PractitionerCalendarView({
     setScheduleUndoPending(true);
     setBookings((rows) => rows.map((b) => (b.id === bookingId ? { ...prev } : b)));
 
+    const skipBookingModificationGuestNotification =
+      pendingDeferredModificationNotifyBookingIdRef.current === bookingId;
+
     try {
       if (kind === 'resize') {
         const res = await fetch(`/api/venue/bookings/${bookingId}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ booking_end_time: bookingEndForStore, allow_manual_overlap: true }),
+          body: JSON.stringify({
+            booking_end_time: bookingEndForStore,
+            allow_manual_overlap: true,
+            ...(skipBookingModificationGuestNotification
+              ? { skip_booking_modification_guest_notification: true }
+              : {}),
+          }),
         });
         if (!res.ok) {
           const j = await res.json().catch(() => ({}));
@@ -3032,8 +3205,6 @@ export function PractitionerCalendarView({
         }
       } else {
         const timeForStore = bookingTimeToStore(prev.booking_time);
-        const skipBookingModificationGuestNotification =
-          pendingDeferredModificationNotifyBookingIdRef.current === bookingId;
         const res = await fetch(`/api/venue/bookings/${bookingId}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
@@ -3088,6 +3259,9 @@ export function PractitionerCalendarView({
         const j = await res.json().catch(() => ({}));
         addToast((j as { error?: string }).error ?? 'Update failed', 'error');
         return;
+      }
+      if (body.status === 'Cancelled') {
+        scheduleWaitlistAlertsRefresh();
       }
       void fetchData({ silent: true });
     } catch {
@@ -3184,7 +3358,7 @@ export function PractitionerCalendarView({
           dateStr,
           undefined,
           bookings,
-          blocks,
+          displayBlocks,
           serviceMap,
           pracClassBlocks,
           pracEventBlocks,
@@ -3229,7 +3403,7 @@ export function PractitionerCalendarView({
         dateStr,
         b.id,
         bookings,
-        blocks,
+        displayBlocks,
         serviceMap,
         pracClassBlocks,
         pracEventBlocks,
@@ -3869,6 +4043,7 @@ export function PractitionerCalendarView({
           showMergedFeeds={showMergedFeeds}
           openingHours={openingHours}
           venueTimezone={venueTimezone}
+          todayIso={initialIsoDate}
           onSelectDay={(cell) => {
             clearTimeRangeOverridesForDayChange();
             setDate(cell);
@@ -3889,7 +4064,7 @@ export function PractitionerCalendarView({
                     Team
                   </th>
                   {weekDays.map((d) => {
-                    const isToday = d === new Date().toISOString().slice(0, 10);
+                    const isToday = d === initialIsoDate;
                     return (
                       <th
                         key={d}
@@ -3922,9 +4097,37 @@ export function PractitionerCalendarView({
                       const dayEventBlocks = eventBlocksForGrid.filter(
                         (b) => b.calendar_id === prac.id && b.date === d,
                       );
+                      const dayManualBlocks = displayBlocks.filter(
+                        (bl) =>
+                          columnIdForBlock(bl) === prac.id &&
+                          bl.block_date === d &&
+                          bl.block_type !== 'class_session',
+                      );
                       return (
                         <td key={d} className="border-l border-slate-200 align-top px-1 py-2">
                           <div className="flex min-h-[80px] flex-col gap-1">
+                            {dayManualBlocks.map((bl) => {
+                              const breakBlock = isBreakCalendarBlock(bl);
+                              return (
+                              <button
+                                key={bl.id}
+                                type="button"
+                                onClick={() => openEditBlockModal(bl)}
+                                disabled={breakBlock}
+                                className={`rounded-lg border px-2 py-1 text-left text-xs ${
+                                  breakBlock
+                                    ? 'cursor-default border-amber-200 bg-amber-50/95 text-amber-950'
+                                    : 'border-slate-300 bg-slate-200/90 text-slate-800 hover:bg-slate-300/90'
+                                }`}
+                                title={breakBlock ? 'Break (set in Calendar availability)' : bl.reason ?? 'Blocked'}
+                              >
+                                <span className="font-semibold">{calendarBlockHeading(bl)}</span>
+                                <span className="mt-0.5 block text-[10px] tabular-nums text-slate-600">
+                                  {bl.start_time.slice(0, 5)} – {bl.end_time.slice(0, 5)}
+                                </span>
+                              </button>
+                              );
+                            })}
                             {dayBookings.map((b) => {
                               const p = bookingCalendarBlockStyle(b);
                               return (
@@ -4166,7 +4369,7 @@ export function PractitionerCalendarView({
                   {timeLabels.map((t, i) =>
                     i % 4 === 0 ? (
                       <div
-                        key={t}
+                        key={`time-label-${i}`}
                         className="absolute left-0 flex w-full justify-end pr-1.5"
                         style={{ top: i * SLOT_HEIGHT, transform: 'translateY(-50%)' }}
                       >
@@ -4258,7 +4461,7 @@ export function PractitionerCalendarView({
                 const pracEventBlocks = eventBlocksForGrid.filter(
                   (b) => b.calendar_id === prac.id && b.date === date,
                 );
-                const pracBlocks = blocks.filter(
+                const pracBlocks = displayBlocks.filter(
                   (bl) =>
                     columnIdForBlock(bl) === prac.id &&
                     bl.block_date === date &&
@@ -4283,7 +4486,7 @@ export function PractitionerCalendarView({
                         const occ = slotOccupied(
                           slotStartMins,
                           bookings,
-                          blocks,
+                          displayBlocks,
                           prac.id,
                           date,
                           serviceMap,
@@ -4350,7 +4553,12 @@ export function PractitionerCalendarView({
                           (minutesBetweenStartAndEnd(bl.start_time, bl.end_time) / SLOT_MINUTES) * SLOT_HEIGHT,
                           SLOT_HEIGHT * 0.5,
                         );
+                        const breakBlock = isBreakCalendarBlock(bl);
                         const canDrag = isManualEditableBlock(bl);
+                        const blockAccent = breakBlock ? '#d97706' : '#94a3b8';
+                        const blockShellClass = breakBlock
+                          ? 'border-amber-200 bg-amber-50/95 hover:bg-amber-50'
+                          : 'border-slate-300 bg-slate-200/90 hover:bg-slate-300/90';
                         const resizeExtra =
                           blockResizeVisual?.blockId === bl.id ? blockResizeVisual.deltaYPx : 0;
                         const displayEndHm =
@@ -4368,8 +4576,8 @@ export function PractitionerCalendarView({
                           >
                             {(handle) => (
                               <div
-                                className="group relative flex h-full min-h-0 flex-row overflow-hidden rounded-lg border border-slate-300 bg-slate-200/90 text-left shadow-sm hover:bg-slate-300/90"
-                                style={{ borderLeftWidth: 3, borderLeftColor: '#94a3b8' }}
+                                className={`group relative flex h-full min-h-0 flex-row overflow-hidden rounded-lg border text-left shadow-sm ${blockShellClass}`}
+                                style={{ borderLeftWidth: 3, borderLeftColor: blockAccent }}
                               >
                                 {canDrag && handle.listeners && handle.attributes ? (
                                   <button
@@ -4394,13 +4602,22 @@ export function PractitionerCalendarView({
                                     if (justResizedBlockIdRef.current === bl.id) return;
                                     openEditBlockModal(bl);
                                   }}
+                                  disabled={breakBlock}
                                   className={`flex min-h-0 min-w-0 flex-1 flex-col justify-start overflow-hidden px-2.5 py-2 text-left ${
                                     canDrag ? 'pb-[19px]' : ''
-                                  }`}
-                                  title="Click to edit block"
+                                  } ${breakBlock ? 'cursor-default' : ''}`}
+                                  title={
+                                    breakBlock
+                                      ? 'Break (set in Calendar availability)'
+                                      : 'Click to edit block'
+                                  }
                                 >
-                                  <span className="truncate text-[13px] font-extrabold tracking-tight text-slate-900">
-                                    Blocked
+                                  <span
+                                    className={`truncate text-[13px] font-extrabold tracking-tight ${
+                                      breakBlock ? 'text-amber-950' : 'text-slate-900'
+                                    }`}
+                                  >
+                                    {calendarBlockHeading(bl)}
                                   </span>
                                   {bl.reason ? (
                                     <span className="mt-0.5 block truncate text-[11px] font-medium leading-snug text-slate-600/90">
@@ -4569,14 +4786,18 @@ export function PractitionerCalendarView({
                               ? resizePreviewEnd.endHm
                               : minutesToTime(timeToMinutes(b.booking_time) + duration);
                           const blockH = height + resizeExtra;
-                          const showInlineMoveFollowUp =
-                            dragMoveConfirmBookingId === b.id &&
-                            lastScheduleEditUndo?.kind === 'move' &&
-                            lastScheduleEditUndo.prev.id === b.id;
+                          const showInlineScheduleFollowUp = dragMoveConfirmBookingId === b.id;
+                          const scheduleFollowUpKind =
+                            lastScheduleEditUndo?.prev.id === b.id
+                              ? lastScheduleEditUndo.kind
+                              : 'move';
                           const isOverlapLane = layout.laneCount > 1;
                           const contentHeightPx =
                             blockH - (canDrag ? BOOKING_RESERVE_ABOVE_RESIZE_PX : 0);
-                          const showPillsRow = !isOverlapLane && contentHeightPx >= 88;
+                          const cardDensity =
+                            isOverlapLane || contentHeightPx < 56 ? 'compact' : 'comfortable';
+                          const showPillsRow =
+                            !isOverlapLane && contentHeightPx >= (cardDensity === 'compact' ? 72 : 88);
                           return (
                             <DraggableBookingShell
                               key={b.id}
@@ -4649,7 +4870,7 @@ export function PractitionerCalendarView({
                                               }}
                                               aria-label={`Open booking details for ${b.guest_name}`}
                                             >
-                                              <BookingCardInfo
+                                              <BookingCard
                                                 name={b.guest_name}
                                                 service={calendarBookingServiceLabel(b, svc, resName ?? null)}
                                                 phone={formatPhoneForDisplay(b.guest_phone)}
@@ -4657,6 +4878,10 @@ export function PractitionerCalendarView({
                                                 end={displayEndHm}
                                                 pill={<CalendarBookingStatusBadge b={b} />}
                                                 contentHeightPx={contentHeightPx}
+                                                density={cardDensity}
+                                                actionsReservePx={
+                                                  actionInset.hasActions ? actionInset.right : 0
+                                                }
                                               />
                                               {showPillsRow ? (
                                                 <div className="mt-1.5 flex w-full min-w-0 shrink-0 flex-col gap-1 border-t border-black/[0.06] pt-1.5">
@@ -4693,7 +4918,7 @@ export function PractitionerCalendarView({
                                           Until {resizePreviewEnd.endHm}
                                         </span>
                                       ) : null}
-                                      {showInlineMoveFollowUp ? (
+                                      {showInlineScheduleFollowUp ? (
                                         <div
                                           className="pointer-events-auto absolute left-1/2 z-[45] -translate-x-1/2"
                                           style={{ bottom: BOOKING_RESERVE_ABOVE_RESIZE_PX }}
@@ -4701,7 +4926,11 @@ export function PractitionerCalendarView({
                                         >
                                           <div
                                             role="group"
-                                            aria-label="Confirm or undo this move"
+                                            aria-label={
+                                              scheduleFollowUpKind === 'resize'
+                                                ? 'Confirm or undo this duration change'
+                                                : 'Confirm or undo this move'
+                                            }
                                             className="flex items-center gap-1 rounded-xl border px-2 py-1 shadow-[0_12px_28px_rgba(15,23,42,0.08),inset_0_1px_0_rgba(255,255,255,0.72)] ring-1 ring-black/[0.05] backdrop-blur-sm"
                                             style={{
                                               backgroundColor: palette.bg,
@@ -4715,13 +4944,26 @@ export function PractitionerCalendarView({
                                               style={{ backgroundColor: palette.accent }}
                                               aria-hidden
                                             />
+                                            <span className="mr-1 max-w-[7.5rem] truncate text-[10px] font-medium leading-tight text-slate-600">
+                                              {modificationNotifyCountdownSec != null
+                                                ? `Notify in ${modificationNotifyCountdownSec}s`
+                                                : 'Notify guest'}
+                                            </span>
                                             <button
                                               type="button"
                                               disabled={scheduleUndoPending}
                                               onClick={() => void confirmInlineDragMove()}
                                               className="rounded-lg bg-brand-600 px-2.5 py-1 text-[10px] font-semibold leading-none text-white shadow-sm shadow-brand-900/20 transition hover:bg-brand-700 disabled:opacity-50"
                                             >
-                                              Confirm
+                                              Notify now
+                                            </button>
+                                            <button
+                                              type="button"
+                                              disabled={scheduleUndoPending}
+                                              onClick={dismissPendingModificationGuestNotify}
+                                              className="rounded-lg border border-slate-300/90 bg-white/90 px-2.5 py-1 text-[10px] font-semibold leading-none text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:opacity-50"
+                                            >
+                                              Skip notify
                                             </button>
                                             <button
                                               type="button"
@@ -4824,7 +5066,7 @@ export function PractitionerCalendarView({
                                                 className={`relative z-[1] flex min-h-0 min-w-0 flex-1 flex-col justify-start overflow-hidden ${isOverlapLane ? 'px-1.5' : 'px-2.5'} py-1 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500`}
                                                 aria-label={`Open booking details for ${b.guest_name}`}
                                               >
-                                                <BookingCardInfo
+                                                <BookingCard
                                                   name={first.guest_name}
                                                   hideName={segIdx > 0}
                                                   service={segServiceLabel}
@@ -4837,6 +5079,11 @@ export function PractitionerCalendarView({
                                                     ) : null
                                                   }
                                                   contentHeightPx={segmentApproxPx}
+                                                  density={
+                                                    isOverlapLane || segmentApproxPx < 56
+                                                      ? 'compact'
+                                                      : 'comfortable'
+                                                  }
                                                 />
                                                 {!isOverlapLane && showSegPills ? (
                                                   <div className="mt-1 flex w-full min-w-0 shrink-0 flex-col gap-1 border-t border-black/[0.06] pt-1">
@@ -4992,38 +5239,66 @@ export function PractitionerCalendarView({
         );
       })()}
 
-      {blockModal && (
-        <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4"
-          onClick={() => setBlockModal(null)}
+      {blockModal ? (
+        <Dialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setBlockModal(null);
+          }}
+          title={blockModal.blockId ? 'Edit block' : 'Block time'}
+          description={blockModal.dateStr}
+          size="sm"
+          contentClassName="max-w-sm"
+          footer={
+            <div className="flex w-full flex-wrap items-center justify-between gap-2">
+              {blockModal.blockId ? (
+                <Button
+                  type="button"
+                  variant="danger"
+                  size="sm"
+                  disabled={blockSaving}
+                  onClick={() => void deleteBlockFromModal()}
+                >
+                  Delete
+                </Button>
+              ) : (
+                <span />
+              )}
+              <div className="flex gap-2">
+                <Button type="button" variant="secondary" size="sm" onClick={() => setBlockModal(null)}>
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  variant="primary"
+                  size="sm"
+                  disabled={blockSaving}
+                  onClick={() => void saveBlock()}
+                >
+                  {blockSaving ? 'Saving…' : 'Save'}
+                </Button>
+              </div>
+            </div>
+          }
         >
-          <div
-            role="dialog"
-            aria-labelledby="block-modal-title"
-            className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 id="block-modal-title" className="text-base font-semibold text-slate-900">
-              {blockModal.blockId ? 'Edit block' : 'Block time'}
-            </h3>
-            <p className="mt-1 text-xs text-slate-500">{blockModal.dateStr}</p>
+          <>
             {(() => {
               const durationMins = timeToMinutes(blockModal.endTime) - timeToMinutes(blockModal.startTime);
               if (durationMins <= 0) {
                 return (
-                  <p className="mt-2 text-xs font-medium text-amber-800" role="status">
+                  <p className="mb-3 text-xs font-medium text-amber-800" role="status">
                     Choose an end time after {blockModal.startTime} to set a duration.
                   </p>
                 );
               }
               return (
-                <p className="mt-2 text-sm text-slate-600" role="status">
+                <p className="mb-3 text-sm text-slate-600" role="status">
                   <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Duration </span>
                   <span className="font-semibold tabular-nums text-slate-900">{formatBlockDurationLabel(durationMins)}</span>
                 </p>
               );
             })()}
-            <div className="mt-4 space-y-3">
+            <div className="space-y-3">
               <div>
                 <label className="text-xs font-medium text-slate-600">Start time</label>
                 <input
@@ -5053,40 +5328,9 @@ export function PractitionerCalendarView({
                 />
               </div>
             </div>
-            <div className="mt-5 flex flex-wrap items-center justify-between gap-2">
-              {blockModal.blockId ? (
-                <button
-                  type="button"
-                  disabled={blockSaving}
-                  onClick={() => void deleteBlockFromModal()}
-                  className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-100 disabled:opacity-50"
-                >
-                  Delete
-                </button>
-              ) : (
-                <span />
-              )}
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => setBlockModal(null)}
-                  className="rounded-lg px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  disabled={blockSaving}
-                  onClick={() => void saveBlock()}
-                  className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
-                >
-                  {blockSaving ? 'Saving…' : 'Save'}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+          </>
+        </Dialog>
+      ) : null}
 
       {(
         <button
@@ -5137,6 +5381,9 @@ export function PractitionerCalendarView({
           anchor={detailBookingAnchor}
           venueTimezone={venueTimezone}
           onClose={() => {
+            if (pendingDeferredModificationNotifyBookingIdRef.current === detailBookingId) {
+              dismissPendingModificationGuestNotify();
+            }
             setDetailBookingId(null);
             setDetailBookingAnchor(null);
           }}
@@ -5171,61 +5418,41 @@ export function PractitionerCalendarView({
         />
       ) : null}
       {showResourceBooking && resourceBookingResourceId ? (
-        <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4"
-          onClick={() => {
-            setShowResourceBooking(false);
-            setResourceBookingResourceId(undefined);
-            setPrefillDate(undefined);
-            setPrefillTime(undefined);
+        <Dialog
+          open
+          onOpenChange={(open) => {
+            if (!open) {
+              setShowResourceBooking(false);
+              setResourceBookingResourceId(undefined);
+              setPrefillDate(undefined);
+              setPrefillTime(undefined);
+            }
           }}
+          title="Book resource"
+          size="lg"
+          contentClassName="max-w-xl overflow-y-auto"
         >
-          <div
-            role="dialog"
-            aria-label="Book resource"
-            className="max-h-[min(90vh,720px)] w-full max-w-xl overflow-y-auto rounded-2xl bg-white p-5 shadow-xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <h3 className="text-base font-semibold text-slate-900">Book resource</h3>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowResourceBooking(false);
-                  setResourceBookingResourceId(undefined);
-                  setPrefillDate(undefined);
-                  setPrefillTime(undefined);
-                }}
-                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-                aria-label="Close"
-              >
-                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
+          {resourceBookingVenueError ? (
+            <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {resourceBookingVenueError}
+            </p>
+          ) : resourceBookingVenue ? (
+            <ResourceBookingFlow
+              key={`${resourceBookingResourceId}-${prefillDate ?? ''}-${prefillTime ?? ''}`}
+              venue={resourceBookingVenue}
+              bookingAudience="staff"
+              staffBookingSource="phone"
+              onBookingCreated={() => void fetchData({ silent: true })}
+              initialResourceId={resourceBookingResourceId}
+              initialDate={prefillDate ?? (viewMode === 'day' ? date : undefined)}
+              initialTime={prefillTime}
+            />
+          ) : (
+            <div className="flex items-center justify-center py-12">
+              <div className="h-8 w-8 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
             </div>
-            {resourceBookingVenueError ? (
-              <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                {resourceBookingVenueError}
-              </p>
-            ) : resourceBookingVenue ? (
-              <ResourceBookingFlow
-                key={`${resourceBookingResourceId}-${prefillDate ?? ''}-${prefillTime ?? ''}`}
-                venue={resourceBookingVenue}
-                bookingAudience="staff"
-                staffBookingSource="phone"
-                onBookingCreated={() => void fetchData({ silent: true })}
-                initialResourceId={resourceBookingResourceId}
-                initialDate={prefillDate ?? (viewMode === 'day' ? date : undefined)}
-                initialTime={prefillTime}
-              />
-            ) : (
-              <div className="flex items-center justify-center py-12">
-                <div className="h-8 w-8 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
-              </div>
-            )}
-          </div>
-        </div>
+          )}
+        </Dialog>
       ) : null}
 
       {linkedEditing ? (

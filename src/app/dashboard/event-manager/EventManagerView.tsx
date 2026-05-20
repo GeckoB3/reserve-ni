@@ -18,6 +18,7 @@ import { currencySymbolFromCode } from '@/lib/money/currency-symbol';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { StackedList } from '@/components/ui/dashboard/StackedList';
 import { DashboardCardGridSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
+import { useVenuePostgresLiveSync } from '@/lib/realtime/useVenuePostgresLiveSync';
 
 interface TicketType {
   id: string;
@@ -141,7 +142,7 @@ const BLANK_EVENT: EventFormState = {
 };
 
 export function EventManagerView({
-  venueId: _venueId,
+  venueId,
   isAdmin,
   linkedPractitionerIds = [],
   currency = 'GBP',
@@ -281,8 +282,11 @@ export function EventManagerView({
     }
   }, [newCalendarName, addToast, refreshCalendarEntitlement]);
 
-  const fetchEvents = useCallback(async () => {
-    setLoading(true);
+  const fetchEvents = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent ?? false;
+    if (!silent) {
+      setLoading(true);
+    }
     setListError(null);
     try {
       const res = await fetch('/api/venue/experience-events');
@@ -297,16 +301,17 @@ export function EventManagerView({
       setListError('Network error while loading events.');
       setEvents([]);
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   }, []);
 
-  useEffect(() => {
-    void fetchEvents();
-  }, [fetchEvents]);
-
-  const loadDetail = useCallback(async (id: string) => {
-    setDetailLoading(true);
+  const loadDetail = useCallback(async (id: string, opts?: { silent?: boolean }) => {
+    const silent = opts?.silent ?? false;
+    if (!silent) {
+      setDetailLoading(true);
+    }
     setDetailError(null);
     try {
       const [evRes, attRes] = await Promise.all([
@@ -334,9 +339,38 @@ export function EventManagerView({
       setDetail(null);
       setAttendees([]);
     } finally {
-      setDetailLoading(false);
+      if (!silent) {
+        setDetailLoading(false);
+      }
     }
   }, []);
+
+  const refreshEvents = useCallback(() => {
+    void fetchEvents({ silent: true });
+  }, [fetchEvents]);
+
+  const refreshEventDetail = useCallback(() => {
+    if (!selectedId) return;
+    void loadDetail(selectedId, { silent: true });
+  }, [loadDetail, selectedId]);
+
+  const refreshEventsAndDetail = useCallback(() => {
+    refreshEvents();
+    refreshEventDetail();
+  }, [refreshEvents, refreshEventDetail]);
+
+  useVenuePostgresLiveSync({
+    venueId,
+    onRefresh: refreshEventsAndDetail,
+    subscriptions: [
+      { table: 'experience_events', filter: `venue_id=eq.${venueId}` },
+      { table: 'bookings', filter: `venue_id=eq.${venueId}` },
+    ],
+  });
+
+  useEffect(() => {
+    void fetchEvents();
+  }, [fetchEvents]);
 
   useEffect(() => {
     if (!selectedId) {

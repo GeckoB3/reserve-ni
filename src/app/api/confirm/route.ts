@@ -37,6 +37,12 @@ import { logBookingOp } from "@/lib/observability/booking-ops-log";
 import type { BookingModel } from "@/types/booking-models";
 import { formatGuestDisplayName } from "@/lib/guests/name";
 import { buildVenuePublicForBookingById } from "@/lib/booking/build-venue-public";
+import {
+  assertAppointmentsFeatureEnabled,
+  parseVenueFeatureFlags,
+  resolveAppointmentsFeatureFlags,
+} from "@/lib/feature-flags";
+import { offerAppointmentWaitlistOnCancel } from "@/lib/booking/offer-appointment-waitlist-on-cancel";
 
 /**
  * GET /api/confirm?booking_id=uuid&token=xxx  (token-based)
@@ -86,7 +92,7 @@ export async function GET(request: NextRequest) {
 
     const { data: venue } = await supabase
       .from("venues")
-      .select("name, address, phone, booking_model, booking_rules, email, reply_to_email")
+      .select("name, address, phone, booking_model, booking_rules, email, reply_to_email, feature_flags")
       .eq("id", booking.venue_id)
       .single();
     const depositPaid = booking.deposit_status === "Paid";
@@ -231,6 +237,11 @@ export async function GET(request: NextRequest) {
       48,
     );
 
+    const venueFlags = parseVenueFeatureFlags(
+      (venue as { feature_flags?: unknown } | null)?.feature_flags,
+    );
+    const featureFlagsResolved = resolveAppointmentsFeatureFlags(venueFlags);
+
     return NextResponse.json({
       booking_id: booking.id,
       venue_id: booking.venue_id,
@@ -268,6 +279,7 @@ export async function GET(request: NextRequest) {
         bookingId: booking.id,
         purpose: "manage",
       }),
+      feature_flags: { resolved: featureFlagsResolved },
     });
   } catch (err) {
     console.error("GET /api/confirm failed:", err);
@@ -501,6 +513,17 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      if (canRefund && !refundSucceeded) {
+        return NextResponse.json(
+          {
+            error:
+              'We could not process your refund right now. Your booking has not been cancelled. Please try again or contact the venue.',
+            code: 'REFUND_FAILED',
+          },
+          { status: 502 },
+        );
+      }
+
       await supabase
         .from("bookings")
         .update({
@@ -560,6 +583,43 @@ export async function POST(request: NextRequest) {
         refund_message = `We were unable to process your refund automatically. Please contact the venue directly to arrange your refund of ${depositAmountStr}.`;
       } else {
         refund_message = "";
+      }
+
+      const cancelledBookingForWaitlist = {
+        id: bookingId,
+        venue_id: booking.venue_id as string,
+        booking_date: String(booking.booking_date),
+        booking_time: String(booking.booking_time),
+        practitioner_id: booking.practitioner_id as string | null | undefined,
+        calendar_id: booking.calendar_id as string | null | undefined,
+        appointment_service_id: booking.appointment_service_id as string | null | undefined,
+        service_item_id: booking.service_item_id as string | null | undefined,
+        experience_event_id: booking.experience_event_id as string | null | undefined,
+        class_instance_id: booking.class_instance_id as string | null | undefined,
+        resource_id: booking.resource_id as string | null | undefined,
+        event_session_id: booking.event_session_id as string | null | undefined,
+      };
+
+      try {
+        const offerResult = await offerAppointmentWaitlistOnCancel(
+          supabase,
+          cancelledBookingForWaitlist,
+        );
+        if (offerResult.offered) {
+          console.info("[confirm cancel] waitlist offer sent", {
+            bookingId,
+            mode: offerResult.mode,
+            ...(offerResult.mode === 'notify_in_order'
+              ? { waitlistEntryId: offerResult.waitlistEntryId }
+              : offerResult.mode === 'notify_all'
+                ? { notifiedCount: offerResult.notifiedCount }
+                : {}),
+          });
+        }
+      } catch (waitlistErr) {
+        console.error("[confirm cancel] waitlist offer failed:", waitlistErr, {
+          bookingId,
+        });
       }
 
       if (guest && venue?.name) {
@@ -648,6 +708,27 @@ export async function POST(request: NextRequest) {
         currentBookingModel === "practitioner_appointment";
 
       if (isAppointmentBooking) {
+        const { data: venueFlagsRow } = await supabase
+          .from("venues")
+          .select("feature_flags, timezone, booking_rules")
+          .eq("id", booking.venue_id)
+          .single();
+        const venueFlags = parseVenueFeatureFlags(
+          (venueFlagsRow as { feature_flags?: unknown } | null)?.feature_flags,
+        );
+        try {
+          assertAppointmentsFeatureEnabled("guest_self_reschedule", venueFlags);
+        } catch {
+          return NextResponse.json(
+            {
+              error: "Online appointment changes are not available for this venue.",
+              code: "feature_disabled",
+              feature: "guest_self_reschedule",
+            },
+            { status: 403 },
+          );
+        }
+
         if (
           !booking_date ||
           !booking_time ||
@@ -837,6 +918,29 @@ export async function POST(request: NextRequest) {
           );
         }
 
+        const { logBookingModifiedEvent } = await import(
+          "@/lib/booking/log-booking-modified-event"
+        );
+        const apptBeforeTime =
+          typeof booking.booking_time === "string"
+            ? booking.booking_time.slice(0, 5)
+            : "";
+        await logBookingModifiedEvent(supabase, {
+          venue_id: booking.venue_id as string,
+          booking_id: bookingId,
+          modification_actor: "guest",
+          before: {
+            booking_date: String(booking.booking_date),
+            booking_time: apptBeforeTime,
+            party_size: Number(booking.party_size),
+          },
+          after: {
+            booking_date: newDate,
+            booking_time: timeStr,
+            party_size: newPartySize,
+          },
+        });
+
         after(async () => {
           try {
             const { executeBookingModificationGuestNotification } = await import(
@@ -975,6 +1079,29 @@ export async function POST(request: NextRequest) {
           { status: 412 },
         );
       }
+
+      const { logBookingModifiedEvent: logTableModified } = await import(
+        "@/lib/booking/log-booking-modified-event"
+      );
+      const tableBeforeTime =
+        typeof booking.booking_time === "string"
+          ? booking.booking_time.slice(0, 5)
+          : "";
+      await logTableModified(supabase, {
+        venue_id: booking.venue_id as string,
+        booking_id: bookingId,
+        modification_actor: "guest",
+        before: {
+          booking_date: String(booking.booking_date),
+          booking_time: tableBeforeTime,
+          party_size: Number(booking.party_size),
+        },
+        after: {
+          booking_date: newDate,
+          booking_time: timeStr,
+          party_size: newPartySize,
+        },
+      });
 
       after(async () => {
         try {

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import { isPlatformAuthFailure, requirePlatformSuperuserAuth } from '@/lib/platform-api-auth';
 
 const PAGE_SIZE = 50;
 
@@ -7,7 +8,6 @@ const PAGE_SIZE = 50;
  * GET /api/platform/venues
  *
  * Returns paginated list of all venues with nested staff members.
- * Middleware enforces superuser access before this handler runs.
  *
  * Query params:
  *   page      – 1-based page number (default 1)
@@ -16,6 +16,9 @@ const PAGE_SIZE = 50;
  *   status    – filter by plan_status  (active | past_due | cancelled | trialing)
  */
 export async function GET(req: NextRequest) {
+  const auth = await requirePlatformSuperuserAuth();
+  if (isPlatformAuthFailure(auth)) return auth;
+
   const admin = getSupabaseAdminClient();
   const { searchParams } = req.nextUrl;
 

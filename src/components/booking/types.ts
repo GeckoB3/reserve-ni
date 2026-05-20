@@ -34,6 +34,20 @@ export interface VenuePublic {
   areas?: Array<{ id: string; name: string; colour: string; sort_order: number }>;
   /** Appointments Light: booking page paused when free period ended without payment. */
   booking_paused?: boolean;
+  /** When true, guests must sign in before completing an online booking. */
+  require_account_login_for_bookings?: boolean;
+  /** Resolved Phase 1a feature flags for public booking (subset). */
+  feature_flags?: {
+    resolved?: {
+      any_available_practitioner?: boolean;
+      guest_self_reschedule?: boolean;
+      waitlist_v2?: boolean;
+    };
+    any_available_practitioner_config?: {
+      mode: 'priority' | 'random';
+      calendar_order: string[];
+    };
+  };
 }
 
 export interface DepositConfigPublic {

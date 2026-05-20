@@ -74,6 +74,7 @@ export async function POST(
     const seenGroups = new Set<string>();
     let cancelledCount = 0;
     let notifications = 0;
+    let refundFailures = 0;
 
     const prefix = `The venue has cancelled "${eventRow.name as string}".`;
 
@@ -99,7 +100,20 @@ export async function POST(
             await work();
           });
         }
+      } else if (result.refundFailed) {
+        refundFailures += 1;
       }
+    }
+
+    if (refundFailures > 0 && cancelledCount === 0) {
+      return NextResponse.json(
+        {
+          error:
+            'Refund could not be processed for one or more bookings. No bookings were cancelled — please try again or refund manually in Stripe.',
+          code: 'REFUND_FAILED',
+        },
+        { status: 502 },
+      );
     }
 
     return NextResponse.json({
@@ -107,6 +121,7 @@ export async function POST(
       event_id: eventId,
       bookings_cancelled: cancelledCount,
       notifications_scheduled: notifications,
+      ...(refundFailures > 0 ? { refund_failures: refundFailures } : {}),
     });
   } catch (err) {
     console.error('POST /api/venue/experience-events/[id]/cancel failed:', err);

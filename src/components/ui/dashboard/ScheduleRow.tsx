@@ -14,7 +14,7 @@ export function ScheduleRow({
 }: {
   timeLabel: string;
   title: string;
-  subtitle?: string;
+  subtitle?: ReactNode;
   /** Tailwind classes for the vertical colour strip */
   stripClassName?: string;
   trailing?: ReactNode;
@@ -23,7 +23,7 @@ export function ScheduleRow({
   /** Empty / open slot styling */
   dashed?: boolean;
 }) {
-  const rowClass = `flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors sm:px-4 sm:py-3 ${
+  const rowClass = `flex w-full flex-wrap items-start gap-x-3 gap-y-2 rounded-xl border px-3 py-2.5 text-left transition-colors sm:px-4 sm:py-3 ${
     dashed
       ? 'border-dashed border-slate-200 bg-slate-50/70'
       : selected
@@ -33,13 +33,19 @@ export function ScheduleRow({
 
   const inner = (
     <>
-      <span className={`h-10 w-1.5 shrink-0 rounded-full ${stripClassName}`} aria-hidden />
-      <span className="w-14 shrink-0 text-xs font-bold tabular-nums text-slate-900 sm:text-sm">{timeLabel}</span>
-      <div className="min-w-0 flex-1">
-        <p className={`truncate text-sm font-semibold ${dashed ? 'text-slate-400' : 'text-slate-900'}`}>{title}</p>
-        {subtitle ? <p className="truncate text-xs text-slate-500">{subtitle}</p> : null}
+      <div className="flex shrink-0 items-start gap-3">
+        <span className={`mt-0.5 h-10 w-1.5 shrink-0 rounded-full ${stripClassName}`} aria-hidden />
+        <span className="w-14 text-xs font-bold tabular-nums text-slate-900 sm:text-sm">{timeLabel}</span>
       </div>
-      {trailing ? <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">{trailing}</div> : null}
+      <div className="min-w-0 flex-[1_1_12rem]">
+        <p className={`break-words text-sm font-semibold ${dashed ? 'text-slate-400' : 'text-slate-900'}`}>{title}</p>
+        {subtitle ? <div className="break-words text-xs text-slate-500">{subtitle}</div> : null}
+      </div>
+      {trailing ? (
+        <div className="flex min-w-[min(100%,10rem)] flex-[1_1_auto] flex-wrap items-center justify-end gap-1.5 sm:min-w-[8rem]">
+          {trailing}
+        </div>
+      ) : null}
     </>
   );
 

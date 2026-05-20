@@ -37,6 +37,29 @@
   --chart-3: #059669;
   --chart-4: #d97706;
   --chart-5: #94a3b8;
+
+  /* Type scale (design system foundation) */
+  --font-size-xs: 0.75rem;
+  --font-size-sm: 0.875rem;
+  --font-size-base: 1rem;
+  --font-size-lg: 1.125rem;
+  --font-size-xl: 1.25rem;
+  --font-size-2xl: 1.5rem;
+  --font-size-3xl: 1.875rem;
+  --line-height-tight: 1.25;
+  --line-height-normal: 1.5;
+
+  /* Z-index layers */
+  --z-dropdown: 50;
+  --z-modal: 70;
+  --z-toast: 80;
+
+  /* Motion */
+  --duration-fast: 150ms;
+  --duration-normal: 200ms;
+
+  /* Semantic font (Sora via layout); --font-geist-sans kept for one release */
+  --font-sans: var(--font-geist-sans);
 }
 
 @theme inline {
@@ -75,6 +98,10 @@
   --color-chart-3: var(--chart-3);
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
+
+  --z-index-dropdown: var(--z-dropdown);
+  --z-index-modal: var(--z-modal);
+  --z-index-toast: var(--z-toast);
 }
 
 body {
@@ -480,17 +507,189 @@ button, a, input, select, textarea {
   box-shadow: 0 0 0 1px var(--ap-accent);
 }
 
-.appointment-public .ap-cal-selected {
-  background-color: var(--ap-accent) !important;
-  color: white !important;
-  box-shadow:
-    0 0 0 2px white,
-    0 0 0 4px var(--ap-accent),
-    0 1px 3px rgb(15 23 42 / 0.12);
-}
-
 .appointment-public .ap-tab-active {
   background-color: var(--ap-accent);
   color: white;
   box-shadow: 0 1px 2px rgb(15 23 42 / 0.08);
+}
+
+/* Map default brand (slate-teal) utilities to venue accent inside public appointment UI */
+.appointment-public .text-brand-600,
+.appointment-public a.text-brand-600 {
+  color: var(--ap-accent);
+}
+.appointment-public .hover\:text-brand-700:hover {
+  color: var(--ap-accent-hover);
+}
+.appointment-public .bg-brand-600 {
+  background-color: var(--ap-accent);
+}
+.appointment-public .hover\:bg-brand-700:hover {
+  background-color: var(--ap-accent-hover);
+}
+.appointment-public .border-brand-300 {
+  border-color: var(--ap-accent-border);
+}
+.appointment-public .hover\:border-brand-300:hover {
+  border-color: var(--ap-accent-border);
+}
+.appointment-public .ring-brand-500\/40 {
+  --tw-ring-color: color-mix(in srgb, var(--ap-accent) 40%, transparent);
+}
+.appointment-public .focus-visible\:ring-brand-500\/40:focus-visible {
+  --tw-ring-color: color-mix(in srgb, var(--ap-accent) 40%, transparent);
+}
+.appointment-public input[type='checkbox'] {
+  accent-color: var(--ap-accent);
+}
+.appointment-public label.border-slate-200.bg-slate-50\/50 {
+  border-color: var(--ap-accent-border);
+  background-color: color-mix(in srgb, var(--ap-accent) 5%, white);
+}
+
+/* Inactive booking-type tabs */
+.appointment-public .ap-tab-inactive {
+  background-color: var(--ap-accent-soft);
+  color: color-mix(in srgb, var(--ap-accent) 55%, #0f172a);
+}
+.appointment-public .ap-tab-inactive:hover {
+  background-color: color-mix(in srgb, var(--ap-accent) 18%, white);
+  color: var(--ap-accent);
+}
+
+/* Progress — pending step */
+.appointment-public .ap-progress-pending {
+  background-color: var(--ap-accent-soft);
+  color: var(--ap-accent-muted);
+}
+.appointment-public .ap-progress-track-pending {
+  background-color: color-mix(in srgb, var(--ap-accent) 12%, white);
+}
+.appointment-public .ap-progress-label-active {
+  color: color-mix(in srgb, var(--ap-accent) 75%, #0f172a);
+}
+.appointment-public .ap-progress-label-done {
+  color: color-mix(in srgb, var(--ap-accent) 50%, #475569);
+}
+.appointment-public .ap-progress-label-pending {
+  color: var(--ap-accent-muted);
+}
+
+/* Icons, prices, chevrons */
+.appointment-public .ap-chevron {
+  color: var(--ap-accent-muted);
+  transition: color 0.15s ease, transform 0.15s ease;
+}
+.appointment-public .group:hover .ap-chevron,
+.appointment-public .ap-chevron:hover {
+  color: var(--ap-accent);
+}
+/* List-row chevrons inside choice cards */
+.appointment-public .ap-choice-card svg:not([class*='ap-chevron']) {
+  color: var(--ap-accent-muted);
+}
+.appointment-public .ap-choice-card:hover svg:not([class*='ap-chevron']) {
+  color: var(--ap-accent);
+}
+.appointment-public .ap-price {
+  color: var(--ap-accent);
+}
+
+/* Shell + cards */
+.appointment-public .ap-shell {
+  border-color: var(--ap-accent-border);
+}
+.appointment-public .ap-card {
+  border-color: var(--ap-accent-border);
+}
+.appointment-public .ap-card:hover {
+  border-color: color-mix(in srgb, var(--ap-accent) 45%, white);
+}
+.appointment-public .ap-card-hover-surface:hover {
+  background-color: var(--ap-accent-soft);
+}
+
+/* Context banner (service / staff summary on date step) */
+.appointment-public .ap-context-banner {
+  border-color: var(--ap-accent-border);
+  background-color: var(--ap-accent-soft);
+  color: color-mix(in srgb, var(--ap-accent) 65%, #0f172a);
+}
+.appointment-public .ap-context-banner .ap-context-muted {
+  color: var(--ap-accent-muted);
+}
+
+/* Calendar chrome — nav uses accent; selected day stays neutral slate */
+.appointment-public .ap-calendar-nav {
+  border-color: var(--ap-accent-border);
+  color: var(--ap-accent);
+}
+.appointment-public .ap-calendar-nav:hover {
+  background-color: var(--ap-accent-soft);
+  border-color: color-mix(in srgb, var(--ap-accent) 40%, white);
+}
+.appointment-public .ap-cal-day-selected {
+  background-color: rgb(30 41 59) !important;
+  color: white !important;
+  cursor: pointer;
+  box-shadow:
+    0 0 0 2px white,
+    0 0 0 4px rgb(30 41 59),
+    0 1px 3px rgb(15 23 42 / 0.12);
+}
+
+/* Secondary / outline buttons */
+.appointment-public .ap-btn-secondary {
+  border-color: var(--ap-accent-border);
+  color: color-mix(in srgb, var(--ap-accent) 55%, #0f172a);
+}
+.appointment-public .ap-btn-secondary:hover:not(:disabled) {
+  background-color: var(--ap-accent-soft);
+  border-color: color-mix(in srgb, var(--ap-accent) 40%, white);
+  color: var(--ap-accent);
+}
+/* Payment step back control */
+.appointment-public button.rounded-full.border.border-slate-200.text-slate-400 {
+  border-color: var(--ap-accent-border);
+  color: var(--ap-accent-muted);
+}
+.appointment-public button.rounded-full.border.border-slate-200.text-slate-400:hover {
+  background-color: var(--ap-accent-soft);
+  color: var(--ap-accent);
+}
+
+/* Brand-tinted utilities used inside the public flow */
+.appointment-public .bg-brand-50,
+.appointment-public .bg-brand-50\/50,
+.appointment-public .bg-brand-50\/80,
+.appointment-public .bg-brand-100 {
+  background-color: var(--ap-accent-soft);
+}
+.appointment-public .text-brand-500 {
+  color: var(--ap-accent);
+}
+.appointment-public .border-brand-100,
+.appointment-public .border-brand-200 {
+  border-color: var(--ap-accent-border);
+}
+.appointment-public .text-brand-400 {
+  color: var(--ap-accent-muted);
+}
+.appointment-public .text-brand-700 {
+  color: color-mix(in srgb, var(--ap-accent) 70%, #0f172a);
+}
+.appointment-public .hover\:text-brand-700:hover {
+  color: var(--ap-accent-hover);
+}
+.appointment-public .focus\:border-brand-400:focus,
+.appointment-public .focus-visible\:border-brand-400:focus-visible {
+  border-color: var(--ap-accent);
+}
+.appointment-public .focus\:ring-brand-100:focus,
+.appointment-public .focus-visible\:ring-brand-100:focus-visible {
+  --tw-ring-color: var(--ap-accent-soft);
+}
+.appointment-public .focus\:ring-brand-500:focus,
+.appointment-public .focus-visible\:ring-brand-500:focus-visible {
+  --tw-ring-color: color-mix(in srgb, var(--ap-accent) 35%, transparent);
 }

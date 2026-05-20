@@ -91,6 +91,7 @@ export async function POST(
     const seenGroups = new Set<string>();
     let cancelledCount = 0;
     let notifications = 0;
+    let refundFailures = 0;
 
     const dateStr = String(inst.instance_date);
     const className = classType.name as string;
@@ -118,7 +119,20 @@ export async function POST(
             await work();
           });
         }
+      } else if (result.refundFailed) {
+        refundFailures += 1;
       }
+    }
+
+    if (refundFailures > 0 && cancelledCount === 0) {
+      return NextResponse.json(
+        {
+          error:
+            'Refund could not be processed for one or more bookings. No bookings were cancelled — please try again or refund manually in Stripe.',
+          code: 'REFUND_FAILED',
+        },
+        { status: 502 },
+      );
     }
 
     return NextResponse.json({
@@ -126,6 +140,7 @@ export async function POST(
       class_instance_id: instanceId,
       bookings_cancelled: cancelledCount,
       notifications_scheduled: notifications,
+      ...(refundFailures > 0 ? { refund_failures: refundFailures } : {}),
     });
   } catch (err) {
     console.error('POST /api/venue/class-instances/[id]/cancel failed:', err);

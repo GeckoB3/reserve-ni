@@ -234,11 +234,12 @@ export function validateNoShowGracePeriod(
   bookingDate: string,
   bookingTime: string,
   graceMinutes: number,
+  timezone = 'Europe/London',
 ): { ok: true } | { ok: false; error: string } {
-  if (!canMarkNoShowForSlot(bookingDate, bookingTime, graceMinutes)) {
+  if (!canMarkNoShowForSlot(bookingDate, bookingTime, graceMinutes, timezone)) {
     return {
       ok: false,
-      error: `Cannot mark as no-show yet \u2014 the grace period of ${graceMinutes} minutes after booking time has not elapsed`,
+      error: `Cannot mark as no-show yet \u2014 the grace period of ${graceMinutes} minutes after the start time has not elapsed`,
     };
   }
   return { ok: true };

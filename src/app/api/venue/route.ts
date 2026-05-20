@@ -12,6 +12,8 @@ import type { BookingModel } from '@/types/booking-models';
 import { isAppointmentPlanTier } from '@/lib/tier-enforcement';
 import { backfillVenueEmailIfEmptyFromStaff } from '@/lib/venue-contact-email';
 import { assertCanDisableBookingModels } from '@/lib/booking/venue-booking-model-disable-guard';
+import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlags } from '@/lib/feature-flags';
+import { normalizeEmbedAccentHex } from '@/lib/embed/accent-colour';
 
 const venueProfileSchema = z.object({
   name: z.string().min(1).max(200).optional(),
@@ -36,6 +38,8 @@ const venueProfileSchema = z.object({
   public_booking_area_mode: z.enum(['auto', 'manual']).optional(),
   /** When true, public booking must complete magic-link login before checkout (see booking create). */
   require_account_login_for_bookings: z.boolean().optional(),
+  /** 6-digit hex (optional `#`) for embed iframe `?accent=` query param. Empty string clears. */
+  embed_accent_colour: z.string().max(7).optional(),
 }).refine((data) => Object.keys(data).filter((k) => data[k as keyof typeof data] !== undefined).length > 0, { message: 'At least one field required' });
 
 /** GET /api/venue - return the authenticated user's venue profile. */
@@ -50,7 +54,7 @@ export async function GET() {
     let venue = null;
     const { data: fullVenue, error } = await staff.db
       .from('venues')
-      .select('id, name, slug, address, phone, email, reply_to_email, cover_photo_url, logo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, communication_templates, opening_hours, venue_opening_exceptions, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, currency, website_url, booking_model, enabled_models, active_booking_models, pricing_tier, terminology, public_booking_area_mode, require_account_login_for_bookings')
+      .select('id, name, slug, address, phone, email, reply_to_email, cover_photo_url, logo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, communication_templates, opening_hours, venue_opening_exceptions, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, currency, website_url, booking_model, enabled_models, active_booking_models, pricing_tier, terminology, public_booking_area_mode, require_account_login_for_bookings, feature_flags, embed_accent_colour')
       .eq('id', staff.venue_id)
       .single();
 
@@ -59,7 +63,7 @@ export async function GET() {
     } else {
       const { data: basicVenue } = await staff.db
         .from('venues')
-        .select('id, name, slug, address, phone, email, reply_to_email, cover_photo_url, logo_url, opening_hours, venue_opening_exceptions, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, currency, website_url, booking_model, enabled_models, active_booking_models, pricing_tier, terminology, public_booking_area_mode, require_account_login_for_bookings')
+        .select('id, name, slug, address, phone, email, reply_to_email, cover_photo_url, logo_url, opening_hours, venue_opening_exceptions, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, currency, website_url, booking_model, enabled_models, active_booking_models, pricing_tier, terminology, public_booking_area_mode, require_account_login_for_bookings, feature_flags, embed_accent_colour')
         .eq('id', staff.venue_id)
         .single();
       if (basicVenue) {
@@ -93,11 +97,16 @@ export async function GET() {
     });
     const primary = activeModels[0] ?? ((v.booking_model as BookingModel) ?? 'table_reservation');
     const enabledModels = activeModelsToLegacyEnabledModels(activeModels, primary);
+    const featureFlagsRaw = parseVenueFeatureFlags(v.feature_flags);
     return NextResponse.json({
       ...venue,
       active_booking_models: activeModels,
       enabled_models: enabledModels,
       current_user_role: staff.role,
+      feature_flags: {
+        raw: featureFlagsRaw,
+        resolved: resolveAppointmentsFeatureFlags(featureFlagsRaw),
+      },
     });
   } catch (err) {
     console.error('GET /api/venue failed:', err);
@@ -168,6 +177,21 @@ export async function PATCH(request: NextRequest) {
     }
     if (data.require_account_login_for_bookings !== undefined) {
       update.require_account_login_for_bookings = data.require_account_login_for_bookings;
+    }
+    if (data.embed_accent_colour !== undefined) {
+      const raw = typeof data.embed_accent_colour === 'string' ? data.embed_accent_colour : '';
+      if (raw.trim() === '') {
+        update.embed_accent_colour = null;
+      } else {
+        const normalised = normalizeEmbedAccentHex(raw);
+        if (!normalised) {
+          return NextResponse.json(
+            { error: 'Accent colour must be a 6-digit hex value (e.g. 4F46E5).' },
+            { status: 400 },
+          );
+        }
+        update.embed_accent_colour = normalised;
+      }
     }
 
     let nextActiveModels: BookingModel[] | null = null;
@@ -248,7 +272,7 @@ export async function PATCH(request: NextRequest) {
       .update(update)
       .eq('id', staff.venue_id)
       .select(
-        'id, name, slug, address, phone, email, reply_to_email, cover_photo_url, logo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, timezone, website_url, booking_model, enabled_models, active_booking_models, pricing_tier, require_account_login_for_bookings',
+        'id, name, slug, address, phone, email, reply_to_email, cover_photo_url, logo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, timezone, website_url, booking_model, enabled_models, active_booking_models, pricing_tier, require_account_login_for_bookings, embed_accent_colour',
       )
       .single();
 

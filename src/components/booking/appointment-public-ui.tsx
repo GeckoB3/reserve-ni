@@ -38,6 +38,11 @@ export function appointmentAccentStyle(accentColour?: string | null): CSSPropert
 
 export const APPOINTMENT_PUBLIC_ROOT_CLASS = 'appointment-public';
 
+export const APPOINTMENT_PUBLIC_CHEVRON = 'ap-chevron h-5 w-5 shrink-0';
+export const APPOINTMENT_PUBLIC_CHEVRON_SM = 'ap-chevron h-4 w-4 shrink-0';
+export const APPOINTMENT_PUBLIC_PRICE = 'ap-price text-sm font-semibold';
+export const APPOINTMENT_PUBLIC_TAB_INACTIVE = 'ap-tab-inactive min-h-[44px] rounded-full px-4 py-2 text-sm font-semibold transition-colors';
+
 export const AppointmentPublicShell = forwardRef<
   HTMLDivElement,
   {
@@ -56,7 +61,7 @@ export const AppointmentPublicShell = forwardRef<
         className={`${APPOINTMENT_PUBLIC_ROOT_CLASS} relative w-full min-w-0 ${className}`.trim()}
         style={accentStyle}
       >
-        <div className="w-full min-w-0 overflow-visible rounded-xl border border-slate-200/90 bg-white shadow-sm ring-1 ring-slate-900/[0.04]">
+        <div className="ap-shell w-full min-w-0 overflow-visible rounded-xl border bg-white shadow-sm ring-1 ring-slate-900/[0.04]">
           <div className="ap-accent-bar h-1 w-full rounded-t-[11px]" />
           <div className="px-3 py-4 sm:px-4 sm:py-5">{children}</div>
         </div>
@@ -70,7 +75,7 @@ export const AppointmentPublicShell = forwardRef<
       className={`${APPOINTMENT_PUBLIC_ROOT_CLASS} relative mx-auto w-full max-w-lg ${className}`.trim()}
       style={accentStyle}
     >
-      <div className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-[var(--ds-shadow-elevated)] ring-1 ring-slate-900/[0.03]">
+      <div className="ap-shell overflow-hidden rounded-2xl border bg-white shadow-[var(--ds-shadow-elevated)] ring-1 ring-slate-900/[0.03]">
         <div className="ap-accent-bar h-1 w-full" />
         <div className="px-5 py-6 sm:px-6 sm:py-7">{children}</div>
       </div>
@@ -94,7 +99,7 @@ export function AppointmentProgressBar({ phase }: { phase: 0 | 1 | 2 }) {
                     ? 'ap-progress-done text-white'
                     : active
                       ? 'ap-progress-active text-white shadow-sm'
-                      : 'bg-slate-100 text-slate-400'
+                      : 'ap-progress-pending'
                 }`}
               >
                 {done ? (
@@ -107,7 +112,11 @@ export function AppointmentProgressBar({ phase }: { phase: 0 | 1 | 2 }) {
               </div>
               <span
                 className={`text-[10px] font-semibold uppercase tracking-wide ${
-                  active ? 'text-slate-800' : done ? 'text-slate-600' : 'text-slate-400'
+                  active
+                    ? 'ap-progress-label-active'
+                    : done
+                      ? 'ap-progress-label-done'
+                      : 'ap-progress-label-pending'
                 }`}
               >
                 {label}
@@ -121,7 +130,7 @@ export function AppointmentProgressBar({ phase }: { phase: 0 | 1 | 2 }) {
           <div
             key={i}
             className={`h-0.5 flex-1 rounded-full transition-colors ${
-              i <= phase ? 'ap-progress-track-active' : 'bg-slate-100'
+              i <= phase ? 'ap-progress-track-active' : 'ap-progress-track-pending'
             }`}
           />
         ))}
@@ -173,22 +182,16 @@ export function AppointmentChoiceCard({
   icon,
   title,
   description,
-  tone = 'accent',
 }: {
   onClick: () => void;
   icon: ReactNode;
   title: string;
   description: string;
-  tone?: 'accent' | 'group';
 }) {
   return (
     <button type="button" onClick={onClick} className="ap-choice-card group w-full text-left">
       <div className="flex items-center gap-4">
-        <div
-          className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl ${
-            tone === 'group' ? 'bg-violet-50 text-violet-600' : 'ap-choice-icon'
-          }`}
-        >
+        <div className="ap-choice-icon flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl">
           {icon}
         </div>
         <div className="min-w-0 flex-1">
@@ -196,7 +199,7 @@ export function AppointmentChoiceCard({
           <div className="mt-0.5 text-sm text-slate-500">{description}</div>
         </div>
         <svg
-          className="h-5 w-5 shrink-0 text-slate-300 transition-transform group-hover:translate-x-0.5 group-hover:text-slate-400"
+          className={APPOINTMENT_PUBLIC_CHEVRON}
           fill="none"
           viewBox="0 0 24 24"
           strokeWidth={2}
@@ -215,7 +218,7 @@ export function AppointmentSummaryStrip({ children }: { children: ReactNode }) {
 }
 
 /**
- * Container-aware grid for appointment time pickers (public page, embed, staff form).
+ * Container-aware grid for appointment time pickers (public page, embed iframe, staff form).
  * See `globals.css` — `repeat(auto-fill, minmax(...))` adapts column count to width.
  */
 export const APPOINTMENT_TIME_SLOTS_GRID_CLASS = 'ap-time-slots-grid';
@@ -244,6 +247,6 @@ export function appointmentTimeSlotClass(selected = false, isPublic = true): str
 export const APPOINTMENT_DETAILS_SUBMIT_CLASS =
   'ap-btn-primary min-h-[48px] w-full rounded-xl px-4 py-3 text-base font-semibold disabled:opacity-50';
 export const APPOINTMENT_DETAILS_INPUT_CLASS =
-  'min-h-[44px] w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base placeholder:text-slate-400 ap-input-focus';
+  'ap-input-focus min-h-[44px] w-full rounded-xl border border-[color:var(--ap-accent-border)] bg-white px-4 py-2.5 text-base placeholder:text-slate-400';
 
 export { BRAND_ACCENT };

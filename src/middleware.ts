@@ -111,8 +111,11 @@ export async function middleware(request: NextRequest) {
     }
   }
 
-  // Unauthenticated: protect /dashboard, /account, /super, and post-login chooser
-  if (!user && (isDashboard || isAccount || isPlatformUI || isChooseDestination)) {
+  // Unauthenticated: protect dashboard, account, platform UI/API, and post-login chooser
+  if (!user && (isDashboard || isAccount || isPlatformUI || isPlatformAPI || isChooseDestination)) {
+    if (isPlatformAPI) {
+      return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
+    }
     const url = request.nextUrl.clone();
     url.pathname = '/login';
     url.searchParams.set('redirectTo', pathname);

@@ -19,7 +19,8 @@ export type CommunicationMessageKey =
   | 'auto_cancel_notification'
   | 'custom_message'
   | 'no_show_notification'
-  | 'post_visit_thankyou';
+  | 'post_visit_thankyou'
+  | 'appointment_waitlist_offer';
 
 export interface LaneMessagePolicy {
   enabled: boolean;
@@ -144,14 +145,70 @@ function buildDefaultLanePolicies(): LaneCommunicationPolicies {
       hoursBefore: null,
       hoursAfter: 4,
     },
+    appointment_waitlist_offer: {
+      enabled: false,
+      channels: ['email'],
+      emailCustomMessage: null,
+      smsCustomMessage: null,
+      hoursBefore: null,
+      hoursAfter: null,
+    },
   };
 }
 
 export function defaultCommunicationPolicies(): VenueCommunicationPolicies {
+  const table = buildDefaultLanePolicies();
+  const appointments_other = buildDefaultLanePolicies();
+  appointments_other.appointment_waitlist_offer = defaultWaitlistOfferMessagePolicy();
+  return { table, appointments_other };
+}
+
+/** Email-only waitlist invite defaults applied when appointment waitlist is first enabled. */
+export function defaultWaitlistOfferMessagePolicy(): LaneMessagePolicy {
   return {
-    table: buildDefaultLanePolicies(),
-    appointments_other: buildDefaultLanePolicies(),
+    enabled: true,
+    channels: EMAIL_ONLY,
+    emailCustomMessage: null,
+    smsCustomMessage: null,
+    hoursBefore: null,
+    hoursAfter: null,
   };
+}
+
+export function communicationPoliciesWithWaitlistOfferEmailDefaults(
+  current: VenueCommunicationPolicies,
+): VenueCommunicationPolicies {
+  return mergeCommunicationPoliciesPatch(current, {
+    appointments_other: {
+      appointment_waitlist_offer: defaultWaitlistOfferMessagePolicy(),
+    },
+  });
+}
+
+/**
+ * When waitlist is active but invite comms were never migrated, apply email-only defaults once.
+ */
+export async function ensureWaitlistOfferCommunicationPolicyForVenue(venueId: string): Promise<void> {
+  const current = await getVenueCommunicationPolicies(venueId);
+  if (current.appointments_other.appointment_waitlist_offer.enabled) return;
+
+  const commNext = communicationPoliciesWithWaitlistOfferEmailDefaults(current);
+  const admin = getSupabaseAdminClient();
+  const { error } = await admin
+    .from('venues')
+    .update({
+      communication_policies: commNext as unknown as Record<string, never>,
+    })
+    .eq('id', venueId);
+
+  if (error) {
+    console.error('[ensureWaitlistOfferCommunicationPolicyForVenue] update failed:', error.message, {
+      venueId,
+    });
+    return;
+  }
+
+  clearCommunicationPoliciesCache(venueId);
 }
 
 /** Appointments Light: SMS toggles default off — email-only channels for the unified scheduling lane. */
@@ -185,6 +242,7 @@ const ALLOWED_CHANNELS_BY_MESSAGE: Record<
   custom_message: EMAIL_AND_SMS,
   no_show_notification: EMAIL_ONLY,
   post_visit_thankyou: EMAIL_ONLY,
+  appointment_waitlist_offer: EMAIL_AND_SMS,
 };
 
 function sanitizeChannels(
@@ -317,6 +375,11 @@ function sanitizeLanePolicies(
       'post_visit_thankyou',
       row.post_visit_thankyou,
       fallback.post_visit_thankyou,
+    ),
+    appointment_waitlist_offer: sanitizeMessagePolicy(
+      'appointment_waitlist_offer',
+      row.appointment_waitlist_offer,
+      fallback.appointment_waitlist_offer,
     ),
   };
 }

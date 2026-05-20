@@ -46,6 +46,7 @@ import {
   isStaffWalkInBookingDateAllowed,
   loadServiceEntityBookingWindow,
 } from '@/lib/booking/entity-booking-window';
+import { listPractitionerIdsForAppointmentService } from '@/lib/availability/appointment-any-practitioner';
 
 interface VenueClockRow {
   timezone?: string | null;
@@ -798,4 +799,33 @@ function emptyAppointmentInput(date: string): AppointmentEngineInput {
     venueOpeningHours: null,
     venueOpeningExceptions: null,
   };
+}
+
+/** Union of month dates with at least one slot for any practitioner offering `serviceId`. */
+export async function computeAnyAvailableAppointmentDatesInMonth(
+  supabase: SupabaseClient,
+  venueId: string,
+  serviceId: string,
+  year: number,
+  month: number,
+  options: ComputeAppointmentMonthOptions = {},
+): Promise<string[]> {
+  const practitionerIds = await listPractitionerIdsForAppointmentService(supabase, venueId, serviceId);
+  if (practitionerIds.length === 0) return [];
+
+  const dateSets = await Promise.all(
+    practitionerIds.map((practitionerId) =>
+      computeAppointmentAvailableDatesInMonth(
+        supabase,
+        venueId,
+        practitionerId,
+        serviceId,
+        year,
+        month,
+        options,
+      ),
+    ),
+  );
+
+  return [...new Set(dateSets.flat())].sort();
 }

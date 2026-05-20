@@ -9,14 +9,17 @@ import { enrichBookingEmailForComms } from '@/lib/emails/booking-email-enrichmen
 import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
 import type { BookingEmailData } from '@/lib/emails/types';
 import { sendBookingModificationNotification } from '@/lib/communications/send-templated';
+import { resolveCommPolicy } from '@/lib/communications/policy-resolver';
 import { createOrGetBookingShortLink } from '@/lib/booking-short-links';
 import { formatGuestDisplayName } from '@/lib/guests/name';
+import { inferBookingRowModel } from '@/lib/booking/infer-booking-row-model';
+import type { BookingModificationNotifyResult } from '@/lib/booking/modification-notify-result';
 
 export async function executeBookingModificationGuestNotification(
   admin: SupabaseClient,
   venueId: string,
   bookingId: string,
-): Promise<void> {
+): Promise<BookingModificationNotifyResult> {
   const { data: bookingRow, error: bkErr } = await admin
     .from('bookings')
     .select('*')
@@ -30,7 +33,42 @@ export async function executeBookingModificationGuestNotification(
       venueId,
       bkErr,
     });
-    return;
+    return { emailSent: false, smsSent: false, skipped: true, skippedReason: 'Booking not found' };
+  }
+
+  const bookingModel = inferBookingRowModel(
+    bookingRow as {
+      booking_model?: string | null;
+      experience_event_id?: string | null;
+      class_instance_id?: string | null;
+      resource_id?: string | null;
+      event_session_id?: string | null;
+      calendar_id?: string | null;
+      service_item_id?: string | null;
+      practitioner_id?: string | null;
+      appointment_service_id?: string | null;
+    },
+  );
+  const modificationPolicy = await resolveCommPolicy({
+    venueId,
+    messageKey: 'booking_modification',
+    bookingModel,
+  });
+  if (!modificationPolicy.enabled) {
+    return {
+      emailSent: false,
+      smsSent: false,
+      skipped: true,
+      skippedReason: 'Booking modification notifications are turned off in Communications settings.',
+    };
+  }
+  if (modificationPolicy.channels.length === 0) {
+    return {
+      emailSent: false,
+      smsSent: false,
+      skipped: true,
+      skippedReason: 'No channels enabled for booking modification notifications.',
+    };
   }
 
   const guestId = (bookingRow as { guest_id: string }).guest_id;
@@ -46,7 +84,14 @@ export async function executeBookingModificationGuestNotification(
     .eq('id', venueId)
     .single();
 
-  if (gErr || !guestRow || !venueRow?.name) return;
+  if (gErr || !guestRow || !venueRow?.name) {
+    return {
+      emailSent: false,
+      smsSent: false,
+      skipped: true,
+      skippedReason: 'Guest or venue details are missing.',
+    };
+  }
 
   const br = bookingRow as {
     booking_time: unknown;
@@ -75,6 +120,7 @@ export async function executeBookingModificationGuestNotification(
     deposit_amount_pence: br.deposit_amount_pence ?? null,
     deposit_status: br.deposit_status ?? null,
     manage_booking_link: manageLink,
+    booking_model: bookingModel,
   };
 
   const venueEmailData = venueRowToEmailData({
@@ -86,5 +132,10 @@ export async function executeBookingModificationGuestNotification(
   });
 
   const enriched = await enrichBookingEmailForComms(admin, bookingId, bookingEmail);
-  await sendBookingModificationNotification(enriched, venueEmailData, venueId);
+  const { email, sms } = await sendBookingModificationNotification(enriched, venueEmailData, venueId);
+  return {
+    emailSent: email.sent,
+    smsSent: sms.sent,
+    skipped: false,
+  };
 }

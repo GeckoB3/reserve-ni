@@ -63,7 +63,7 @@ export function ResourceCalendarMonth({
         <button
           type="button"
           onClick={onPrevMonth}
-          className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          className="ap-calendar-nav rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors"
           aria-label="Previous month"
         >
           ←
@@ -105,7 +105,7 @@ export function ResourceCalendarMonth({
           if (disabled) {
             cellClass += isPast ? 'cursor-not-allowed text-slate-300 ' : 'cursor-not-allowed bg-slate-50 text-slate-400 ';
           } else if (isSelected) {
-            cellClass += 'ap-cal-selected ';
+            cellClass += 'ap-cal-day-selected cursor-pointer ';
           } else if (hasAvail) {
             cellClass +=
               'cursor-pointer bg-emerald-50 text-emerald-900 ring-1 ring-emerald-300 hover:bg-emerald-100 ';

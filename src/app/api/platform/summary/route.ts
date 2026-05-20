@@ -1,13 +1,16 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import { isPlatformAuthFailure, requirePlatformSuperuserAuth } from '@/lib/platform-api-auth';
 
 /**
  * GET /api/platform/summary
  *
  * Returns aggregate KPI counts for the superuser overview panel.
- * Middleware enforces superuser access before this handler runs.
  */
 export async function GET() {
+  const auth = await requirePlatformSuperuserAuth();
+  if (isPlatformAuthFailure(auth)) return auth;
+
   const admin = getSupabaseAdminClient();
 
   const [venuesResult, staffResult] = await Promise.all([

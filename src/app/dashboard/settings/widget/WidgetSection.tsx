@@ -2,12 +2,15 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import QRCode from 'qrcode';
+import { buildVenueEmbedSnippet, normalizeEmbedAccentHex } from '@/lib/embed/accent-colour';
 import { EMBED_IFRAME_DEFAULT_HEIGHT_PX } from '@/lib/embed/widget-frame';
 
 interface WidgetSectionProps {
   venueName: string;
   venueSlug: string;
   baseUrl: string;
+  /** Stored on venue row; drives iframe `?accent=` in the embed snippet. */
+  initialEmbedAccentColour?: string;
 }
 
 interface CollectiveEmbedOption {
@@ -15,13 +18,29 @@ interface CollectiveEmbedOption {
   name: string;
 }
 
-export function WidgetSection({ venueName, venueSlug, baseUrl }: WidgetSectionProps) {
+export function WidgetSection({
+  venueName,
+  venueSlug,
+  baseUrl,
+  initialEmbedAccentColour = '',
+}: WidgetSectionProps) {
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
-  const [accentColour, setAccentColour] = useState('');
+  const [accentColour, setAccentColour] = useState(() => {
+    const stored = normalizeEmbedAccentHex(initialEmbedAccentColour);
+    return stored ?? '';
+  });
+  const [accentSaveState, setAccentSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const accentSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const accentSavedResetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** 'venue' = this venue's own page; otherwise a collective slug. */
   const [target, setTarget] = useState<'venue' | string>('venue');
   const [collectives, setCollectives] = useState<CollectiveEmbedOption[]>([]);
+
+  useEffect(() => {
+    const stored = normalizeEmbedAccentHex(initialEmbedAccentColour);
+    setAccentColour(stored ?? '');
+  }, [initialEmbedAccentColour]);
 
   useEffect(() => {
     let cancelled = false;
@@ -49,16 +68,65 @@ export function WidgetSection({ venueName, venueSlug, baseUrl }: WidgetSectionPr
     };
   }, []);
 
+  const persistAccent = useCallback(async (rawInput: string) => {
+    const trimmed = rawInput.trim();
+    if (trimmed !== '' && !normalizeEmbedAccentHex(trimmed)) {
+      setAccentSaveState('error');
+      return;
+    }
+    setAccentSaveState('saving');
+    try {
+      const res = await fetch('/api/venue', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ embed_accent_colour: trimmed }),
+      });
+      const body = (await res.json()) as { error?: string };
+      if (!res.ok) {
+        throw new Error(typeof body.error === 'string' ? body.error : 'Failed to save accent colour');
+      }
+      setAccentSaveState('saved');
+      if (accentSavedResetRef.current) clearTimeout(accentSavedResetRef.current);
+      accentSavedResetRef.current = setTimeout(() => setAccentSaveState('idle'), 2500);
+    } catch {
+      setAccentSaveState('error');
+    }
+  }, []);
+
+  const scheduleAccentSave = useCallback(
+    (value: string) => {
+      if (accentSaveTimerRef.current) clearTimeout(accentSaveTimerRef.current);
+      accentSaveTimerRef.current = setTimeout(() => {
+        void persistAccent(value);
+      }, 600);
+    },
+    [persistAccent],
+  );
+
+  useEffect(() => {
+    return () => {
+      if (accentSaveTimerRef.current) clearTimeout(accentSaveTimerRef.current);
+      if (accentSavedResetRef.current) clearTimeout(accentSavedResetRef.current);
+    };
+  }, []);
+
   const usingCollective = target !== 'venue';
   const root = baseUrl.replace(/\/$/, '');
+  const venueEmbed = buildVenueEmbedSnippet({
+    baseUrl,
+    venueSlug,
+    accentHex: accentColour,
+  });
   const embedUrl = usingCollective
     ? `${root}/book/c/${target}${accentColour ? `?accent=${accentColour.replace(/^#/, '')}` : ''}`
-    : `${root}/embed/${venueSlug}${accentColour ? `?accent=${accentColour.replace(/^#/, '')}` : ''}`;
+    : venueEmbed.embedUrl;
   const bookUrl = usingCollective
     ? `${root}/book/c/${target}`
     : `${root}/book/${venueSlug}`;
-  const snippet = `<iframe src="${embedUrl}" width="100%" height="${EMBED_IFRAME_DEFAULT_HEIGHT_PX}" style="border:none;overflow:hidden;" scrolling="no" id="reserveni-widget"></iframe>
-<script src="${baseUrl.replace(/\/$/, '')}/embed/resize.js"></script>`;
+  const snippet = usingCollective
+    ? `<iframe src="${embedUrl}" width="100%" height="${EMBED_IFRAME_DEFAULT_HEIGHT_PX}" style="border:none;overflow:hidden;" scrolling="no" id="reserveni-widget"></iframe>
+<script src="${root}/embed/resize.js"></script>`
+    : venueEmbed.snippet;
 
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
   const copyResetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -155,15 +223,38 @@ export function WidgetSection({ venueName, venueSlug, baseUrl }: WidgetSectionPr
               id="accent"
               type="text"
               value={accentColour}
-              onChange={(e) => setAccentColour(e.target.value.replace(/[^a-fA-F0-9#]/g, '').slice(0, 7))}
+              onChange={(e) => {
+                const next = e.target.value.replace(/[^a-fA-F0-9#]/g, '').slice(0, 7);
+                setAccentColour(next);
+                scheduleAccentSave(next);
+              }}
+              onBlur={() => {
+                if (accentSaveTimerRef.current) {
+                  clearTimeout(accentSaveTimerRef.current);
+                  accentSaveTimerRef.current = null;
+                }
+                void persistAccent(accentColour);
+              }}
               placeholder="#4F46E5"
               className="w-32 rounded border border-neutral-300 px-3 py-2 text-sm"
             />
-            {accentColour && (
-              <div className="h-8 w-8 rounded border border-neutral-300" style={{ backgroundColor: `#${accentColour.replace(/^#/, '')}` }} />
-            )}
+            {accentColour && normalizeEmbedAccentHex(accentColour) ? (
+              <div
+                className="h-8 w-8 rounded border border-neutral-300"
+                style={{ backgroundColor: `#${normalizeEmbedAccentHex(accentColour)}` }}
+              />
+            ) : null}
           </div>
-          <p className="mt-1 text-xs text-neutral-500">Hex colour for buttons in the embedded widget (e.g. 4F46E5)</p>
+          <p className="mt-1 text-xs text-neutral-500">
+            Hex colour for buttons in the embedded widget (e.g. 4F46E5). Saved automatically for your venue embed.
+          </p>
+          {accentSaveState === 'saving' ? (
+            <p className="mt-1 text-xs text-neutral-500">Saving accent…</p>
+          ) : accentSaveState === 'saved' ? (
+            <p className="mt-1 text-xs text-emerald-700">Accent colour saved.</p>
+          ) : accentSaveState === 'error' ? (
+            <p className="mt-1 text-xs text-red-600">Could not save accent colour. Use 6 hex digits.</p>
+          ) : null}
         </div>
         <pre className="mt-4 overflow-x-auto rounded border border-neutral-200 bg-neutral-50 p-4 text-xs text-neutral-800">
           {snippet}

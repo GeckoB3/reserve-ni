@@ -12,7 +12,7 @@ const joinSchema = z.object({
   party_size: z.number().int().min(1).max(50),
   first_name: z.string().min(1).max(100),
   last_name: z.string().min(1).max(100),
-  guest_email: z.string().email().optional().or(z.literal('')),
+  guest_email: z.string().trim().email(),
   guest_phone: z.string().min(1).max(24),
   service_id: z.string().uuid().optional(),
   notes: z.string().max(500).optional(),
@@ -45,6 +45,7 @@ export async function POST(request: NextRequest) {
       .eq('venue_id', parsed.data.venue_id)
       .eq('desired_date', parsed.data.desired_date)
       .eq('guest_phone', guestPhoneE164)
+      .eq('waitlist_kind', 'table')
       .eq('status', 'waiting');
 
     if ((count ?? 0) > 0) {
@@ -55,13 +56,14 @@ export async function POST(request: NextRequest) {
       .from('waitlist_entries')
       .insert({
         venue_id: parsed.data.venue_id,
+        waitlist_kind: 'table',
         service_id: parsed.data.service_id ?? null,
         desired_date: parsed.data.desired_date,
         desired_time: parsed.data.desired_time ?? null,
         party_size: parsed.data.party_size,
         guest_first_name: guestFirst,
         guest_last_name: guestLast,
-        guest_email: parsed.data.guest_email || null,
+        guest_email: parsed.data.guest_email.trim().toLowerCase(),
         guest_phone: guestPhoneE164,
         notes: parsed.data.notes || null,
       })

@@ -10,8 +10,12 @@ import {
 } from '@/lib/booking/public-book-tabs';
 import { resolveActiveBookingModels } from '@/lib/booking/active-models';
 import { BookingFlowRouter, type LockedPractitionerBooking } from '@/components/booking/BookingFlowRouter';
+import { PublicBookingAccountGateProvider } from '@/components/booking/PublicBookingAccountGate';
 import type { VenuePublic } from '@/components/booking/types';
-import { appointmentAccentStyle } from '@/components/booking/appointment-public-ui';
+import {
+  appointmentAccentStyle,
+  APPOINTMENT_PUBLIC_TAB_INACTIVE,
+} from '@/components/booking/appointment-public-ui';
 
 const EMPTY_ENABLED: BookingModel[] = [];
 
@@ -54,6 +58,10 @@ export function BookPublicBookingFlow({
   );
 
   const tabParam = searchParams.get('tab');
+  const waitlistOfferEntryId = searchParams.get('waitlist_offer') ?? undefined;
+  const waitlistPrefillDate = searchParams.get('date') ?? undefined;
+  const waitlistPrefillTime = searchParams.get('time') ?? undefined;
+  const waitlistPrefillServiceId = searchParams.get('service_id') ?? undefined;
   const activeSlug = useMemo(
     () => resolvePublicBookTabFromQuery(tabParam, activeModels, venue.terminology),
     [tabParam, activeModels, venue.terminology],
@@ -120,7 +128,7 @@ export function BookPublicBookingFlow({
                       ? appointmentTabs
                         ? 'ap-tab-active shadow-sm'
                         : 'bg-brand-600 text-white shadow-sm'
-                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                      : APPOINTMENT_PUBLIC_TAB_INACTIVE
                   }`}
                 >
                   {t.label}
@@ -138,16 +146,22 @@ export function BookPublicBookingFlow({
         </div>
       )}
 
-      <BookingFlowRouter
-        key={activeSlug}
-        venue={venue}
-        activeBookingModel={activeModel}
-        lockedPractitioner={lockedPractitioner ?? undefined}
-        embed={embed}
-        onHeightChange={onHeightChange}
-        accentColour={accentColour}
-        collectiveId={collectiveId}
-      />
+      <PublicBookingAccountGateProvider venue={venue}>
+        <BookingFlowRouter
+          key={activeSlug}
+          venue={venue}
+          activeBookingModel={activeModel}
+          lockedPractitioner={lockedPractitioner ?? undefined}
+          embed={embed}
+          onHeightChange={onHeightChange}
+          accentColour={accentColour}
+          collectiveId={collectiveId}
+          waitlistOfferEntryId={waitlistOfferEntryId}
+          preselectedServiceId={waitlistPrefillServiceId}
+          initialDate={waitlistPrefillDate}
+          initialTime={waitlistPrefillTime}
+        />
+      </PublicBookingAccountGateProvider>
     </div>
   );
 }

@@ -43,6 +43,28 @@ export interface CommunicationRenderOptions {
   cancellationPolicy?: string | null;
   changeSummary?: string | null;
   message?: string | null;
+  /** When false for appointment lanes, manage links use cancel-only copy. */
+  guestSelfRescheduleEnabled?: boolean;
+}
+
+function isAppointmentCancelOnly(opts: CommunicationRenderOptions): boolean {
+  return isAppointmentLane(opts.lane) && opts.guestSelfRescheduleEnabled === false;
+}
+
+function manageBookingEmailCtaLabel(cancelOnly: boolean): string {
+  return cancelOnly ? 'Cancel Your Appointment' : 'Manage Your Booking';
+}
+
+function manageBookingSmsUrlLabel(cancelOnly: boolean): string {
+  return cancelOnly ? 'Cancel: ' : 'Manage: ';
+}
+
+function manageBookingTextLinkLine(cancelOnly: boolean, url: string): string {
+  return cancelOnly ? `Cancel appointment: ${url}` : `Manage booking: ${url}`;
+}
+
+function manageBookingActionButtonLabel(cancelOnly: boolean): string {
+  return cancelOnly ? 'Cancel' : 'Manage';
 }
 
 function isAppointmentLane(lane: CommunicationLane): boolean {
@@ -154,6 +176,8 @@ export function renderCommunicationSms(
     ? clipSmsText(opts.refundMessage.trim(), 56)
     : '';
   const manageUrl = opts.booking.manage_booking_link?.trim() ?? '';
+  const cancelOnly = isAppointmentCancelOnly(opts);
+  const smsManageLabel = manageBookingSmsUrlLabel(cancelOnly);
 
   const body = (() => {
     switch (opts.messageKey) {
@@ -163,10 +187,10 @@ export function renderCommunicationSms(
           : '';
         if (isAppointmentLane(opts.lane)) {
           const core = `${leadPart}${vn}: Confirmed: ${withStaffSms(opts.booking, label)} on ${smsDate} at ${time}.${payHint}`;
-          return joinSmsPrefixAndUrl(core, manageUrl || null, 'Manage: ');
+          return joinSmsPrefixAndUrl(core, manageUrl || null, smsManageLabel);
         }
         const core = `${leadPart}${vn}: Booking confirmed for ${partySize} guests on ${smsDate} at ${time}.`;
-        return joinSmsPrefixAndUrl(core, manageUrl || null, 'Manage: ');
+        return joinSmsPrefixAndUrl(core, manageUrl || null, smsManageLabel);
       }
       case 'deposit_payment_request': {
         const url = opts.paymentLink?.trim() ?? '';
@@ -206,7 +230,7 @@ export function renderCommunicationSms(
         const core = isAppointmentLane(opts.lane)
           ? `${leadPart}${vn}: Updated booking: ${withStaffSms(opts.booking, label)} is now ${smsDate} at ${time}.`
           : `${leadPart}${vn}: Updated booking for ${partySize} guests: ${smsDate} at ${time}.`;
-        return joinSmsPrefixAndUrl(core, manageUrl || null, 'Manage: ');
+        return joinSmsPrefixAndUrl(core, manageUrl || null, smsManageLabel);
       }
       case 'cancellation_confirmation': {
         const tail = refundMsg ? ` ${refundMsg}` : '';
@@ -255,6 +279,8 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
   const label = bookingLabel(opts.booking);
   const withStaffLabel = withStaff(label, opts.booking);
   const appointment = isAppointmentLane(opts.lane);
+  const cancelOnly = isAppointmentCancelOnly(opts);
+  const manageCtaLabel = manageBookingEmailCtaLabel(cancelOnly);
 
   switch (opts.messageKey) {
     case 'booking_confirmation': {
@@ -296,9 +322,9 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
             ? `Before your appointment: ${opts.preAppointmentInstructions}`
             : null,
           '',
-          'Need to make changes?',
+          cancelOnly ? 'Need to cancel?' : 'Need to make changes?',
         ],
-        ctaLabel: 'Manage Your Booking',
+        ctaLabel: manageCtaLabel,
         ctaUrl: opts.booking.manage_booking_link ?? null,
         postCtaHtml: acct.html || null,
         postCtaTextLine: acct.textLine,
@@ -364,7 +390,7 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
           depositAmount ? `Deposit paid: ${depositAmount}` : null,
           acctPaid.textLine,
         ],
-        ctaLabel: 'Manage Your Booking',
+        ctaLabel: manageCtaLabel,
         ctaUrl: opts.booking.manage_booking_link ?? null,
       };
     }
@@ -470,7 +496,7 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
           depositAmount ? `Deposit paid: ${depositAmount}` : null,
           acctPre.textLine,
         ],
-        ctaLabel: 'Manage Your Booking',
+        ctaLabel: manageCtaLabel,
         ctaUrl: opts.booking.manage_booking_link ?? null,
       };
     }
@@ -498,7 +524,7 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
           opts.changeSummary ? `What changed: ${opts.changeSummary}` : null,
           acctMod.textLine,
         ],
-        ctaLabel: 'Manage Your Booking',
+        ctaLabel: manageCtaLabel,
         ctaUrl: opts.booking.manage_booking_link ?? null,
       };
     }
@@ -624,6 +650,10 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
         ctaLabel: 'Book Again',
         ctaUrl: opts.rebookLink ?? opts.venue.booking_page_url ?? null,
       };
+    case 'appointment_waitlist_offer':
+      throw new Error(
+        'appointment_waitlist_offer is rendered via renderAppointmentWaitlistOfferEmail, not buildMainContentEmail',
+      );
   }
 }
 
@@ -636,6 +666,8 @@ export function renderCommunicationEmail(
 
   let html: string;
 
+  const cancelOnly = isAppointmentCancelOnly(opts);
+
   if (opts.messageKey === 'booking_confirmation') {
     const structuredPrice = confirmationStructuredPriceText(opts.booking);
 
@@ -645,6 +677,7 @@ export function renderCommunicationEmail(
       appointmentStyle: appointmentLane,
       emailVariant: appointmentLane ? 'appointment' : 'table',
       priceDisplay: structuredPrice?.trim() ? structuredPrice : null,
+      manageButtonLabel: manageBookingActionButtonLabel(cancelOnly),
       blocks: {
         preambleHtml: '',
         depositHtml: null,
@@ -716,7 +749,7 @@ export function renderCommunicationEmail(
     opts.messageKey === 'booking_confirmation' && mapsUrl ? `Location (Google Maps): ${mapsUrl}` : null,
     opts.messageKey === 'booking_confirmation' && venueWeb ? `Venue website: ${venueWeb}` : null,
     opts.messageKey === 'booking_confirmation' && opts.booking.manage_booking_link?.trim()
-      ? `Manage booking: ${opts.booking.manage_booking_link}`
+      ? manageBookingTextLinkLine(cancelOnly, opts.booking.manage_booking_link.trim())
       : null,
     opts.messageKey !== 'booking_confirmation' && ctaLabel && ctaUrl ? '' : null,
     opts.messageKey !== 'booking_confirmation' && ctaLabel && ctaUrl ? `${ctaLabel}: ${ctaUrl}` : null,

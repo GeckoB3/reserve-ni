@@ -19,8 +19,11 @@ import {
 import { UndoToast } from '@/app/dashboard/table-grid/UndoToast';
 import type { UndoAction } from '@/types/table-management';
 import { DashboardStaffBookingModal } from '@/components/booking/DashboardStaffBookingModal';
+import { Dialog } from '@/components/ui/primitives/Dialog';
+import { ConfirmDialog } from '@/components/ui/primitives/ConfirmDialog';
 import type { BookingModel } from '@/types/booking-models';
 import { ExpandedBookingContent } from '@/app/dashboard/bookings/ExpandedBookingContent';
+import { scheduleWaitlistAlertsRefresh } from '@/lib/booking/waitlist-alerts-events';
 import { BookingDetailPanel, type BookingDetailPanelSnapshot } from '@/app/dashboard/bookings/BookingDetailPanel';
 import { expandedBookingRowShellClass } from '@/app/dashboard/bookings/booking-expand-accordion-classes';
 import { OperationsWorkspaceToolbar } from '@/components/dashboard/OperationsWorkspaceToolbar';
@@ -274,7 +277,7 @@ function bookingTypePillVariant(model: BookingModel): PillVariant {
 
 function depositBadge(status: string, amountPence: number | null) {
   if (status === 'Not Required' || status === 'N/A') return null;
-  const amt = amountPence ? `Â£${(amountPence / 100).toFixed(2)}` : null;
+  const amt = amountPence ? `£${(amountPence / 100).toFixed(2)}` : null;
   const variantMap: Record<string, PillVariant> = {
     Paid: 'success',
     Refunded: 'brand',
@@ -418,33 +421,6 @@ function DaySheetToolbarSummary({
 }
 
 // â”€â”€â”€ ConfirmDialog â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
-function ConfirmDialog({ state, onClose }: { state: ConfirmState; onClose: () => void }) {
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 p-4 backdrop-blur-[2px]"
-      onClick={onClose}
-    >
-      <div
-        className="w-full max-w-sm rounded-2xl border border-slate-200/80 bg-white p-6 shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h3 className="text-base font-semibold text-slate-900">{state.title}</h3>
-        <p className="mt-2 text-sm text-slate-600">{state.message}</p>
-        <div className="mt-5 flex gap-3">
-          <button type="button" onClick={() => { state.onConfirm(); onClose(); }} className="flex-1 rounded-xl bg-red-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-red-700">
-            {state.confirmLabel}
-          </button>
-          <button type="button" onClick={onClose} className="flex-1 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50">
-            Cancel
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// â”€â”€â”€ Main: DaySheetView â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export function DaySheetView({
   venueId,
@@ -917,6 +893,9 @@ export function DaySheetView({
                      newStatus === 'No-Show' ? 'Marked as no-show' :
                      newStatus === 'Cancelled' ? 'Booking cancelled' : 'Status updated';
       addToast(label, 'success');
+      if (newStatus === 'Cancelled') {
+        scheduleWaitlistAlertsRefresh();
+      }
       const tableStyle = isTableReservationBooking(currentBooking);
       setUndoAction({
         id: crypto.randomUUID(),
@@ -938,7 +917,7 @@ export function DaySheetView({
   const requestStatusChange = useCallback(
     (booking: DaySheetBooking, nextStatus: BookingStatus) => {
       if (!canTransitionBookingStatus(booking.status, nextStatus)) return;
-      if (nextStatus === 'No-Show' && data && !canMarkNoShowForSlot(date, booking.booking_time, data.no_show_grace_minutes)) {
+      if (nextStatus === 'No-Show' && data && !canMarkNoShowForSlot(date, booking.booking_time, data.no_show_grace_minutes, venueTimezone)) {
         addToast(`No-show can only be marked ${data.no_show_grace_minutes} minutes after the booking start time.`, 'error');
         return;
       }
@@ -980,7 +959,7 @@ export function DaySheetView({
       }
       void changeStatus(booking.id, nextStatus);
     },
-    [activeTables.length, addToast, changeStatus, data, date],
+    [activeTables.length, addToast, changeStatus, data, date, venueTimezone],
   );
 
   const undoStatusChange = useCallback(async () => {
@@ -1371,7 +1350,7 @@ export function DaySheetView({
                       </>
                     ) : (
                       <span className="text-xs text-slate-500">
-                        {period.booked_covers} covers Â· {period.bookings.filter((b) => !isTerminal(b.status)).length} bookings
+                        {period.booked_covers} covers · {period.bookings.filter((b) => !isTerminal(b.status)).length} bookings
                       </span>
                     )}
                   </div>
@@ -1429,20 +1408,20 @@ export function DaySheetView({
                               <span className="shrink-0 font-semibold tabular-nums text-slate-700">{b.booking_time.slice(0, 5)}</span>
                               {isTableBooking ? (
                                 <>
-                                  <span className="shrink-0 text-slate-300">Â·</span>
+                                  <span className="shrink-0 text-slate-300">·</span>
                                   <span className="shrink-0 text-[11px] font-medium text-slate-600 sm:text-xs">
                                     {b.party_size} {b.party_size === 1 ? 'cover' : 'covers'}
                                   </span>
                                 </>
                               ) : b.party_size > 1 ? (
                                 <>
-                                  <span className="shrink-0 text-slate-300">Â·</span>
+                                  <span className="shrink-0 text-slate-300">·</span>
                                   <span className="shrink-0 text-[11px] font-medium text-slate-600 sm:text-xs">
                                     {b.party_size} people
                                   </span>
                                 </>
                               ) : null}
-                              <span className="hidden shrink-0 text-slate-300 sm:inline">Â·</span>
+                              <span className="hidden shrink-0 text-slate-300 sm:inline">·</span>
                               <span className="hidden shrink-0 sm:inline-flex">{sourceBadge(b.source)}</span>
                               <BookingStatusPill statusKey={b.status}>{displayStatus}</BookingStatusPill>
                               {isTableBooking && b.area_name ? (
@@ -1675,9 +1654,16 @@ export function DaySheetView({
           initialDate={date}
         />
       )}
-      {confirmDialog && (
-        <ConfirmDialog state={confirmDialog} onClose={() => setConfirmDialog(null)} />
-      )}
+      <ConfirmDialog
+        open={confirmDialog != null}
+        onOpenChange={(open) => {
+          if (!open) setConfirmDialog(null);
+        }}
+        title={confirmDialog?.title ?? ''}
+        message={confirmDialog?.message ?? ''}
+        confirmLabel={confirmDialog?.confirmLabel ?? 'Confirm'}
+        onConfirm={() => confirmDialog?.onConfirm()}
+      />
       {undoAction && (
         <UndoToast
           action={undoAction}
@@ -1687,127 +1673,119 @@ export function DaySheetView({
       )}
 
       {/* â”€â”€ Table Selector (Seat flow) â”€â”€ */}
-      {seatWithTableBookingId && (
-        <div
-          className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/20 p-4 backdrop-blur-sm"
-          onClick={() => setSeatWithTableBookingId(null)}
-        >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-label="Assign table"
-            className="my-16 w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 className="mb-4 text-lg font-semibold text-slate-900">Assign a table</h3>
-            <TableSelector
-              tables={activeTables}
-              occupancyMap={occupancyMap}
-              partySize={data?.periods.flatMap((p) => p.bookings).find((b) => b.id === seatWithTableBookingId)?.party_size ?? 2}
-              selectedIds={seatSelectedTableIds}
-              onChange={setSeatSelectedTableIds}
-              confirmLabel="Seat"
-              skipLabel="Seat without table"
-              onConfirm={async (ids) => {
-                const bookingId = seatWithTableBookingId;
-                setSeatWithTableBookingId(null);
-                setActionLoading(bookingId);
-                try {
-                  const res = await fetch(`/api/venue/bookings/${bookingId}`, {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ status: 'Seated', table_ids: ids }),
-                  });
-                  if (!res.ok) {
-                    const j = await res.json().catch(() => ({}));
-                    addToast(j.error ?? 'Failed to seat guest', 'error');
-                  } else {
-                    addToast('Guest checked in', 'success');
-                  }
-                  void fetchDaySheet();
-                } catch {
-                  addToast('Failed to seat guest', 'error');
-                } finally {
-                  setActionLoading(null);
-                }
-              }}
-              onSkip={() => {
-                const bookingId = seatWithTableBookingId;
-                setSeatWithTableBookingId(null);
-                void changeStatus(bookingId, 'Seated');
-              }}
-            />
-          </div>
-        </div>
-      )}
+      <Dialog
+        open={seatWithTableBookingId != null}
+        onOpenChange={(open) => {
+          if (!open) setSeatWithTableBookingId(null);
+        }}
+        title="Assign a table"
+        size="md"
+        contentClassName="max-w-md"
+      >
+        <TableSelector
+          tables={activeTables}
+          occupancyMap={occupancyMap}
+          partySize={data?.periods.flatMap((p) => p.bookings).find((b) => b.id === seatWithTableBookingId)?.party_size ?? 2}
+          selectedIds={seatSelectedTableIds}
+          onChange={setSeatSelectedTableIds}
+          confirmLabel="Seat"
+          skipLabel="Seat without table"
+          onConfirm={async (ids) => {
+            const bookingId = seatWithTableBookingId;
+            if (!bookingId) return;
+            setSeatWithTableBookingId(null);
+            setActionLoading(bookingId);
+            try {
+              const res = await fetch(`/api/venue/bookings/${bookingId}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status: 'Seated', table_ids: ids }),
+              });
+              if (!res.ok) {
+                const j = await res.json().catch(() => ({}));
+                addToast(j.error ?? 'Failed to seat guest', 'error');
+              } else {
+                addToast('Guest checked in', 'success');
+              }
+              void fetchDaySheet();
+            } catch {
+              addToast('Failed to seat guest', 'error');
+            } finally {
+              setActionLoading(null);
+            }
+          }}
+          onSkip={() => {
+            const bookingId = seatWithTableBookingId;
+            if (!bookingId) return;
+            setSeatWithTableBookingId(null);
+            void changeStatus(bookingId, 'Seated');
+          }}
+        />
+      </Dialog>
 
       {changeTableBookingId && data && (() => {
         const changeBooking = data.periods.flatMap((p) => p.bookings).find((x) => x.id === changeTableBookingId);
         if (!changeBooking) return null;
         return (
-          <div
-            className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/20 p-4 backdrop-blur-sm"
-            onClick={() => setChangeTableBookingId(null)}
+          <Dialog
+            open
+            onOpenChange={(open) => {
+              if (!open) setChangeTableBookingId(null);
+            }}
+            title="Change table"
+            size="md"
+            contentClassName="max-w-md"
           >
-            <div
-              role="dialog"
-              aria-modal="true"
-              aria-label="Change table"
-              className="my-16 w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <h3 className="mb-4 text-lg font-semibold text-slate-900">Change table</h3>
-              <p className="mb-3 text-sm text-slate-600">
-                Select table(s) for {changeBooking.guest_name}. Current booking tables are shown as free so you can move them.
-              </p>
-              <TableSelector
-                tables={activeTables}
-                occupancyMap={changeTableOccupancyMap}
-                partySize={changeBooking.party_size}
-                selectedIds={changeTableSelectedIds}
-                onChange={setChangeTableSelectedIds}
-                confirmLabel="Save"
-                skipLabel="Cancel"
-                onConfirm={async (ids) => {
-                  const bookingId = changeTableBookingId;
-                  if (!bookingId) return;
-                  const oldIds = (changeBooking.table_assignments ?? []).map((t) => t.id);
-                  setChangeTableBookingId(null);
-                  setActionLoading(bookingId);
-                  try {
-                    const res = oldIds.length > 0
-                      ? await fetch('/api/venue/tables/assignments', {
-                          method: 'POST',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({
-                            action: 'reassign',
-                            booking_id: bookingId,
-                            old_table_ids: oldIds,
-                            new_table_ids: ids,
-                          }),
-                        })
-                      : await fetch('/api/venue/tables/assignments', {
-                          method: 'POST',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({ booking_id: bookingId, table_ids: ids }),
-                        });
-                    if (!res.ok) {
-                      const j = await res.json().catch(() => ({}));
-                      addToast((j as { error?: string }).error ?? 'Failed to update tables', 'error');
-                    } else {
-                      addToast('Table assignment updated', 'success');
-                    }
-                    void fetchDaySheet();
-                  } catch {
-                    addToast('Failed to update tables', 'error');
-                  } finally {
-                    setActionLoading(null);
+            <p className="mb-3 text-sm text-slate-600">
+              Select table(s) for {changeBooking.guest_name}. Current booking tables are shown as free so you can move them.
+            </p>
+            <TableSelector
+              tables={activeTables}
+              occupancyMap={changeTableOccupancyMap}
+              partySize={changeBooking.party_size}
+              selectedIds={changeTableSelectedIds}
+              onChange={setChangeTableSelectedIds}
+              confirmLabel="Save"
+              skipLabel="Cancel"
+              onConfirm={async (ids) => {
+                const bookingId = changeTableBookingId;
+                if (!bookingId) return;
+                const oldIds = (changeBooking.table_assignments ?? []).map((t) => t.id);
+                setChangeTableBookingId(null);
+                setActionLoading(bookingId);
+                try {
+                  const res = oldIds.length > 0
+                    ? await fetch('/api/venue/tables/assignments', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          action: 'reassign',
+                          booking_id: bookingId,
+                          old_table_ids: oldIds,
+                          new_table_ids: ids,
+                        }),
+                      })
+                    : await fetch('/api/venue/tables/assignments', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ booking_id: bookingId, table_ids: ids }),
+                      });
+                  if (!res.ok) {
+                    const j = await res.json().catch(() => ({}));
+                    addToast((j as { error?: string }).error ?? 'Failed to update tables', 'error');
+                  } else {
+                    addToast('Table assignment updated', 'success');
                   }
-                }}
-                onSkip={() => setChangeTableBookingId(null)}
-              />
-            </div>
-          </div>
+                  void fetchDaySheet();
+                } catch {
+                  addToast('Failed to update tables', 'error');
+                } finally {
+                  setActionLoading(null);
+                }
+              }}
+              onSkip={() => setChangeTableBookingId(null)}
+            />
+          </Dialog>
         );
       })()}
 

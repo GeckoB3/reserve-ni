@@ -30,6 +30,11 @@ export interface CronBookingRow {
   experience_event_id: string | null;
   class_instance_id: string | null;
   resource_id: string | null;
+  event_session_id?: string | null;
+  calendar_id?: string | null;
+  service_item_id?: string | null;
+  practitioner_id?: string | null;
+  appointment_service_id?: string | null;
   suppress_import_comms?: boolean | null;
   guest: CronGuestInfo | null;
 }

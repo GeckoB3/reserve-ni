@@ -15,6 +15,8 @@
  * - `No-Show`   — Guest did not arrive.
  * - `Cancelled` — Booking cancelled by guest or staff.
  */
+import { getVenueLocalDateAndMinutes, venueLocalDateTimeToUtcMs } from '@/lib/venue/venue-local-clock';
+
 export const BOOKING_STATUSES = [
   'Pending',
   'Booked',
@@ -49,7 +51,7 @@ export const BOOKING_REVERT_ACTIONS: Partial<Record<BookingStatus, { label: stri
   Confirmed: { label: 'Undo confirm', target: 'Booked' },
   Seated: { label: 'Unseat', target: 'Booked' },
   Completed: { label: 'Reopen', target: 'Seated' },
-  'No-Show': { label: 'Revert No-Show', target: 'Booked' },
+  'No-Show': { label: 'Undo No-Show', target: 'Booked' },
 };
 
 export function isRevertTransition(from: BookingStatus | string, to: BookingStatus | string): boolean {
@@ -116,13 +118,17 @@ export function canMarkNoShowForSlot(
   bookingDate: string,
   bookingTime: string,
   graceMinutes: number,
+  timezone = 'Europe/London',
   nowDate = new Date(),
 ): boolean {
-  const today = nowDate.toISOString().slice(0, 10);
-  if (bookingDate < today) return true;
-  if (bookingDate > today) return false;
-  const [hours, minutes] = bookingTime.slice(0, 5).split(':').map(Number);
-  const bookingMin = (hours ?? 0) * 60 + (minutes ?? 0);
-  const nowMin = nowDate.getHours() * 60 + nowDate.getMinutes();
-  return nowMin >= bookingMin + graceMinutes;
+  const timeZone = timezone.trim() || 'Europe/London';
+  const bookingTimeHm = bookingTime.slice(0, 5);
+  const { dateYmd: todayInVenue } = getVenueLocalDateAndMinutes(timeZone, nowDate);
+
+  if (bookingDate < todayInVenue) return true;
+  if (bookingDate > todayInVenue) return false;
+
+  const startMs = venueLocalDateTimeToUtcMs(bookingDate, bookingTimeHm, timeZone);
+  const graceEndMs = startMs + graceMinutes * 60 * 1000;
+  return nowDate.getTime() >= graceEndMs;
 }

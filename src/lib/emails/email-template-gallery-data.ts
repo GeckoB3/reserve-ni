@@ -6,6 +6,7 @@ import { renderBookingConfirmation } from '@/lib/emails/templates/booking-confir
 import { renderStaffWelcomeEmail } from '@/lib/emails/templates/staff-welcome-email';
 import { renderReminder56h } from '@/lib/emails/templates/reminder-56h';
 import { renderDayOfReminderEmail } from '@/lib/emails/templates/day-of-reminder-email';
+import { renderAppointmentWaitlistOfferEmail } from '@/lib/emails/templates/appointment-waitlist-offer-email';
 
 /** Rich venue sample so confirmation hero buttons (website, directions) render. */
 export const EMAIL_GALLERY_DEMO_VENUE: VenueEmailData = {
@@ -84,6 +85,7 @@ function messageKeyTitle(key: CommunicationMessageKey): string {
     custom_message: 'Custom message',
     no_show_notification: 'No-show notification',
     post_visit_thankyou: 'Post-visit thank you',
+    appointment_waitlist_offer: 'Waitlist invite',
   };
   return titles[key];
 }
@@ -205,6 +207,24 @@ export function getEmailTemplateGalleryItems(): EmailGalleryItem[] {
     subtitle: 'Same-day / tonight copy',
     subject: dayOf.subject,
     html: dayOf.html,
+  });
+
+  const waitlistOffer = renderAppointmentWaitlistOfferEmail({
+    venueName: EMAIL_GALLERY_DEMO_VENUE.name,
+    venueLogoUrl: EMAIL_GALLERY_DEMO_VENUE.logo_url,
+    venueAddress: EMAIL_GALLERY_DEMO_VENUE.address,
+    venuePhone: EMAIL_GALLERY_DEMO_VENUE.phone,
+    guestName: 'Alex Smith',
+    desiredDate: '2026-06-15',
+    timeWindowLabel: '10:00 – 14:00',
+    bookingPageUrl: EMAIL_GALLERY_DEMO_VENUE.booking_page_url ?? null,
+  });
+  items.push({
+    id: 'appointment-waitlist-offer',
+    title: 'Appointment waitlist availability',
+    subtitle: 'Slot opened — view availability and book online',
+    subject: waitlistOffer.subject,
+    html: waitlistOffer.html,
   });
 
   return items;

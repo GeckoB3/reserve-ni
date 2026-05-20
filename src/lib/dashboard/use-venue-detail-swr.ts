@@ -9,6 +9,7 @@ import {
   GUEST_DETAIL_HISTORY_LIMIT_FULL,
   venueBookingDetailKey,
   venueGuestDetailKey,
+  VENUE_DETAIL_DEDUPE_MS,
   VENUE_DETAIL_STALE_MS,
 } from '@/lib/dashboard/venue-detail-swr';
 
@@ -18,8 +19,9 @@ export function useVenueBookingDetail(bookingId: string | null | undefined) {
     id ? venueBookingDetailKey(id) : null,
     () => fetchVenueBookingDetail(id!),
     {
-      revalidateOnFocus: false,
-      dedupingInterval: VENUE_DETAIL_STALE_MS,
+      revalidateOnFocus: true,
+      dedupingInterval: VENUE_DETAIL_DEDUPE_MS,
+      refreshInterval: VENUE_DETAIL_STALE_MS,
     },
   );
 }
@@ -33,8 +35,9 @@ export function useVenueGuestDetail(
     id ? venueGuestDetailKey(id, historyLimit) : null,
     () => fetchVenueGuestDetail(id!, historyLimit),
     {
-      revalidateOnFocus: false,
-      dedupingInterval: VENUE_DETAIL_STALE_MS,
+      revalidateOnFocus: true,
+      dedupingInterval: VENUE_DETAIL_DEDUPE_MS,
+      refreshInterval: VENUE_DETAIL_STALE_MS,
     },
   );
 }

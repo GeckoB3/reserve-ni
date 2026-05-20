@@ -77,12 +77,13 @@ function buildActionButtons(opts: {
   mapsUrl: string | null;
   venueUrl: string | null;
   manageUrl: string | null;
+  manageLabel?: string;
 }): string {
   const buttons: Array<{ href: string; label: string }> = [];
   if (opts.calendarUrl) buttons.push({ href: opts.calendarUrl, label: 'Add to calendar' });
   if (opts.mapsUrl)     buttons.push({ href: opts.mapsUrl,     label: 'Location' });
   if (opts.venueUrl)    buttons.push({ href: opts.venueUrl,    label: 'Visit website' });
-  if (opts.manageUrl)   buttons.push({ href: opts.manageUrl,   label: 'Manage' });
+  if (opts.manageUrl)   buttons.push({ href: opts.manageUrl,   label: opts.manageLabel ?? 'Manage' });
   if (buttons.length === 0) return '';
 
   const cells = buttons.map(
@@ -288,8 +289,9 @@ export function renderBookingConfirmationDocumentHtml(input: {
   blocks: BookingConfirmationLayoutBlocks;
   emailVariant: 'table' | 'appointment';
   priceDisplay?: string | null;
+  manageButtonLabel?: string;
 }): string {
-  const { booking, venue, appointmentStyle, blocks, priceDisplay } = input;
+  const { booking, venue, appointmentStyle, blocks, priceDisplay, manageButtonLabel } = input;
 
   const calendarUrl = buildGoogleCalendarAddUrlForBooking(booking, venue);
   const mapsUrl = buildGoogleMapsDirectionsUrl(venue.address);
@@ -323,7 +325,7 @@ export function renderBookingConfirmationDocumentHtml(input: {
     `<p style="margin:0 0 4px;font-size:17px;font-weight:700;color:${TEXT_DARK};text-align:center;font-family:${FONT}">${escapeHtml(venue.name)}</p>` +
     `<p style="margin:0;font-size:14px;color:${TEXT_MUTED};text-align:center;font-family:${FONT}">${escapeHtml(dateTimeLine(booking))}</p>` +
     // Action buttons
-    buildActionButtons({ calendarUrl, mapsUrl, venueUrl: venueWebUrl, manageUrl });
+    buildActionButtons({ calendarUrl, mapsUrl, venueUrl: venueWebUrl, manageUrl, manageLabel: manageButtonLabel });
 
   // ── Details card ───────────────────────────────────────────────────────────
 

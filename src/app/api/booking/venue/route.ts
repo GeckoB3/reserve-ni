@@ -4,6 +4,8 @@ import { resolveVenueMode } from '@/lib/venue-mode';
 import { listActiveAreasForVenue } from '@/lib/areas/resolve-default-area';
 import { isPublicOnlineBookingBlocked } from '@/lib/billing/subscription-entitlement';
 import { mergePublicTableBookingRulesFromRestrictions } from '@/lib/booking/public-table-venue-booking-rules';
+import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlags } from '@/lib/feature-flags';
+import { mapVenueFeatureFlagsForPublic } from '@/lib/booking/venue-public-feature-flags';
 
 /**
  * GET /api/booking/venue?slug=venue-slug
@@ -25,7 +27,7 @@ export async function GET(request: NextRequest) {
     const { data: venue, error } = await supabase
       .from('venues')
       .select(
-        'id, name, slug, cover_photo_url, logo_url, address, phone, website_url, deposit_config, booking_rules, opening_hours, timezone, booking_model, enabled_models, active_booking_models, terminology, currency, public_booking_area_mode, pricing_tier, plan_status, subscription_current_period_end, billing_access_source',
+        'id, name, slug, cover_photo_url, logo_url, address, phone, website_url, deposit_config, booking_rules, opening_hours, timezone, booking_model, enabled_models, active_booking_models, terminology, currency, public_booking_area_mode, pricing_tier, plan_status, subscription_current_period_end, billing_access_source, feature_flags',
       )
       .eq('slug', slug.trim())
       .single();
@@ -52,6 +54,12 @@ export async function GET(request: NextRequest) {
       areas = await listActiveAreasForVenue(supabase, venue.id);
     }
 
+    const venueFlags = parseVenueFeatureFlags((venue as { feature_flags?: unknown }).feature_flags);
+    const resolvedFlags = resolveAppointmentsFeatureFlags(venueFlags);
+    const publicFeatureFlags = mapVenueFeatureFlagsForPublic(
+      (venue as { feature_flags?: unknown }).feature_flags,
+    );
+
     const payload: Record<string, unknown> = {
       ...venue,
       booking_model: venueMode.bookingModel,
@@ -59,6 +67,14 @@ export async function GET(request: NextRequest) {
       enabled_models: venueMode.enabledModels,
       terminology: venueMode.terminology,
       areas,
+      feature_flags: {
+        resolved: {
+          any_available_practitioner: resolvedFlags.any_available_practitioner,
+          guest_self_reschedule: resolvedFlags.guest_self_reschedule,
+          waitlist_v2: resolvedFlags.waitlist_v2,
+        },
+        any_available_practitioner_config: publicFeatureFlags?.any_available_practitioner_config,
+      },
     };
 
     if (
