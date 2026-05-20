@@ -751,6 +751,25 @@ export function ContactDetailPanel({
         />
       ) : null}
 
+      {relatedGuestHistoryBooking ? (
+        <BookingDetailPanel
+          key={relatedGuestHistoryBooking.bookingId}
+          bookingId={relatedGuestHistoryBooking.bookingId}
+          venueId={venueId}
+          venueCurrency={venueCurrency}
+          initialSnapshot={relatedGuestHistoryBooking.snapshot}
+          isAppointment={relatedGuestHistoryBooking.isAppointment}
+          presentation="modal"
+          stackDepth={0}
+          venueTimezone={venueTimezone}
+          onClose={() => setRelatedGuestHistoryBooking(null)}
+          onUpdated={() => {
+            void loadDetail(g.id);
+            void loadList();
+          }}
+        />
+      ) : null}
+
       {newBookingModal ? (
         <StaffSurfaceBookingModal
           open
