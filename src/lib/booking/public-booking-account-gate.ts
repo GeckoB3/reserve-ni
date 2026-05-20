@@ -63,31 +63,32 @@ export function usePublicBookingAccountGate(venue: VenuePublic): PublicBookingAc
   const [sessionEmail, setSessionEmail] = useState<string | null>(null);
   const [authChecking, setAuthChecking] = useState(requireLogin);
 
-  const refreshSession = useCallback(async () => {
-    if (!requireLogin) {
-      setSessionEmail(null);
-      setAuthChecking(false);
-      return null;
-    }
-    setAuthChecking(true);
-    const supabase = createClient();
-    const { data } = await supabase.auth.getUser();
-    const email = data.user?.email?.trim().toLowerCase() ?? null;
-    setSessionEmail(email);
-    setAuthChecking(false);
-    return data.user ?? null;
-  }, [requireLogin]);
-
   useEffect(() => {
-    void refreshSession();
     if (!requireLogin) return;
+
     const supabase = createClient();
+    let cancelled = false;
+
+    const syncSession = async () => {
+      const { data } = await supabase.auth.getUser();
+      if (cancelled) return;
+      const email = data.user?.email?.trim().toLowerCase() ?? null;
+      setSessionEmail(email);
+      setAuthChecking(false);
+    };
+
+    void syncSession();
+
     const { data: sub } = supabase.auth.onAuthStateChange(() => {
-      void refreshSession();
+      void syncSession();
       setAuthOpen(false);
     });
-    return () => sub.subscription.unsubscribe();
-  }, [requireLogin, refreshSession]);
+
+    return () => {
+      cancelled = true;
+      sub.subscription.unsubscribe();
+    };
+  }, [requireLogin]);
 
   const ensureSignedIn = useCallback(async (): Promise<boolean> => {
     if (!requireLogin) return true;
