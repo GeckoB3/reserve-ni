@@ -539,9 +539,6 @@ export function ExpandedBookingContent({
     activeDetail?.special_requests,
     activeDetail?.internal_notes,
   ].filter(Boolean).length;
-  const confirmationSentAt = activeDetail?.communications.find(
-    (comm) => comm.message_type === 'booking_confirmation_email' || comm.message_type === 'booking_confirmation_sms',
-  )?.created_at;
 
   const patchBookingQuick = async (body: Record<string, unknown>, loadingKey: string) => {
     setInlineActionLoading(loadingKey);
@@ -931,12 +928,6 @@ export function ExpandedBookingContent({
               <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
                 <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Checked in</p>
                 <p className="truncate text-xs font-bold text-slate-700">{formatRelative(activeDetail.checked_in_at)}</p>
-              </div>
-            ) : null}
-            {confirmationSentAt ? (
-              <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
-                <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Confirmation</p>
-                <p className="truncate text-xs font-bold text-slate-700">Sent {formatRelative(confirmationSentAt)}</p>
               </div>
             ) : null}
             <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
