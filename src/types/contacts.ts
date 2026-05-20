@@ -76,6 +76,22 @@ export interface GuestBookingHistoryRow {
   detail_label: string;
   practitioner_name: string | null;
   service_name: string | null;
+  /** Rebook + guest-history accordion fields (from booking row). */
+  practitioner_id?: string | null;
+  appointment_service_id?: string | null;
+  calendar_id?: string | null;
+  calendar_name?: string | null;
+  service_item_id?: string | null;
+  service_variant_id?: string | null;
+  service_id?: string | null;
+  area_id?: string | null;
+  area_name?: string | null;
+  estimated_end_time?: string | null;
+  booking_end_time?: string | null;
+  experience_event_id?: string | null;
+  class_instance_id?: string | null;
+  resource_id?: string | null;
+  event_session_id?: string | null;
 }
 
 export interface GuestDetailResponse {

@@ -21,6 +21,23 @@ describe('BookingDetailSurface', () => {
     expect(screen.getAllByRole('dialog').length).toBeGreaterThanOrEqual(1);
   });
 
+  it('renders modal close control and calls onClose when clicked', () => {
+    const onClose = vi.fn();
+    render(
+      <BookingDetailSurface
+        presentation="modal"
+        onClose={onClose}
+        panelRef={{ current: null }}
+        panelClassName="test-panel"
+      >
+        <p>Modal body</p>
+      </BookingDetailSurface>,
+    );
+
+    screen.getByRole('button', { name: 'Close booking detail' }).click();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it('does not call onClose when nested booking is open and sheet dismisses', () => {
     const onClose = vi.fn();
     render(

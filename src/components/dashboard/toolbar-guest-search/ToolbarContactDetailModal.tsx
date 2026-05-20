@@ -180,8 +180,8 @@ export function ToolbarContactDetailModal({
           if (!next) onClose();
         }}
         title={title}
-        size="md"
-        contentClassName="flex max-h-[min(85dvh,85vh)] w-full max-w-lg flex-col overflow-hidden"
+        size="lg"
+        contentClassName="flex h-[min(85dvh,85vh)] max-h-[min(85dvh,85vh)] min-h-0 w-full max-w-2xl flex-col overflow-hidden"
       >
         <ContactDetailPanel
             id={`toolbar-contact-${row.id}`}

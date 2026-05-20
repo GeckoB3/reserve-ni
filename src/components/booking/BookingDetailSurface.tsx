@@ -51,6 +51,10 @@ export function BookingDetailSurface({
     if (!open && !nestedBookingOpen) onClose();
   };
 
+  const handleOverlayDismiss = () => {
+    if (!nestedBookingOpen) onClose();
+  };
+
   if (isModal) {
     return (
       <>
@@ -61,9 +65,25 @@ export function BookingDetailSurface({
           hideHeader
           size="lg"
           showClose={false}
-          contentClassName="flex h-[min(85dvh,85vh)] max-h-[min(90dvh,90vh)] w-full max-w-2xl flex-col overflow-hidden p-0"
+          onOverlayClick={handleOverlayDismiss}
+          contentClassName="flex h-[min(85dvh,85vh)] max-h-[min(90dvh,90vh)] min-h-0 w-full max-w-2xl flex-col overflow-hidden p-0"
+          bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden p-0"
         >
-          {panelInner}
+          <div className="flex shrink-0 items-center justify-end border-b border-slate-100 bg-white/95 px-3 py-2">
+            <button
+              type="button"
+              aria-label="Close booking detail"
+              onClick={onClose}
+              className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+            >
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" aria-hidden>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-[max(0.75rem,env(safe-area-inset-bottom,0px))]">
+            {panelInner}
+          </div>
         </Dialog>
         {popoverDismissLayer}
       </>

@@ -163,7 +163,7 @@ export async function GET(
     const { data: recentRaw, error: rbErr } = await staff.db
       .from('bookings')
       .select(
-        'id, booking_date, booking_time, party_size, status, deposit_status, deposit_amount_pence, practitioner_id, appointment_service_id, calendar_id, service_item_id, experience_event_id, class_instance_id, resource_id, event_session_id',
+        'id, booking_date, booking_time, party_size, status, deposit_status, deposit_amount_pence, booking_model, estimated_end_time, booking_end_time, service_id, area_id, practitioner_id, appointment_service_id, calendar_id, service_item_id, service_variant_id, experience_event_id, class_instance_id, resource_id, event_session_id',
       )
       .eq('guest_id', guestId)
       .eq('venue_id', staff.venue_id)
@@ -184,6 +184,7 @@ export async function GET(
     const eventIds = [...new Set(recent.map((r) => (r as { experience_event_id?: string | null }).experience_event_id).filter(Boolean))] as string[];
     const classInstIds = [...new Set(recent.map((r) => (r as { class_instance_id?: string | null }).class_instance_id).filter(Boolean))] as string[];
     const resourceIds = [...new Set(recent.map((r) => (r as { resource_id?: string | null }).resource_id).filter(Boolean))] as string[];
+    const areaIds = [...new Set(recent.map((r) => (r as { area_id?: string | null }).area_id).filter(Boolean))] as string[];
 
     const prMap = new Map<string, string>();
     const svcMap = new Map<string, string>();
@@ -191,6 +192,7 @@ export async function GET(
     const siMap = new Map<string, string>();
     const evMap = new Map<string, string>();
     const resMap = new Map<string, string>();
+    const areaMap = new Map<string, string>();
     const classLabelMap = new Map<string, string>();
 
     if (practitionerIds.length > 0) {
@@ -229,6 +231,12 @@ export async function GET(
         resMap.set((v as { id: string }).id, (v as { name: string }).name);
       }
     }
+    if (areaIds.length > 0) {
+      const { data: areas } = await staff.db.from('areas').select('id, name').in('id', areaIds);
+      for (const a of areas ?? []) {
+        areaMap.set((a as { id: string }).id, (a as { name: string }).name);
+      }
+    }
     if (classInstIds.length > 0) {
       const { data: instRows } = await staff.db
         .from('class_instances')
@@ -258,10 +266,16 @@ export async function GET(
         status: string;
         deposit_status: string | null;
         deposit_amount_pence?: number | null;
+        booking_model?: string | null;
+        estimated_end_time?: string | null;
+        booking_end_time?: string | null;
+        service_id?: string | null;
+        area_id?: string | null;
         practitioner_id: string | null;
         appointment_service_id: string | null;
         calendar_id?: string | null;
         service_item_id?: string | null;
+        service_variant_id?: string | null;
         experience_event_id?: string | null;
         class_instance_id?: string | null;
         resource_id?: string | null;
@@ -307,6 +321,21 @@ export async function GET(
         detail_label,
         practitioner_name,
         service_name,
+        practitioner_id: row.practitioner_id,
+        appointment_service_id: row.appointment_service_id,
+        calendar_id: row.calendar_id ?? null,
+        calendar_name,
+        service_item_id: row.service_item_id ?? null,
+        service_variant_id: row.service_variant_id ?? null,
+        service_id: row.service_id ?? null,
+        area_id: row.area_id ?? null,
+        area_name: row.area_id ? areaMap.get(row.area_id) ?? null : null,
+        estimated_end_time: row.estimated_end_time ?? null,
+        booking_end_time: row.booking_end_time ?? null,
+        experience_event_id: row.experience_event_id ?? null,
+        class_instance_id: row.class_instance_id ?? null,
+        resource_id: row.resource_id ?? null,
+        event_session_id: row.event_session_id ?? null,
       };
     });
 

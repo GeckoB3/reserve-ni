@@ -467,25 +467,20 @@ export function BookingDetailPanel({
     if (stackDepth === 0 && nestedBookingOpen) {
       return undefined;
     }
-    if (stackDepth > 0) {
-      const onKeyDown = (event: KeyboardEvent) => {
-        if (event.key !== 'Escape') return;
-        if (isBookingDetailPopoverDismissExempt(event.target, panelRef.current)) return;
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        onClose();
-      };
-      window.addEventListener('keydown', onKeyDown, true);
-      return () => window.removeEventListener('keydown', onKeyDown, true);
-    }
+
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
-      if (isBookingDetailPopoverDismissExempt(event.target, panelRef.current)) return;
+      if (confirmDialog) return;
+      if (stackDepth > 0) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      }
       onClose();
     };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [onClose, stackDepth, nestedBookingOpen]);
+
+    window.addEventListener('keydown', onKeyDown, stackDepth > 0);
+    return () => window.removeEventListener('keydown', onKeyDown, stackDepth > 0);
+  }, [confirmDialog, onClose, stackDepth, nestedBookingOpen]);
 
   useEffect(() => {
     if (!isPopover) return;

@@ -25,6 +25,10 @@ export interface DialogProps {
   hideHeader?: boolean;
   className?: string;
   contentClassName?: string;
+  /** Override the scrollable body wrapper (e.g. flex column with an inner scroll region). */
+  bodyClassName?: string;
+  /** When set, overlay clicks call this in addition to Radix dismiss (booking detail modals). */
+  onOverlayClick?: () => void;
 }
 
 export function Dialog({
@@ -39,6 +43,8 @@ export function Dialog({
   hideHeader = false,
   className,
   contentClassName,
+  bodyClassName,
+  onOverlayClick,
 }: DialogProps) {
   return (
     <RadixDialog.Root open={open} onOpenChange={onOpenChange}>
@@ -47,14 +53,17 @@ export function Dialog({
           data-booking-detail-dismiss-exempt
           className={cn('fixed inset-0 z-[var(--z-modal)] bg-slate-900/30 backdrop-blur-[2px]', className)}
           onPointerDown={(e) => e.stopPropagation()}
-          onClick={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            onOverlayClick?.();
+          }}
         />
         <RadixDialog.Content
           data-booking-detail-dismiss-exempt
           onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => e.stopPropagation()}
           className={cn(
-            'fixed left-1/2 top-1/2 z-[var(--z-modal)] flex max-h-[min(90dvh,90vh)] w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl bg-white shadow-xl focus:outline-none',
+            'fixed left-1/2 top-1/2 z-[var(--z-modal)] flex min-h-0 max-h-[min(90dvh,90vh)] w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl bg-white shadow-xl focus:outline-none',
             sizeClasses[size],
             contentClassName,
           )}
@@ -87,8 +96,9 @@ export function Dialog({
           )}
           <div
             className={cn(
-              'min-h-0 flex-1 overflow-y-auto',
-              hideHeader ? 'p-0' : 'px-6 py-4 pb-[max(1rem,env(safe-area-inset-bottom,0px))]',
+              'min-h-0 flex-1 overflow-y-auto overscroll-contain',
+              hideHeader ? 'p-0' : 'px-6 py-4 pb-[max(1.25rem,env(safe-area-inset-bottom,0px))]',
+              bodyClassName,
             )}
           >
             {children}
@@ -107,5 +117,4 @@ function CloseIcon() {
     </svg>
   );
 }
-
 

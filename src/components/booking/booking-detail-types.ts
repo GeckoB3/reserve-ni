@@ -14,7 +14,7 @@ export function bookingDetailPanelClassName(
         return `flex max-h-[inherit] min-w-0 max-w-full w-full flex-col overflow-x-hidden overflow-y-auto rounded-2xl ${PANEL_CHROME}`;
       }
       if (presentation === 'modal') {
-        return `flex h-[min(85dvh,85vh)] w-full max-w-2xl min-h-0 flex-col overflow-hidden rounded-t-2xl ${PANEL_CHROME} sm:rounded-2xl`;
+        return `flex w-full min-w-0 max-w-2xl flex-col rounded-t-2xl ${PANEL_CHROME} sm:rounded-2xl`;
       }
       return `flex w-full max-w-sm flex-col border-l ${PANEL_CHROME} lg:rounded-l-2xl`;
     case 'drawer':
@@ -22,7 +22,7 @@ export function bookingDetailPanelClassName(
     case 'popover':
       return `flex max-h-[inherit] min-w-0 max-w-full w-full flex-col overflow-x-hidden overflow-y-auto rounded-2xl ${PANEL_CHROME}`;
     case 'modal':
-      return `flex h-[min(85dvh,85vh)] w-full max-w-2xl min-h-0 flex-col overflow-hidden rounded-t-2xl ${PANEL_CHROME} sm:rounded-2xl`;
+      return `flex w-full min-w-0 max-w-2xl flex-col rounded-t-2xl ${PANEL_CHROME} sm:rounded-2xl`;
     case 'expanded-popover':
       return `max-h-[inherit] min-w-0 max-w-full overflow-x-hidden overflow-y-auto rounded-2xl ${PANEL_CHROME}`;
     default: {
