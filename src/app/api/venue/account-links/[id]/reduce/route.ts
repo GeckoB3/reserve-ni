@@ -2,7 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { resolveLinkAdmin } from '@/lib/linked-accounts/route-helpers';
 import { reduceLinkSchema } from '@/lib/linked-accounts/validation';
 import { loadLinkViewsForVenue } from '@/lib/linked-accounts/queries';
-import { describeGrant, isReductionOnly, normaliseGrant } from '@/lib/linked-accounts/permissions';
+import {
+  describeGrant,
+  grantsEqual,
+  isReductionOnly,
+  normaliseGrant,
+} from '@/lib/linked-accounts/permissions';
 import type { AccountLinkRow, LinkGrant } from '@/lib/linked-accounts/types';
 import { notifyPermissionReduced } from '@/lib/linked-accounts/notifications';
 import { reconcileCollectivesAfterLinkChange } from '@/lib/linked-accounts/collectives';
@@ -70,6 +75,10 @@ export async function POST(
           act: link.high_grants_act,
         };
     const next = normaliseGrant(parsed.data.grant);
+
+    if (grantsEqual(current, next)) {
+      return NextResponse.json({ error: 'The proposed access matches what you already grant.' }, { status: 400 });
+    }
 
     if (!isReductionOnly(current, next)) {
       return NextResponse.json(

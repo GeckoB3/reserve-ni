@@ -5,6 +5,7 @@
 import { useEffect, useId, type ReactNode } from 'react';
 import type { PillVariant } from '@/components/ui/dashboard/Pill';
 import {
+  applyCalendarVisibilityChange,
   describeGrant,
   isLinkConfigurationValid,
   normaliseGrant,
@@ -16,6 +17,9 @@ import type {
   LinkGrant,
   LinkStatus,
 } from '@/lib/linked-accounts/types';
+
+export const linkedNewBookingButtonClass =
+  'inline-flex items-center justify-center rounded-lg bg-brand-600 px-2.5 py-1 text-[10px] font-semibold text-white shadow-sm shadow-brand-900/20 transition hover:bg-brand-700 sm:text-xs';
 
 export function Modal({
   open,
@@ -125,10 +129,10 @@ export function GrantEditor({
             disabled={calendarDisabled}
             onChange={(e) =>
               onChange(
-                normaliseGrant({
-                  ...v,
-                  calendar: e.target.value as LinkCalendarVisibility,
-                }),
+                applyCalendarVisibilityChange(
+                  v,
+                  e.target.value as LinkCalendarVisibility,
+                ),
               )
             }
           >

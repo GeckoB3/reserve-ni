@@ -2,7 +2,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { AccountLinkRow, AccountLinkView, LinkGrant } from './types';
-import { orderVenuePair, viewLinkForVenue } from './permissions';
+import { normaliseGrant, orderVenuePair, viewLinkForVenue } from './permissions';
 
 const LINK_COLUMNS =
   'id, venue_low_id, venue_high_id, requested_by_venue_id, status, ' +
@@ -118,9 +118,15 @@ export async function resolveCallerGrantOverVenue(
   if (!link) return null;
   // The grant authored by the owner venue is the one the caller receives.
   const ownerIsLow = link.venue_low_id === ownerVenueId;
-  const grant: LinkGrant = ownerIsLow
-    ? { calendar: link.low_grants_calendar, pii: link.low_grants_pii, act: link.low_grants_act }
-    : { calendar: link.high_grants_calendar, pii: link.high_grants_pii, act: link.high_grants_act };
+  const grant = normaliseGrant(
+    ownerIsLow
+      ? { calendar: link.low_grants_calendar, pii: link.low_grants_pii, act: link.low_grants_act }
+      : {
+          calendar: link.high_grants_calendar,
+          pii: link.high_grants_pii,
+          act: link.high_grants_act,
+        },
+  );
   if (grant.calendar === 'none') return null;
   return { linkId: link.id, grant };
 }
@@ -136,9 +142,15 @@ export async function loadAccessibleLinkedVenueIds(
     if (r.status !== 'accepted') continue;
     const otherId = r.venue_low_id === venueId ? r.venue_high_id : r.venue_low_id;
     const otherIsLow = r.venue_low_id === otherId;
-    const grant: LinkGrant = otherIsLow
-      ? { calendar: r.low_grants_calendar, pii: r.low_grants_pii, act: r.low_grants_act }
-      : { calendar: r.high_grants_calendar, pii: r.high_grants_pii, act: r.high_grants_act };
+    const grant = normaliseGrant(
+      otherIsLow
+        ? { calendar: r.low_grants_calendar, pii: r.low_grants_pii, act: r.low_grants_act }
+        : {
+            calendar: r.high_grants_calendar,
+            pii: r.high_grants_pii,
+            act: r.high_grants_act,
+          },
+    );
     if (grant.calendar === 'none') continue;
     out.push({ venueId: otherId, linkId: r.id, grant });
   }

@@ -1,13 +1,15 @@
 'use client';
 
-import { useMemo } from 'react';
-import { useForm, Controller } from 'react-hook-form';
+import { useCallback, useMemo, useState } from 'react';
+import { useForm, Controller, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import type { AvailableSlot, GuestDetails } from './types';
 import type { CountryCode } from 'libphonenumber-js';
 import { normalizeToE164 } from '@/lib/phone/e164';
 import { PhoneWithCountryField } from '@/components/phone/PhoneWithCountryField';
+import { StaffGuestContactFields } from '@/components/booking/staff-guest-contact/StaffGuestContactFields';
+import type { GuestListRow } from '@/types/contacts';
 import {
   cancellationDeadlineHoursBefore,
   classifyGroupDepositRefunds,
@@ -164,7 +166,8 @@ export function DetailsStep({
     [phoneDefaultCountry],
   );
   const activeSchema = isStaffWalkIn ? detailsSchemaStaffWalkIn : isStaff ? detailsSchemaStaff : detailsSchemaWithTerms;
-  const { register, control, handleSubmit, formState: { errors, isSubmitting } } = useForm<
+  const [selectedKnownContact, setSelectedKnownContact] = useState(false);
+  const { register, control, setValue, handleSubmit, formState: { errors, isSubmitting } } = useForm<
     FormDataWithTerms | FormDataStaff | FormDataStaffWalkIn
   >({
     resolver: zodResolver(activeSchema),
@@ -181,6 +184,13 @@ export function DetailsStep({
       marketingConsent: true,
     },
   });
+
+  const watchedGuestFields = useWatch({
+    control,
+    name: ['first_name', 'last_name', 'email', 'phone'],
+  });
+  const [wFirstName, wLastName, wEmail, wPhone] = watchedGuestFields ?? ['', '', '', ''];
+  const useStaffContactAutocomplete = isStaff || isStaffWalkIn;
 
   const dateStr = formatDate(date);
   const isAppointment = variant === 'appointment';
@@ -218,6 +228,37 @@ export function DetailsStep({
   const textareaCls =
     fieldClassName?.replace('min-h-[44px]', '') ??
     'w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500';
+
+  const onValidSubmit = useCallback(
+    (d: FormDataWithTerms | FormDataStaff | FormDataStaffWalkIn) => {
+      const phoneRaw = 'phone' in d ? d.phone : '';
+      const e164 = phoneRaw.trim() ? normalizeToE164(phoneRaw, phoneDefaultCountry) : null;
+      const fnRaw = 'first_name' in d ? String(d.first_name ?? '').trim() : '';
+      const lnRaw = 'last_name' in d ? String(d.last_name ?? '').trim() : '';
+      onSubmit({
+        first_name: fnRaw,
+        last_name: lnRaw,
+        email: d.email || '',
+        phone: e164 ?? (phoneRaw.trim() ? phoneRaw : ''),
+        dietary_notes: useAppointmentFields
+          ? (d.comments_requests?.trim() ? d.comments_requests.trim() : undefined)
+          : (d.dietary_notes?.trim() ? d.dietary_notes.trim() : undefined),
+        occasion: useAppointmentFields ? undefined : (d.occasion?.trim() ? d.occasion.trim() : undefined),
+        ...(audience === 'public' && 'marketingConsent' in d
+          ? { marketing_consent: Boolean(d.marketingConsent) }
+          : {}),
+        ...(useStaffContactAutocomplete && selectedKnownContact ? { returning_guest: true } : {}),
+      });
+    },
+    [
+      audience,
+      onSubmit,
+      phoneDefaultCountry,
+      selectedKnownContact,
+      useAppointmentFields,
+      useStaffContactAutocomplete,
+    ],
+  );
 
   return (
     <div className="space-y-5">
@@ -313,85 +354,119 @@ export function DetailsStep({
         </div>
       )}
 
-      <form
-        onSubmit={handleSubmit((d) => {
-          const phoneRaw = 'phone' in d ? d.phone : '';
-          const e164 = phoneRaw.trim() ? normalizeToE164(phoneRaw, phoneDefaultCountry) : null;
-          const fnRaw = 'first_name' in d ? String(d.first_name ?? '').trim() : '';
-          const lnRaw = 'last_name' in d ? String(d.last_name ?? '').trim() : '';
-          onSubmit({
-            first_name: fnRaw,
-            last_name: lnRaw,
-            email: d.email || '',
-            phone: e164 ?? (phoneRaw.trim() ? phoneRaw : ''),
-            dietary_notes: useAppointmentFields
-              ? (d.comments_requests?.trim() ? d.comments_requests.trim() : undefined)
-              : (d.dietary_notes?.trim() ? d.dietary_notes.trim() : undefined),
-            occasion: useAppointmentFields ? undefined : (d.occasion?.trim() ? d.occasion.trim() : undefined),
-            ...(audience === 'public' && 'marketingConsent' in d
-              ? { marketing_consent: Boolean(d.marketingConsent) }
-              : {}),
-          });
-        })}
-        className="space-y-4"
-      >
-        <div className="grid gap-4 sm:grid-cols-2">
-          <FormField
-            label="First name"
-            required={audience === 'public'}
-            error={errors.first_name?.message}
-          >
-            <input
-              {...register('first_name')}
-              autoComplete="given-name"
-              className={inputCls}
-              placeholder="First name"
+      <form onSubmit={handleSubmit(onValidSubmit)} className="space-y-4">
+        {useStaffContactAutocomplete ? (
+          <>
+            <StaffGuestContactFields
+              values={{
+                firstName: wFirstName ?? '',
+                lastName: wLastName ?? '',
+                email: wEmail ?? '',
+                phone: wPhone ?? '',
+              }}
+              onFieldChange={(field, value) => {
+                setSelectedKnownContact(false);
+                const formField =
+                  field === 'firstName'
+                    ? 'first_name'
+                    : field === 'lastName'
+                      ? 'last_name'
+                      : field;
+                setValue(formField, value, { shouldDirty: true, shouldValidate: true });
+              }}
+              phoneDefaultCountry={phoneDefaultCountry}
+              onContactSelected={(_row: GuestListRow) => {
+                setSelectedKnownContact(true);
+              }}
+              emailReadOnly={emailReadOnly}
+              phoneRequired={!isStaffWalkIn}
+              namesOptional={!isStaffWalkIn}
+              emailOptional
+              firstNameId="details-first-name"
+              lastNameId="details-last-name"
+              emailId="details-email"
+              phoneId="details-phone"
+              inputClassName={inputCls}
+              phoneInputClassName={
+                fieldClassName
+                  ? `${fieldClassName} min-w-0`
+                  : 'min-h-[44px] w-full min-w-0 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500'
+              }
             />
-          </FormField>
-          <FormField label="Surname" required={audience === 'public'} error={errors.last_name?.message}>
-            <input
-              {...register('last_name')}
-              autoComplete="family-name"
-              className="min-h-[44px] w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-              placeholder="Surname"
-            />
-          </FormField>
-        </div>
+            {errors.first_name?.message ? (
+              <p className="text-xs text-red-600">{errors.first_name.message}</p>
+            ) : null}
+            {errors.last_name?.message ? (
+              <p className="text-xs text-red-600">{errors.last_name.message}</p>
+            ) : null}
+            {errors.email?.message ? (
+              <p className="text-xs text-red-600">{errors.email.message}</p>
+            ) : null}
+            {errors.phone?.message ? (
+              <p className="text-xs text-red-600">{errors.phone.message}</p>
+            ) : null}
+          </>
+        ) : (
+          <>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <FormField
+                label="First name"
+                required={audience === 'public'}
+                error={errors.first_name?.message}
+              >
+                <input
+                  {...register('first_name')}
+                  autoComplete="given-name"
+                  className={inputCls}
+                  placeholder="First name"
+                />
+              </FormField>
+              <FormField label="Surname" required={audience === 'public'} error={errors.last_name?.message}>
+                <input
+                  {...register('last_name')}
+                  autoComplete="family-name"
+                  className="min-h-[44px] w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                  placeholder="Surname"
+                />
+              </FormField>
+            </div>
 
-        <FormField label="Email" required={audience === 'public'} error={errors.email?.message}>
-          <input
-            type="email"
-            {...register('email')}
-            readOnly={emailReadOnly}
-            className={`${inputCls}${emailReadOnly ? ' cursor-not-allowed bg-slate-50 text-slate-600' : ''}`}
-            placeholder="you@example.com"
-          />
-          {emailReadOnly ? (
-            <p className="mt-1 text-xs text-slate-500">Bookings use your signed-in ReserveNI email.</p>
-          ) : null}
-        </FormField>
-
-        <FormField label="Phone" required={audience !== 'staff_walk_in'}>
-          <Controller
-            name="phone"
-            control={control}
-            render={({ field }) => (
-              <PhoneWithCountryField
-                id="details-phone"
-                name={field.name}
-                value={field.value}
-                onChange={field.onChange}
-                defaultCountry={phoneDefaultCountry}
-                error={errors.phone?.message}
-                inputClassName={
-                  fieldClassName
-                    ? `${fieldClassName} min-w-0`
-                    : 'min-h-[44px] w-full min-w-0 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500'
-                }
+            <FormField label="Email" required={audience === 'public'} error={errors.email?.message}>
+              <input
+                type="email"
+                {...register('email')}
+                readOnly={emailReadOnly}
+                className={`${inputCls}${emailReadOnly ? ' cursor-not-allowed bg-slate-50 text-slate-600' : ''}`}
+                placeholder="you@example.com"
               />
-            )}
-          />
-        </FormField>
+              {emailReadOnly ? (
+                <p className="mt-1 text-xs text-slate-500">Bookings use your signed-in ReserveNI email.</p>
+              ) : null}
+            </FormField>
+
+            <FormField label="Phone" required>
+              <Controller
+                name="phone"
+                control={control}
+                render={({ field }) => (
+                  <PhoneWithCountryField
+                    id="details-phone"
+                    name={field.name}
+                    value={field.value}
+                    onChange={field.onChange}
+                    defaultCountry={phoneDefaultCountry}
+                    error={errors.phone?.message}
+                    inputClassName={
+                      fieldClassName
+                        ? `${fieldClassName} min-w-0`
+                        : 'min-h-[44px] w-full min-w-0 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500'
+                    }
+                  />
+                )}
+              />
+            </FormField>
+          </>
+        )}
 
         {!useAppointmentFields && (
           <>

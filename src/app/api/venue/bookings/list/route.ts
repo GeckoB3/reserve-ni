@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
+import { getSupabaseAdminClient } from '@/lib/supabase';
+import { resolveCallerGrantOverVenue } from '@/lib/linked-accounts/queries';
+import type { LinkGrant } from '@/lib/linked-accounts/types';
 import {
   formatGuestDisplayName,
   mergeBookingSnapshotWithGuestProfile,
@@ -15,8 +18,11 @@ import { calendarDateInTimeZone } from '@/lib/guests/guest-contacts-list';
  * GET /api/venue/bookings/list?date=YYYY-MM-DD&status=Pending|Seated|...
  * or  /api/venue/bookings/list?from=YYYY-MM-DD&to=YYYY-MM-DD&status=...
  * Optional: `guest=<uuid>&guest_history=1` — bookings for that guest across a wide venue-local date window (max 250 rows); use with `guest` filter.
+ * Optional: `owner_venue_id=<uuid>` with `guest_history=1` — load history for a linked owner venue (requires an active link grant).
+ * Optional: `owner_venue_id=<uuid>` with `experience_event_id` or `class_instance_id` — session bookings for a linked owner venue (requires full_details calendar grant).
  * Optional: service=<uuid>[,<uuid>...] filters table reservations by venue_services.id.
  * Optional: calendar=<uuid> filters schedule bookings by calendar/practitioner/resource id.
+ * Optional: experience_event_id=<uuid> or class_instance_id=<uuid> — all bookings for that session (no date range required).
  * Optional: attendance_confirmed=1 — bookings where the guest confirmed via reminder link (guest_attendance_confirmed_at)
  *   or staff pressed Confirm Booking (staff_attendance_confirmed_at). When set, `status` is ignored.
  * Returns bookings for the authenticated venue, with guest name.
@@ -60,22 +66,67 @@ export async function GET(request: NextRequest) {
     const areaIdParam = request.nextUrl.searchParams.get('area');
     const serviceIdParam = request.nextUrl.searchParams.get('service');
     const calendarIdParam = request.nextUrl.searchParams.get('calendar');
+    const experienceEventIdParam = request.nextUrl.searchParams.get('experience_event_id');
+    const classInstanceIdParam = request.nextUrl.searchParams.get('class_instance_id');
     const isoRe = /^\d{4}-\d{2}-\d{2}$/;
     const guestUuidRe =
       /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    const ownerVenueIdParam = request.nextUrl.searchParams.get('owner_venue_id');
+    const guestHistoryMode =
+      guestIdParam &&
+      guestUuidRe.test(guestIdParam) &&
+      request.nextUrl.searchParams.get('guest_history') === '1';
+
+    let scopeVenueId = staff.venue_id;
+    let scopeDb = staff.db;
+    let linkedGuestHistoryGrant: LinkGrant | null = null;
+
+    const linkedOwnerVenueId =
+      ownerVenueIdParam &&
+      guestUuidRe.test(ownerVenueIdParam) &&
+      ownerVenueIdParam !== staff.venue_id
+        ? ownerVenueIdParam
+        : null;
+
+    const linkedSessionMode =
+      linkedOwnerVenueId != null &&
+      Boolean(
+        (experienceEventIdParam && guestUuidRe.test(experienceEventIdParam)) ||
+          (classInstanceIdParam && guestUuidRe.test(classInstanceIdParam)),
+      );
+
+    if (linkedOwnerVenueId && (guestHistoryMode || linkedSessionMode)) {
+      const admin = getSupabaseAdminClient();
+      const access = await resolveCallerGrantOverVenue(admin, staff.venue_id, linkedOwnerVenueId);
+      if (!access || access.grant.calendar === 'none') {
+        return NextResponse.json(
+          { error: 'You do not have access to bookings for that venue.' },
+          { status: 403 },
+        );
+      }
+      if (linkedSessionMode && access.grant.calendar === 'time_only') {
+        return NextResponse.json(
+          { error: 'This link only shows busy time — session bookings are not available.' },
+          { status: 403 },
+        );
+      }
+      scopeVenueId = linkedOwnerVenueId;
+      scopeDb = admin;
+      linkedGuestHistoryGrant = access.grant;
+    }
 
     /** Separate branches avoid a ternary on `.select(...)` which triggers excessively deep Supabase generics. */
     let query = calendarView
-      ? staff.db
+      ? scopeDb
           .from('bookings')
           .select(BOOKINGS_LIST_SELECT_CALENDAR)
-          .eq('venue_id', staff.venue_id)
+          .eq('venue_id', scopeVenueId)
           .order('booking_date', { ascending: true })
           .order('booking_time', { ascending: true })
-      : staff.db
+      : scopeDb
           .from('bookings')
           .select(BOOKINGS_LIST_SELECT_FULL)
-          .eq('venue_id', staff.venue_id)
+          .eq('venue_id', scopeVenueId)
           .order('booking_date', { ascending: true })
           .order('booking_time', { ascending: true });
 
@@ -111,6 +162,10 @@ export async function GET(request: NextRequest) {
 
     if (groupBookingId) {
       query = query.eq('group_booking_id', groupBookingId);
+    } else if (experienceEventIdParam && guestUuidRe.test(experienceEventIdParam)) {
+      query = query.eq('experience_event_id', experienceEventIdParam);
+    } else if (classInstanceIdParam && guestUuidRe.test(classInstanceIdParam)) {
+      query = query.eq('class_instance_id', classInstanceIdParam);
     } else if (ids) {
       const idList = ids.split(',').filter(Boolean);
       if (idList.length === 0) {
@@ -121,12 +176,12 @@ export async function GET(request: NextRequest) {
       query = query.eq('booking_date', date);
     } else if (from && to && isoRe.test(from) && isoRe.test(to)) {
       query = query.gte('booking_date', from).lte('booking_date', to);
-    } else if (
-      guestIdParam &&
-      guestUuidRe.test(guestIdParam) &&
-      request.nextUrl.searchParams.get('guest_history') === '1'
-    ) {
-      const { data: vTzRow } = await staff.db.from('venues').select('timezone').eq('id', staff.venue_id).maybeSingle();
+    } else if (guestHistoryMode) {
+      const { data: vTzRow } = await scopeDb
+        .from('venues')
+        .select('timezone')
+        .eq('id', scopeVenueId)
+        .maybeSingle();
       const tzRaw = (vTzRow as { timezone?: string | null } | null)?.timezone;
       const tz = typeof tzRaw === 'string' && tzRaw.trim() !== '' ? tzRaw.trim() : 'Europe/London';
       const y = Number.parseInt(calendarDateInTimeZone(new Date(), tz).slice(0, 4), 10);
@@ -135,7 +190,10 @@ export async function GET(request: NextRequest) {
       query = query.gte('booking_date', fromWide).lte('booking_date', toWide).limit(250);
     } else {
       return NextResponse.json(
-        { error: 'Provide date=YYYY-MM-DD or from=...&to=... or ids=..., or guest=guestId&guest_history=1' },
+        {
+          error:
+            'Provide date=YYYY-MM-DD or from=...&to=... or ids=..., experience_event_id=..., class_instance_id=..., or guest=guestId&guest_history=1',
+        },
         { status: 400 },
       );
     }
@@ -151,7 +209,10 @@ export async function GET(request: NextRequest) {
     const rawRows = (rows ?? []) as RawBookingRow[];
     const guestIds = [...new Set(rawRows.map((r) => r.guest_id))];
     const { data: guestsRows } = guestIds.length
-      ? await staff.db.from('guests').select('id, first_name, last_name, email, phone, visit_count, tags').in('id', guestIds)
+      ? await scopeDb
+          .from('guests')
+          .select('id, first_name, last_name, email, phone, visit_count, tags')
+          .in('id', guestIds)
       : { data: [] };
     const guestsMap = new Map(
       (guestsRows ?? []).map(
@@ -173,7 +234,7 @@ export async function GET(request: NextRequest) {
     const areaIds = [...new Set(rawRows.map((r) => r.area_id).filter((x): x is string => typeof x === 'string'))];
     const { data: areaRows } =
       areaIds.length > 0
-        ? await staff.db.from('areas').select('id, name').in('id', areaIds)
+        ? await scopeDb.from('areas').select('id, name').in('id', areaIds)
         : { data: [] as { id: string; name: string }[] };
     const areaNameById = new Map((areaRows ?? []).map((a: { id: string; name: string }) => [a.id, a.name]));
 
@@ -186,10 +247,10 @@ export async function GET(request: NextRequest) {
     ];
     const calendarNameById = new Map<string, string>();
     if (calendarIds.length > 0) {
-      const { data: calRows } = await staff.db
+      const { data: calRows } = await scopeDb
         .from('unified_calendars')
         .select('id, name')
-        .eq('venue_id', staff.venue_id)
+        .eq('venue_id', scopeVenueId)
         .in('id', calendarIds);
       for (const c of calRows ?? []) {
         const row = c as { id: string; name?: string | null };
@@ -212,6 +273,7 @@ export async function GET(request: NextRequest) {
         Boolean(normaliseGuestNamePart(r.guest_last_name as string | null | undefined));
       const guestLabel =
         guest || snapshotPresent ? formatGuestDisplayName(merged.first, merged.last) : '-';
+      const canSeeLinkedPii = !linkedGuestHistoryGrant || linkedGuestHistoryGrant.pii;
       return {
         id: r.id,
         booking_date: r.booking_date,
@@ -238,10 +300,10 @@ export async function GET(request: NextRequest) {
         booking_guest_last_name: normaliseGuestNamePart(r.guest_last_name as string | null | undefined),
         guest_first_name: merged.first,
         guest_last_name: merged.last,
-        guest_email: guest?.email ?? null,
-        guest_phone: guest?.phone ?? null,
-        guest_visit_count: guest?.visit_count ?? null,
-        guest_tags: Array.isArray(guest?.tags) ? guest.tags : [],
+        guest_email: canSeeLinkedPii ? (guest?.email ?? null) : null,
+        guest_phone: canSeeLinkedPii ? (guest?.phone ?? null) : null,
+        guest_visit_count: canSeeLinkedPii ? (guest?.visit_count ?? null) : null,
+        guest_tags: canSeeLinkedPii && Array.isArray(guest?.tags) ? guest.tags : [],
         service_id: r.service_id ?? null,
         practitioner_id: r.practitioner_id ?? null,
         calendar_id: r.calendar_id ?? null,
@@ -283,7 +345,7 @@ export async function GET(request: NextRequest) {
     const bookingIds = bookings.map((b: Record<string, unknown>) => b.id as string);
     const assignmentsMap = new Map<string, Array<{ id: string; name: string }>>();
     if (!calendarView && bookingIds.length > 0) {
-      const { data: assignRows } = await staff.db
+      const { data: assignRows } = await scopeDb
         .from('booking_table_assignments')
         .select('booking_id, table_id, table:venue_tables(id, name)')
         .in('booking_id', bookingIds);
@@ -342,7 +404,7 @@ export async function GET(request: NextRequest) {
       appointment_service_id: b.appointment_service_id as string | null | undefined,
       service_id: b.service_id as string | null | undefined,
     }));
-    const labelById = await resolveBookingListRowLabels(staff.db, labelRows);
+    const labelById = await resolveBookingListRowLabels(scopeDb, labelRows);
     const withItemNames = enriched.map((b: Record<string, unknown>) => ({
       ...b,
       booking_item_name: labelById.get(b.id as string) ?? null,

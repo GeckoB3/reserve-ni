@@ -92,6 +92,7 @@ export interface MonthDayScheduleCounts {
  */
 export function buildMonthDayScheduleCounts(
   bookings: Array<{
+    id?: string;
     booking_date: string;
     status: string;
     experience_event_id?: string | null;
@@ -118,11 +119,17 @@ export function buildMonthDayScheduleCounts(
   const countCl = scheduleModelFilter === 'all' || scheduleModelFilter === 'class_session';
   const countRes = scheduleModelFilter === 'all' || scheduleModelFilter === 'resource_booking';
 
+  const resourceBookingIdsFromGrid = new Set<string>();
+
   for (const b of bookings) {
     if (!dateSet.has(b.booking_date)) continue;
     if (b.status === 'Cancelled' || b.status === 'No-Show') continue;
     if (countAppt && isPractitionerGridBooking(b)) {
       out[b.booking_date]!.appointments += 1;
+    }
+    if (countRes && b.resource_id && inferBookingRowModel(b) === 'resource_booking') {
+      out[b.booking_date]!.resource_booking += 1;
+      if (b.id) resourceBookingIdsFromGrid.add(b.id);
     }
   }
 
@@ -132,7 +139,10 @@ export function buildMonthDayScheduleCounts(
     const k = bl.kind;
     if (k === 'event_ticket' && countEv) out[bl.date]!.event_ticket += 1;
     else if (k === 'class_session' && countCl) out[bl.date]!.class_session += 1;
-    else if (k === 'resource_booking' && countRes) out[bl.date]!.resource_booking += 1;
+    else if (k === 'resource_booking' && countRes) {
+      if (bl.booking_id && resourceBookingIdsFromGrid.has(bl.booking_id)) continue;
+      out[bl.date]!.resource_booking += 1;
+    }
   }
 
   return out;

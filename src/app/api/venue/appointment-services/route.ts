@@ -23,6 +23,7 @@ import { customWorkingHoursRequestSchema } from '@/lib/service-custom-schedule-z
 import { isServiceCustomScheduleEmpty, parseCustomWorkingHoursFromDb } from '@/lib/service-custom-availability';
 import { ensureUnifiedMirrorForPractitionerId } from '@/lib/class-instances/instructor-calendar-block';
 import { venueUsesUnifiedAppointmentServiceData } from '@/lib/booking/uses-unified-appointment-data';
+import { resolveLinkedStaffCatalogScope } from '@/lib/booking/staff-booking-access';
 import {
   loadVariantsForServices,
   replaceServiceVariants,
@@ -364,24 +365,39 @@ async function assertPractitionerIdsBelongToVenueLegacy(
 /** USE stores services in `service_items` when primary is unified_scheduling or it is enabled as a secondary. */
 const venueUsesUnifiedServiceItems = venueUsesUnifiedAppointmentServiceData;
 
-/** GET /api/venue/appointment-services - list appointment services for the venue. */
-export async function GET() {
+const OWNER_VENUE_UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** GET /api/venue/appointment-services - list appointment services for the venue.
+ * Optional `?owner_venue_id=` loads the linked owner venue catalogue (requires edit grant). */
+export async function GET(request: NextRequest) {
   try {
     const supabase = await createClient();
     const staff = await getVenueStaff(supabase);
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
 
     const admin = getSupabaseAdminClient();
-    const useUnified = await venueUsesUnifiedServiceItems(admin, staff.venue_id);
+    const ownerVenueParam = request.nextUrl.searchParams.get('owner_venue_id');
+    const scope = await resolveLinkedStaffCatalogScope(
+      admin,
+      staff.venue_id,
+      ownerVenueParam && OWNER_VENUE_UUID_RE.test(ownerVenueParam) ? ownerVenueParam : null,
+    );
+    if (!scope.ok) {
+      return NextResponse.json({ error: scope.error }, { status: scope.status });
+    }
+    const catalogVenueId = scope.venueId;
+
+    const useUnified = await venueUsesUnifiedServiceItems(admin, catalogVenueId);
 
     if (useUnified) {
       const [servicesRes, calRes] = await Promise.all([
         admin
           .from('service_items')
           .select('*')
-          .eq('venue_id', staff.venue_id)
+          .eq('venue_id', catalogVenueId)
           .order('sort_order', { ascending: true }),
-        admin.from('unified_calendars').select('id').eq('venue_id', staff.venue_id),
+        admin.from('unified_calendars').select('id').eq('venue_id', catalogVenueId),
       ]);
 
       if (servicesRes.error) {
@@ -427,7 +443,7 @@ export async function GET() {
       const serviceIds = services.map((s) => s.id as string);
       const variantMap = await loadVariantsForServices({
         admin,
-        venueId: staff.venue_id,
+        venueId: catalogVenueId,
         schema: 'service_item',
         parentIds: serviceIds,
       });
@@ -446,12 +462,12 @@ export async function GET() {
       admin
         .from('appointment_services')
         .select('*')
-        .eq('venue_id', staff.venue_id)
+        .eq('venue_id', catalogVenueId)
         .order('sort_order', { ascending: true }),
       admin
         .from('practitioner_services')
         .select('*, practitioner:practitioners!inner(venue_id)')
-        .eq('practitioner.venue_id', staff.venue_id),
+        .eq('practitioner.venue_id', catalogVenueId),
     ]);
 
     if (servicesRes.error) {
@@ -469,7 +485,7 @@ export async function GET() {
     const serviceIds = services.map((s) => s.id as string);
     const variantMap = await loadVariantsForServices({
       admin,
-      venueId: staff.venue_id,
+      venueId: catalogVenueId,
       schema: 'appointment_service',
       parentIds: serviceIds,
     });

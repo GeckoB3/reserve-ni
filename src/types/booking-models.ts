@@ -328,6 +328,9 @@ export interface VenueResource {
   deposit_amount_pence: number | null;
   /** Hours before start for deposit / prepayment refund (`unified_calendars`). */
   cancellation_notice_hours?: number;
+  max_advance_booking_days?: number;
+  min_booking_notice_hours?: number;
+  allow_same_day_booking?: boolean;
   availability_hours: WorkingHours;
   /** Optional per-date closed days or replacement `periods` for that date only. */
   availability_exceptions?: ResourceAvailabilityExceptions;

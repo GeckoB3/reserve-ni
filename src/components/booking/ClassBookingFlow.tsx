@@ -167,6 +167,7 @@ export interface ClassBookingFlowProps {
   bookingAudience?: BookingFlowAudience;
   staffBookingSource?: 'phone' | 'walk-in';
   onBookingCreated?: () => void;
+  linkedOwnerVenueId?: string;
 }
 
 export function ClassBookingFlow({
@@ -175,6 +176,7 @@ export function ClassBookingFlow({
   bookingAudience = 'public',
   staffBookingSource = 'phone',
   onBookingCreated,
+  linkedOwnerVenueId,
 }: ClassBookingFlowProps) {
   const isStaff = bookingAudience === 'staff';
   const isPublicGuest = !isStaff;
@@ -241,7 +243,7 @@ export function ClassBookingFlow({
     setError(null);
     try {
       const from = localTodayISO();
-      const res = await fetch(classOfferingsUrl(bookingAudience, venue.id));
+      const res = await fetch(classOfferingsUrl(bookingAudience, venue.id, linkedOwnerVenueId));
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? 'Failed to load classes');
       setRangeFrom(data.from ?? from);
@@ -258,7 +260,7 @@ export function ClassBookingFlow({
     } finally {
       setLoading(false);
     }
-  }, [venue.id, bookingAudience]);
+  }, [venue.id, bookingAudience, linkedOwnerVenueId]);
 
   useEffect(() => {
     void fetchOfferings();
@@ -356,6 +358,8 @@ export function ClassBookingFlow({
               class_instance_id: selectedClass.instance_id,
               dietary_notes: details.dietary_notes,
               source: staffBookingSource,
+              ...(details.returning_guest ? { returning_guest: true } : {}),
+              ...(linkedOwnerVenueId ? { owner_venue_id: linkedOwnerVenueId } : {}),
             }),
           });
           const data = await res.json();
@@ -426,7 +430,7 @@ export function ClassBookingFlow({
         setSubmitting(false);
       }
     },
-    [venue.id, selectedClass, spots, isStaff, isPublicGuest, accountGate, staffBookingSource, payWithClassCredits],
+    [venue.id, selectedClass, spots, isStaff, isPublicGuest, accountGate, staffBookingSource, payWithClassCredits, linkedOwnerVenueId],
   );
 
   const depositPenceForDetails = isStaffWalkIn || payWithClassCredits ? 0 : (summary?.chargePence ?? 0);

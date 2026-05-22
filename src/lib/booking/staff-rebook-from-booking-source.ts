@@ -97,7 +97,7 @@ function appointmentRebookIds(row: StaffRebookBootstrapBookingSource): {
 
 /**
  * Build one-shot `/dashboard/bookings/new` bootstrap payload from any booking-like row that staff can rebook:
- * tables and practitioner / unified appointments. Returns null for unsupported models (classes, resources, bare events).
+ * tables, practitioner / unified appointments, and resource bookings. Returns null for unsupported models (classes, bare events).
  */
 export function buildStaffRebookBootstrapFromBookingSource(
   row: StaffRebookBootstrapBookingSource,
@@ -134,6 +134,20 @@ export function buildStaffRebookBootstrapFromBookingSource(
       },
       guest,
       appointmentComments: buildAppointmentRebookComments(guest),
+    };
+  }
+
+  if (model === 'resource_booking') {
+    const resourceId = row.resource_id?.trim();
+    if (!resourceId) return null;
+    return {
+      v: 1,
+      surface: 'resource_booking',
+      resource: {
+        resourceId,
+        durationMinutes: bookingSourceDurationMinutes(row),
+      },
+      guest,
     };
   }
 

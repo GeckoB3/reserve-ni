@@ -8,6 +8,7 @@ import {
   expandedRowToEditSnapshot,
 } from '@/components/booking/ModifyTableBookingModal';
 import { StaffAppointmentModifyForm } from '@/components/booking/StaffAppointmentModifyForm';
+import { StaffResourceBookingModifyForm } from '@/components/booking/StaffResourceBookingModifyForm';
 import { PhoneWithCountryField } from '@/components/phone/PhoneWithCountryField';
 import type { CountryCode } from 'libphonenumber-js';
 import { defaultPhoneCountryForVenueCurrency } from '@/lib/phone/default-country';
@@ -58,7 +59,7 @@ export interface StaffExpandedBookingModifyDetailLite {
   } | null;
 }
 
-type ModifyBranch = 'table' | 'appointment' | 'cde_details';
+type ModifyBranch = 'table' | 'appointment' | 'cde_details' | 'resource';
 
 function inferModifyBranch(booking: StaffExpandedBookingModifySource): ModifyBranch {
   const model =
@@ -75,7 +76,8 @@ function inferModifyBranch(booking: StaffExpandedBookingModifySource): ModifyBra
       appointment_service_id: booking.appointment_service_id,
     });
   if (model === 'table_reservation') return 'table';
-  if (model === 'event_ticket' || model === 'class_session' || model === 'resource_booking') {
+  if (model === 'resource_booking') return 'resource';
+  if (model === 'event_ticket' || model === 'class_session') {
     return 'cde_details';
   }
   return 'appointment';
@@ -170,8 +172,8 @@ function CdeDetailsModifyForm({
   return (
     <div className="space-y-3">
       <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-        For events, classes, and resource bookings, the allocated slot cannot be changed here. Update client contact
-        details or internal notes below, or cancel and create a new booking if the slot must move.
+        For events and classes, the allocated slot cannot be changed here. Update client contact details or internal
+        notes below, or cancel and create a new booking if the slot must move.
       </p>
 
       <div className="grid gap-3 sm:grid-cols-2">
@@ -257,6 +259,8 @@ export function StaffExpandedBookingModifyModal({
   tableManagementEnabled,
   booking,
   detail,
+  linkedAct,
+  focusResourceSlotChange = false,
 }: {
   open: boolean;
   onClose: () => void;
@@ -266,8 +270,13 @@ export function StaffExpandedBookingModifyModal({
   tableManagementEnabled: boolean;
   booking: StaffExpandedBookingModifySource;
   detail: StaffExpandedBookingModifyDetailLite | undefined;
+  linkedAct?: import('@/lib/linked-accounts/types').LinkActionLevel;
+  /** When true, resource bookings open with the slot picker expanded. */
+  focusResourceSlotChange?: boolean;
 }) {
   const branch = useMemo(() => inferModifyBranch(booking), [booking]);
+  const catalogOwnerVenueId =
+    linkedAct != null && linkedAct !== 'none' ? venueId : undefined;
 
   if (!open) return null;
 
@@ -313,9 +322,16 @@ export function StaffExpandedBookingModifyModal({
     );
   }
 
-  const shellTitle = branch === 'appointment' ? 'Modify appointment' : 'Modify booking details';
+  const shellTitle =
+    branch === 'appointment'
+      ? 'Modify appointment'
+      : branch === 'resource'
+        ? 'Modify resource booking'
+        : 'Modify booking details';
   const practitionerId = practitionerIdFromBooking(booking);
   const serviceId = serviceIdFromBooking(booking);
+  const isAppointmentBranch = branch === 'appointment';
+  const isResourceBranch = branch === 'resource';
 
   return (
     <Dialog
@@ -324,8 +340,10 @@ export function StaffExpandedBookingModifyModal({
         if (!next) onClose();
       }}
       title={shellTitle}
-      size="md"
-      contentClassName="flex max-h-[min(90dvh,90vh)] max-w-xl flex-col overflow-hidden p-0"
+      size={isAppointmentBranch || isResourceBranch ? 'lg' : 'md'}
+      contentClassName={`flex max-h-[min(90dvh,90vh)] flex-col overflow-hidden p-0 ${
+        isAppointmentBranch || isResourceBranch ? 'max-w-2xl' : 'max-w-xl'
+      }`}
     >
       <div className="min-h-0 overflow-y-auto px-5 py-4">
           {branch === 'appointment' ? (
@@ -337,10 +355,23 @@ export function StaffExpandedBookingModifyModal({
               <StaffAppointmentModifyForm
                 bookingId={booking.id}
                 booking={booking}
+                ownerVenueId={venueId}
+                catalogOwnerVenueId={catalogOwnerVenueId}
                 onSaved={onSaved}
                 onClose={onClose}
               />
             )
+          ) : branch === 'resource' ? (
+            <StaffResourceBookingModifyForm
+              bookingId={booking.id}
+              booking={booking}
+              detail={detail}
+              venueId={venueId}
+              venueCurrency={venueCurrency}
+              initialSlotSectionOpen={focusResourceSlotChange}
+              onSaved={onSaved}
+              onClose={onClose}
+            />
           ) : (
             <CdeDetailsModifyForm
               bookingId={booking.id}

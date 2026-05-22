@@ -300,6 +300,8 @@ export interface ComputeAppointmentMonthOptions {
   variantOverride?: ServiceVariant | null;
   /** Staff-only per-booking duration override; filters dates by fitting this custom interval. */
   customDurationMinutes?: number | null;
+  /** When rescheduling, omit this booking from capacity so its slot stays bookable. */
+  excludeBookingId?: string | null;
 }
 
 /**
@@ -381,6 +383,13 @@ export async function computeAppointmentAvailableDatesInMonth(
       );
     }
     attachVenueClockToAppointmentInput(input, venueClockRow, bookingWindow);
+    if (audience === 'staff') {
+      input.skipPastSlotFilter = true;
+    }
+    if (options.excludeBookingId) {
+      const excludeLc = options.excludeBookingId.toLowerCase();
+      input.existingBookings = input.existingBookings.filter((b) => b.id.toLowerCase() !== excludeLc);
+    }
     const out = computeAppointmentAvailability(input);
     const practitioner = out.practitioners.find((p) => p.id === practitionerId);
     const hasSlot = practitioner?.slots.some((slot) => {

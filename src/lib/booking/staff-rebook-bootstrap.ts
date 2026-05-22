@@ -31,6 +31,10 @@ export interface StaffRebookBootstrapPayloadV1 {
     areaId?: string | null;
     coverDurationMinutes: number;
   };
+  resource?: {
+    resourceId: string;
+    durationMinutes: number | null;
+  };
   guest: StaffRebookGuestPrefill;
   /** Pre-filled “Comments or requests” on the appointment details step. */
   appointmentComments?: string;

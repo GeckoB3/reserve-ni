@@ -46,13 +46,51 @@ export function isLinkConfigurationValid(a: LinkGrant, b: LinkGrant): boolean {
   return a.calendar !== 'none' || b.calendar !== 'none';
 }
 
+/** True when two grants are identical after normalisation. */
+export function grantsEqual(a: LinkGrant, b: LinkGrant): boolean {
+  const na = normaliseGrant(a);
+  const nb = normaliseGrant(b);
+  return na.calendar === nb.calendar && na.pii === nb.pii && na.act === nb.act;
+}
+
 /** True when `next` grants strictly less-or-equal access than `current` in every dimension. */
 export function isReductionOnly(current: LinkGrant, next: LinkGrant): boolean {
+  const c = normaliseGrant(current);
+  const n = normaliseGrant(next);
   return (
-    CALENDAR_RANK[next.calendar] <= CALENDAR_RANK[current.calendar] &&
-    (next.pii ? current.pii : true) &&
-    ACTION_RANK[next.act] <= ACTION_RANK[current.act]
+    CALENDAR_RANK[n.calendar] <= CALENDAR_RANK[c.calendar] &&
+    (n.pii ? c.pii : true) &&
+    ACTION_RANK[n.act] <= ACTION_RANK[c.act]
   );
+}
+
+/** True when `next` grants strictly more-or-equal access than `current`, and differs. */
+export function isIncreaseOnly(current: LinkGrant, next: LinkGrant): boolean {
+  const c = normaliseGrant(current);
+  const n = normaliseGrant(next);
+  if (grantsEqual(c, n)) return false;
+  return (
+    CALENDAR_RANK[n.calendar] >= CALENDAR_RANK[c.calendar] &&
+    (n.pii ? true : !c.pii) &&
+    ACTION_RANK[n.act] >= ACTION_RANK[c.act]
+  );
+}
+
+/**
+ * Apply a calendar visibility change with sensible defaults — upgrading to
+ * `full_details` from `time_only`/`none` enables PII and edit access (§5.4).
+ */
+export function applyCalendarVisibilityChange(
+  grant: LinkGrant,
+  calendar: LinkCalendarVisibility,
+): LinkGrant {
+  if (
+    calendar === 'full_details' &&
+    (grant.calendar === 'none' || grant.calendar === 'time_only')
+  ) {
+    return normaliseGrant({ calendar, pii: true, act: 'edit_existing' });
+  }
+  return normaliseGrant({ ...grant, calendar });
 }
 
 /** Plain-English bullet list of what a grant permits (neutral phrasing). */
@@ -98,24 +136,43 @@ export function viewLinkForVenue(
 
   // "they can do X to my data" = the grant I (owner) gave the other direction.
   // If I am low: low_grants_* is what the high venue may do to me.
-  const theyCan: LinkGrant = iAmLow
-    ? { calendar: link.low_grants_calendar, pii: link.low_grants_pii, act: link.low_grants_act }
-    : { calendar: link.high_grants_calendar, pii: link.high_grants_pii, act: link.high_grants_act };
+  const theyCan: LinkGrant = normaliseGrant(
+    iAmLow
+      ? { calendar: link.low_grants_calendar, pii: link.low_grants_pii, act: link.low_grants_act }
+      : {
+          calendar: link.high_grants_calendar,
+          pii: link.high_grants_pii,
+          act: link.high_grants_act,
+        },
+  );
 
-  // "I can do X to their data" = the grant the other venue gave.
-  const iCan: LinkGrant = iAmLow
-    ? { calendar: link.high_grants_calendar, pii: link.high_grants_pii, act: link.high_grants_act }
-    : { calendar: link.low_grants_calendar, pii: link.low_grants_pii, act: link.low_grants_act };
+  const iCan: LinkGrant = normaliseGrant(
+    iAmLow
+      ? { calendar: link.high_grants_calendar, pii: link.high_grants_pii, act: link.high_grants_act }
+      : { calendar: link.low_grants_calendar, pii: link.low_grants_pii, act: link.low_grants_act },
+  );
 
   let pendingChange: AccountLinkView['pendingChange'] = null;
   if (link.pending_change) {
     const pc = link.pending_change;
-    const pcTheyCan: LinkGrant = iAmLow
-      ? { calendar: pc.low_grants_calendar, pii: pc.low_grants_pii, act: pc.low_grants_act }
-      : { calendar: pc.high_grants_calendar, pii: pc.high_grants_pii, act: pc.high_grants_act };
-    const pcICan: LinkGrant = iAmLow
-      ? { calendar: pc.high_grants_calendar, pii: pc.high_grants_pii, act: pc.high_grants_act }
-      : { calendar: pc.low_grants_calendar, pii: pc.low_grants_pii, act: pc.low_grants_act };
+    const pcTheyCan: LinkGrant = normaliseGrant(
+      iAmLow
+        ? { calendar: pc.low_grants_calendar, pii: pc.low_grants_pii, act: pc.low_grants_act }
+        : {
+            calendar: pc.high_grants_calendar,
+            pii: pc.high_grants_pii,
+            act: pc.high_grants_act,
+          },
+    );
+    const pcICan: LinkGrant = normaliseGrant(
+      iAmLow
+        ? { calendar: pc.high_grants_calendar, pii: pc.high_grants_pii, act: pc.high_grants_act }
+        : {
+            calendar: pc.low_grants_calendar,
+            pii: pc.low_grants_pii,
+            act: pc.low_grants_act,
+          },
+    );
     pendingChange = {
       proposedByMe: pc.by_venue_id === myVenueId,
       iCan: pcICan,

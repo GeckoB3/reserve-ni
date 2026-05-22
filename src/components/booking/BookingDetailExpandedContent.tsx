@@ -36,6 +36,7 @@ export function BookingDetailExpandedContent({ ctx }: { ctx: BookingDetailExpand
     guestHistoryListRefresh,
     stackDepth,
     setNestedBookingOpen,
+    linkedAct,
   } = ctx;
 
   return (
@@ -115,6 +116,7 @@ export function BookingDetailExpandedContent({ ctx }: { ctx: BookingDetailExpand
               isAppointment: !isTableReservationBooking(payload.row),
             });
           }}
+          linkedAct={linkedAct}
         />
         {showAssignModal ? (
           <div className="mx-2 mb-2 rounded-xl border border-brand-200 bg-brand-50/30 p-3">

@@ -41,6 +41,8 @@ export function appointmentCalendarUrl(
   variantId?: string | null,
   durationMinutes?: number | null,
   anyAvailable?: boolean,
+  ownerVenueId?: string | null,
+  excludeBookingId?: string | null,
 ): string {
   const params = new URLSearchParams({
     practitioner_id: practitionerId,
@@ -57,11 +59,28 @@ export function appointmentCalendarUrl(
   if (durationMinutes != null) {
     params.set('duration_minutes', String(durationMinutes));
   }
+  if (excludeBookingId) {
+    params.set('exclude_booking_id', excludeBookingId);
+  }
   if (audience === 'public') {
     params.set('venue_id', venueId);
     return `/api/booking/appointment-calendar?${params}`;
   }
+  if (ownerVenueId) {
+    params.set('owner_venue_id', ownerVenueId);
+  }
   return `/api/venue/appointment-calendar?${params}`;
+}
+
+/** Staff day-level appointment slots (same rules as staff month calendar). */
+export function staffAppointmentAvailabilityUrl(
+  params: URLSearchParams,
+  linkedOwnerVenueId?: string | null,
+): string {
+  if (linkedOwnerVenueId) {
+    params.set('owner_venue_id', linkedOwnerVenueId);
+  }
+  return `/api/venue/appointment-availability?${params}`;
 }
 
 export function appointmentCalendarCacheKey(
@@ -79,6 +98,10 @@ export function appointmentCalendarCacheKey(
 
 export function validateAppointmentSlotUrl(): string {
   return '/api/booking/validate-appointment-slot';
+}
+
+export function validateResourceBookingModificationUrl(bookingId: string): string {
+  return `/api/venue/bookings/${bookingId}/validate-resource-modification`;
 }
 
 export function bookingCreateUrl(): string {
@@ -101,25 +124,46 @@ export function bookingConfirmPaymentUrl(): string {
   return '/api/booking/confirm-payment';
 }
 
-export function eventOfferingsUrl(audience: BookingFlowAudience, venueId: string): string {
-  const from = localTodayISO();
+export function eventOfferingsUrl(
+  audience: BookingFlowAudience,
+  venueId: string,
+  ownerVenueId?: string | null,
+  options?: { from?: string; days?: number },
+): string {
+  const from = options?.from ?? localTodayISO();
+  const days = options?.days ?? 90;
   if (audience === 'staff') {
-    return `/api/venue/event-offerings?from=${from}&days=90`;
+    const params = new URLSearchParams({ from, days: String(days) });
+    if (ownerVenueId) params.set('owner_venue_id', ownerVenueId);
+    return `/api/venue/event-offerings?${params}`;
   }
-  return `/api/booking/event-offerings?venue_id=${encodeURIComponent(venueId)}&from=${from}&days=90`;
+  return `/api/booking/event-offerings?venue_id=${encodeURIComponent(venueId)}&from=${from}&days=${days}`;
 }
 
-export function classOfferingsUrl(audience: BookingFlowAudience, venueId: string): string {
+export function classOfferingsUrl(
+  audience: BookingFlowAudience,
+  venueId: string,
+  ownerVenueId?: string | null,
+): string {
   const from = localTodayISO();
   if (audience === 'staff') {
-    return `/api/venue/class-offerings?from=${from}&days=90`;
+    const params = new URLSearchParams({ from, days: '90' });
+    if (ownerVenueId) params.set('owner_venue_id', ownerVenueId);
+    return `/api/venue/class-offerings?${params}`;
   }
   return `/api/booking/class-offerings?venue_id=${encodeURIComponent(venueId)}&from=${from}&days=90`;
 }
 
-export function resourceOptionsUrl(audience: BookingFlowAudience, venueId: string): string {
+export function resourceOptionsUrl(
+  audience: BookingFlowAudience,
+  venueId: string,
+  ownerVenueId?: string | null,
+): string {
   if (audience === 'staff') {
-    return '/api/venue/resource-options';
+    const params = new URLSearchParams();
+    if (ownerVenueId) params.set('owner_venue_id', ownerVenueId);
+    const qs = params.toString();
+    return qs ? `/api/venue/resource-options?${qs}` : '/api/venue/resource-options';
   }
   return `/api/booking/resource-options?venue_id=${encodeURIComponent(venueId)}`;
 }
@@ -134,6 +178,7 @@ export function resourceCalendarUrl(
   year: number,
   month: number,
   duration: 'any' | number,
+  options?: { excludeBookingId?: string | null; skipPastSlots?: boolean },
 ): string {
   const params = new URLSearchParams({
     resource_id: resourceId,
@@ -144,6 +189,12 @@ export function resourceCalendarUrl(
     params.set('duration', 'any');
   } else {
     params.set('duration', String(duration));
+  }
+  if (options?.excludeBookingId) {
+    params.set('exclude_booking_id', options.excludeBookingId);
+  }
+  if (options?.skipPastSlots) {
+    params.set('skip_past_slots', '1');
   }
   if (audience === 'public') {
     params.set('venue_id', venueId);
@@ -160,6 +211,7 @@ export function resourceSlotsUrl(
   date: string,
   durationMinutes: number,
   resourceId: string,
+  options?: { excludeBookingId?: string | null; skipPastSlots?: boolean },
 ): string {
   if (audience === 'staff') {
     const qs = new URLSearchParams({
@@ -167,6 +219,12 @@ export function resourceSlotsUrl(
       duration: String(durationMinutes),
       resource_id: resourceId,
     });
+    if (options?.excludeBookingId) {
+      qs.set('exclude_booking_id', options.excludeBookingId);
+    }
+    if (options?.skipPastSlots) {
+      qs.set('skip_past_slots', '1');
+    }
     return `/api/venue/resource-availability?${qs}`;
   }
   const params = new URLSearchParams({

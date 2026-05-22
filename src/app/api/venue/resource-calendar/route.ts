@@ -49,6 +49,14 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    const excludeBookingIdParam = searchParams.get('exclude_booking_id');
+    const excludeBookingId =
+      excludeBookingIdParam &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(excludeBookingIdParam)
+        ? excludeBookingIdParam
+        : undefined;
+    const skipPastSlots = searchParams.get('skip_past_slots') === '1';
+
     const admin = getSupabaseAdminClient();
     const venueMode = await resolveVenueMode(admin, staff.venue_id);
     const canResource =
@@ -78,7 +86,11 @@ export async function GET(request: NextRequest) {
     const [enriched] = await attachHostCalendarsToResources(admin, staff.venue_id, [resource]);
     resource = enriched ?? resource;
 
-    const prefetchOpts = { reuseEnrichedResourceRow: true as const };
+    const prefetchOpts = {
+      reuseEnrichedResourceRow: true as const,
+      excludeBookingId,
+      skipPastSlotFilter: skipPastSlots,
+    };
     const available_dates = durationAny
       ? await computeResourceAvailableDatesInMonthAnyDuration(
           admin,

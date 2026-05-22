@@ -192,9 +192,20 @@ export async function GET(request: NextRequest) {
 
     const resourceIds = [...new Set(rows.map((r) => r.resource_id).filter(Boolean))] as string[];
     const { data: resourceRows } = resourceIds.length
-      ? await staff.db.from('unified_calendars').select('id, name').eq('calendar_type', 'resource').in('id', resourceIds)
+      ? await staff.db
+          .from('unified_calendars')
+          .select('id, name, display_on_calendar_id, min_booking_minutes')
+          .eq('calendar_type', 'resource')
+          .in('id', resourceIds)
       : { data: [] };
-    const resourceMap = new Map((resourceRows ?? []).map((r: { id: string; name: string }) => [r.id, r.name]));
+    const resourceMap = new Map(
+      (resourceRows ?? []).map(
+        (r: { id: string; name: string; display_on_calendar_id?: string | null; min_booking_minutes?: number }) => [
+          r.id,
+          r,
+        ],
+      ),
+    );
 
     const bookedClassIds = new Set<string>();
     const classEnrolledByInstance = new Map<string, number>();
@@ -257,7 +268,10 @@ export async function GET(request: NextRequest) {
         }
       }
       if (bm === 'resource_booking' && row.resource_id) {
-        return minutesToTime(timeToMinutes(hhmm(row.booking_time as string)) + 60);
+        const resRow = resourceMap.get(row.resource_id as string) as { min_booking_minutes?: number } | undefined;
+        const fallbackMins =
+          resRow?.min_booking_minutes != null && resRow.min_booking_minutes > 0 ? resRow.min_booking_minutes : 60;
+        return minutesToTime(timeToMinutes(hhmm(row.booking_time as string)) + fallbackMins);
       }
       return minutesToTime(timeToMinutes(hhmm(row.booking_time as string)) + 60);
     }
@@ -275,7 +289,8 @@ export async function GET(request: NextRequest) {
         const cn = ct?.name ?? 'Class';
         title = cn;
       } else if (bm === 'resource_booking' && r.resource_id) {
-        const rn = resourceMap.get(r.resource_id) ?? 'Resource';
+        const resRow = resourceMap.get(r.resource_id) as { name?: string } | undefined;
+        const rn = resRow?.name ?? 'Resource';
         title = `${rn} · ${gn}`;
       }
 
@@ -320,7 +335,13 @@ export async function GET(request: NextRequest) {
         accent_colour: accent,
         class_capacity: classCap,
         class_booked_spots: classBooked,
-        calendar_id: bm === 'class_session' ? calendarIdForClassInstance(r.class_instance_id as string) : null,
+        calendar_id:
+          bm === 'class_session'
+            ? calendarIdForClassInstance(r.class_instance_id as string)
+            : bm === 'resource_booking' && r.resource_id
+              ? ((resourceMap.get(r.resource_id as string) as { display_on_calendar_id?: string | null } | undefined)
+                  ?.display_on_calendar_id ?? null)
+              : null,
       });
     }
 

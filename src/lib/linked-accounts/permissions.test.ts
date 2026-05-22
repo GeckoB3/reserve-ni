@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  applyCalendarVisibilityChange,
   grantsToColumns,
   isGrantCoherent,
+  isIncreaseOnly,
   isLinkConfigurationValid,
   isReductionOnly,
+  grantsEqual,
   normaliseGrant,
   orderVenuePair,
   viewLinkForVenue,
@@ -58,6 +61,43 @@ describe('isLinkConfigurationValid — no zero-way links', () => {
   it('allows a one-way link', () => {
     expect(isLinkConfigurationValid(some, none)).toBe(true);
     expect(isLinkConfigurationValid(none, some)).toBe(true);
+  });
+});
+
+describe('isIncreaseOnly', () => {
+  const timeOnly: LinkGrant = { calendar: 'time_only', pii: false, act: 'none' };
+  const full: LinkGrant = { calendar: 'full_details', pii: true, act: 'create_edit_cancel' };
+
+  it('accepts time_only → full_details + PII + create_edit_cancel', () => {
+    expect(isIncreaseOnly(timeOnly, full)).toBe(true);
+  });
+  it('rejects equal grants', () => {
+    expect(isIncreaseOnly(full, full)).toBe(false);
+  });
+  it('rejects a strict reduction', () => {
+    expect(isIncreaseOnly(full, timeOnly)).toBe(false);
+  });
+});
+
+describe('grantsEqual', () => {
+  it('treats normalised equivalents as equal', () => {
+    expect(
+      grantsEqual(
+        { calendar: 'time_only', pii: true, act: 'create_edit_cancel' },
+        { calendar: 'time_only', pii: false, act: 'none' },
+      ),
+    ).toBe(true);
+  });
+});
+
+describe('applyCalendarVisibilityChange', () => {
+  it('enables PII and edit when upgrading from time_only', () => {
+    expect(
+      applyCalendarVisibilityChange(
+        { calendar: 'time_only', pii: false, act: 'none' },
+        'full_details',
+      ),
+    ).toEqual({ calendar: 'full_details', pii: true, act: 'edit_existing' });
   });
 });
 

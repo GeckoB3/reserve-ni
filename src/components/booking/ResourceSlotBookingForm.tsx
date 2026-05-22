@@ -2,10 +2,13 @@
 
 import { useCallback, useEffect, useState, useMemo } from 'react';
 import { NumericInput } from '@/components/ui/NumericInput';
+import { Button } from '@/components/ui/primitives/Button';
+import { Skeleton } from '@/components/ui/Skeleton';
 import {
   DEFAULT_RESOURCE_MIN_BOOKING_MINUTES,
   DEFAULT_RESOURCE_SLOT_INTERVAL_MINUTES,
 } from '@/lib/booking/resource-booking-defaults';
+import { resourceDurationCandidatesMinutes } from '@/lib/availability/resource-booking-engine';
 
 interface ResourceInfo {
   id: string;
@@ -27,6 +30,9 @@ interface Props {
   preselectedDate?: string;
   preselectedTime?: string;
 }
+
+const INPUT_CLASS =
+  'w-full min-h-10 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-brand-500 focus:ring-1 focus:ring-brand-500';
 
 function formatCurrency(pence: number, currency: string): string {
   return new Intl.NumberFormat('en-GB', {
@@ -70,7 +76,6 @@ export function ResourceSlotBookingForm({
   const [guestPhone, setGuestPhone] = useState('');
   const [partySize, setPartySize] = useState(1);
 
-  // Sync preselected values when they change
   useEffect(() => {
     if (preselectedDate) setDate(preselectedDate);
   }, [preselectedDate]);
@@ -78,7 +83,6 @@ export function ResourceSlotBookingForm({
     if (preselectedTime) setStartTime(preselectedTime);
   }, [preselectedTime]);
 
-  // Fetch resource info when opened
   useEffect(() => {
     if (!open || !resourceId) return;
     setLoading(true);
@@ -101,11 +105,10 @@ export function ResourceSlotBookingForm({
         });
         setDurationMinutes(r.min_booking_minutes ?? DEFAULT_RESOURCE_MIN_BOOKING_MINUTES);
       })
-      .catch(() => setError('Could not load resource details'))
+      .catch(() => setError('We couldn’t load this resource. Close and try again.'))
       .finally(() => setLoading(false));
   }, [open, resourceId]);
 
-  // Reset form when closed
   useEffect(() => {
     if (!open) {
       setFirstName('');
@@ -118,30 +121,20 @@ export function ResourceSlotBookingForm({
     }
   }, [open]);
 
-  // Duration options based on resource constraints
   const durationOptions = useMemo(() => {
     if (!resource) return [];
-    const opts: number[] = [];
-    const step = resource.slot_interval_minutes;
-    for (let d = resource.min_booking_minutes; d <= resource.max_booking_minutes; d += step) {
-      opts.push(d);
-    }
-    // Ensure at least one option
-    if (opts.length === 0) opts.push(resource.min_booking_minutes);
-    return opts;
+    return resourceDurationCandidatesMinutes(resource);
   }, [resource]);
 
-  // Computed end time
   const endTime = useMemo(() => {
     if (!startTime) return '';
     const startMins = timeToMinutes(startTime);
     return minutesToTime(startMins + durationMinutes);
   }, [startTime, durationMinutes]);
 
-  // Computed price
   const totalPricePence = useMemo(() => {
     if (!resource?.price_per_slot_pence) return null;
-    const slots = durationMinutes / resource.slot_interval_minutes;
+    const slots = Math.ceil(durationMinutes / resource.slot_interval_minutes);
     return Math.round(resource.price_per_slot_pence * slots);
   }, [resource, durationMinutes]);
 
@@ -160,30 +153,29 @@ export function ResourceSlotBookingForm({
       setSubmitting(true);
       setError(null);
       try {
-        const res = await fetch('/api/booking/create', {
+        const res = await fetch('/api/venue/bookings', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            venue_id: venueId,
             booking_date: date,
-            booking_time: startTime.length === 5 ? startTime + ':00' : startTime,
-            booking_end_time: endTime.length === 5 ? endTime + ':00' : endTime,
+            booking_time: startTime.length === 5 ? startTime : startTime.slice(0, 5),
+            booking_end_time: endTime.length === 5 ? endTime : endTime.slice(0, 5),
             resource_id: resource.id,
             first_name: firstName.trim(),
             last_name: lastName.trim(),
-            guest_email: guestEmail.trim() || undefined,
-            guest_phone: guestPhone.trim() || undefined,
+            email: guestEmail.trim() || undefined,
+            phone: guestPhone.trim() || undefined,
             party_size: partySize,
-            booking_model: 'resource_booking',
+            source: 'phone',
           }),
         });
         if (!res.ok) {
           const data = await res.json().catch(() => ({}));
-          throw new Error(data.error || 'Failed to create booking');
+          throw new Error(data.error || 'Could not create this booking. Check the slot is still free.');
         }
         onCreated();
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to create booking');
+        setError(err instanceof Error ? err.message : 'Could not create this booking.');
       } finally {
         setSubmitting(false);
       }
@@ -195,81 +187,97 @@ export function ResourceSlotBookingForm({
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4"
+      className="fixed inset-0 z-[60] flex items-end justify-center bg-slate-900/25 p-0 backdrop-blur-[2px] sm:items-center sm:p-4"
       onClick={onClose}
     >
       <div
         role="dialog"
+        aria-modal="true"
         aria-labelledby="resource-booking-title"
-        className="w-full max-w-md rounded-2xl bg-white shadow-xl"
+        className="max-h-[92vh] w-full overflow-y-auto rounded-t-2xl border border-slate-200/80 bg-white shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100 sm:max-w-md sm:rounded-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header */}
-        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
-          <div>
+        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+          <div className="min-w-0 pr-3">
             <h3 id="resource-booking-title" className="text-base font-semibold text-slate-900">
               Book resource
             </h3>
-            {resource && (
-              <p className="mt-0.5 text-sm text-slate-500">
+            {resource ? (
+              <p className="mt-0.5 truncate text-sm text-slate-500">
                 {resource.name}
-                {resource.resource_type ? ` \u00b7 ${resource.resource_type}` : ''}
+                {resource.resource_type ? ` · ${resource.resource_type}` : ''}
               </p>
-            )}
+            ) : null}
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+            className="shrink-0 rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
             aria-label="Close"
           >
-            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
         </div>
 
-        {/* Body */}
         <div className="px-5 py-4">
           {loading ? (
-            <div className="flex items-center justify-center py-8">
-              <div className="h-6 w-6 animate-spin rounded-full border-2 border-slate-300 border-t-slate-600" />
+            <div className="space-y-4 py-2" role="status" aria-label="Loading resource">
+              <Skeleton.Line className="w-1/2" />
+              <Skeleton.Block className="h-10" />
+              <Skeleton.Block className="h-10" />
+              <Skeleton.Block className="h-24" />
             </div>
           ) : error && !resource ? (
-            <p className="py-4 text-center text-sm text-red-600">{error}</p>
+            <div className="py-4 text-center">
+              <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+                {error}
+              </p>
+              <Button type="button" variant="secondary" size="sm" className="mt-4" onClick={onClose}>
+                Close
+              </Button>
+            </div>
           ) : resource ? (
             <form onSubmit={handleSubmit} className="space-y-4">
-              {/* Date & time row */}
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-700">Date</label>
+                  <label htmlFor="resource-booking-date" className="mb-1 block text-xs font-medium text-slate-700">
+                    Date
+                  </label>
                   <input
+                    id="resource-booking-date"
                     type="date"
                     value={date}
                     onChange={(e) => setDate(e.target.value)}
                     required
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                    className={INPUT_CLASS}
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-700">Start time</label>
+                  <label htmlFor="resource-booking-time" className="mb-1 block text-xs font-medium text-slate-700">
+                    Start time
+                  </label>
                   <input
+                    id="resource-booking-time"
                     type="time"
                     value={startTime}
                     onChange={(e) => setStartTime(e.target.value)}
                     required
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                    className={INPUT_CLASS}
                   />
                 </div>
               </div>
 
-              {/* Duration */}
               <div>
-                <label className="mb-1 block text-xs font-medium text-slate-700">Duration</label>
+                <label htmlFor="resource-booking-duration" className="mb-1 block text-xs font-medium text-slate-700">
+                  Duration
+                </label>
                 <select
+                  id="resource-booking-duration"
                   value={durationMinutes}
                   onChange={(e) => setDurationMinutes(Number(e.target.value))}
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                  className={INPUT_CLASS}
                 >
                   {durationOptions.map((d) => (
                     <option key={d} value={d}>
@@ -277,99 +285,110 @@ export function ResourceSlotBookingForm({
                     </option>
                   ))}
                 </select>
-                {endTime && (
-                  <p className="mt-1 text-xs text-slate-500">
-                    {startTime.slice(0, 5)} &ndash; {endTime.slice(0, 5)}
-                    {totalPricePence != null && (
+                {endTime ? (
+                  <p className="mt-1.5 text-xs text-slate-500">
+                    {startTime.slice(0, 5)} – {endTime.slice(0, 5)}
+                    {totalPricePence != null ? (
                       <span className="ml-2 font-medium text-slate-700">
                         {formatCurrency(totalPricePence, currency)}
                       </span>
-                    )}
+                    ) : null}
                   </p>
-                )}
+                ) : null}
               </div>
 
-              {/* Guest name */}
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-700">First name</label>
+                  <label htmlFor="resource-booking-first" className="mb-1 block text-xs font-medium text-slate-700">
+                    First name
+                  </label>
                   <input
+                    id="resource-booking-first"
                     type="text"
                     value={firstName}
                     onChange={(e) => setFirstName(e.target.value)}
                     required
                     autoComplete="given-name"
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                    className={INPUT_CLASS}
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-700">Surname</label>
+                  <label htmlFor="resource-booking-last" className="mb-1 block text-xs font-medium text-slate-700">
+                    Surname
+                  </label>
                   <input
+                    id="resource-booking-last"
                     type="text"
                     value={lastName}
                     onChange={(e) => setLastName(e.target.value)}
                     required
                     autoComplete="family-name"
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                    className={INPUT_CLASS}
                   />
                 </div>
               </div>
 
-              {/* Email & phone */}
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-700">Email</label>
+                  <label htmlFor="resource-booking-email" className="mb-1 block text-xs font-medium text-slate-700">
+                    Email <span className="font-normal text-slate-400">(optional)</span>
+                  </label>
                   <input
+                    id="resource-booking-email"
                     type="email"
                     value={guestEmail}
                     onChange={(e) => setGuestEmail(e.target.value)}
-                    placeholder="Optional"
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                    autoComplete="email"
+                    className={INPUT_CLASS}
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-700">Phone</label>
+                  <label htmlFor="resource-booking-phone" className="mb-1 block text-xs font-medium text-slate-700">
+                    Phone <span className="font-normal text-slate-400">(optional)</span>
+                  </label>
                   <input
+                    id="resource-booking-phone"
                     type="tel"
                     value={guestPhone}
                     onChange={(e) => setGuestPhone(e.target.value)}
-                    placeholder="Optional"
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                    autoComplete="tel"
+                    className={INPUT_CLASS}
                   />
                 </div>
               </div>
 
-              {/* Party size */}
               <div>
-                <label className="mb-1 block text-xs font-medium text-slate-700">Party size</label>
+                <label htmlFor="resource-booking-party" className="mb-1 block text-xs font-medium text-slate-700">
+                  Party size
+                </label>
                 <NumericInput
+                  id="resource-booking-party"
                   min={1}
                   max={50}
                   value={partySize}
                   onChange={setPartySize}
-                  className="w-24 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                  className={`w-full max-w-[6rem] ${INPUT_CLASS}`}
                 />
               </div>
 
-              {/* Error */}
-              {error && <p className="text-sm text-red-600">{error}</p>}
+              {error ? (
+                <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+                  {error}
+                </p>
+              ) : null}
 
-              {/* Actions */}
-              <div className="flex items-center justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={onClose}
-                  className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-                >
+              <div className="flex flex-col-reverse gap-2 pt-2 sm:flex-row sm:justify-end">
+                <Button type="button" variant="secondary" onClick={onClose} disabled={submitting}>
                   Cancel
-                </button>
-                <button
+                </Button>
+                <Button
                   type="submit"
-                  disabled={submitting || !firstName.trim() || !lastName.trim() || !date || !startTime}
-                  className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
+                  variant="primary"
+                  loading={submitting}
+                  disabled={!firstName.trim() || !lastName.trim() || !date || !startTime}
                 >
-                  {submitting ? 'Booking\u2026' : 'Create booking'}
-                </button>
+                  {submitting ? 'Creating booking…' : 'Create booking'}
+                </Button>
               </div>
             </form>
           ) : null}

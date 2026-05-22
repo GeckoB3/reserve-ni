@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { VenuePublic, GuestDetails } from './types';
 import { usePublicBookingAccountGateContext } from '@/components/booking/PublicBookingAccountGate';
 import { defaultPhoneCountryForVenueCurrency } from '@/lib/phone/default-country';
@@ -63,6 +63,24 @@ interface EventInstance {
 type Step = 'pick-event' | 'pick-date' | 'summary' | 'details' | 'payment' | 'confirmation';
 
 import { currencySymbolFromCode as symForCurrency } from '@/lib/money/currency-symbol';
+
+function daysBetweenIso(from: string, to: string): number {
+  const [fy, fm, fd] = from.split('-').map(Number);
+  const [ty, tm, td] = to.split('-').map(Number);
+  const fromMs = Date.UTC(fy!, fm! - 1, fd!);
+  const toMs = Date.UTC(ty!, tm! - 1, td!);
+  return Math.max(0, Math.round((toMs - fromMs) / 86_400_000));
+}
+
+function eventOfferingsRange(preselectedEventDate?: string): { from: string; days: number } {
+  const today = localTodayISO();
+  const from =
+    preselectedEventDate && preselectedEventDate < today ? preselectedEventDate : today;
+  const days = preselectedEventDate
+    ? Math.min(120, Math.max(90, daysBetweenIso(from, preselectedEventDate) + 14))
+    : 90;
+  return { from, days };
+}
 
 function eventPaymentSummaryLines(
   occurrence: EventInstance,
@@ -132,6 +150,12 @@ export interface EventBookingFlowProps {
   bookingAudience?: BookingFlowAudience;
   staffBookingSource?: 'phone' | 'walk-in';
   onBookingCreated?: () => void;
+  /** When set, load offerings and create bookings in a linked owner venue. */
+  linkedOwnerVenueId?: string;
+  /** Skip event/date pickers and open ticket selection for this occurrence. */
+  preselectedExperienceEventId?: string;
+  preselectedEventDate?: string;
+  preselectedEventTime?: string;
 }
 
 export function EventBookingFlow({
@@ -140,6 +164,10 @@ export function EventBookingFlow({
   bookingAudience = 'public',
   staffBookingSource = 'phone',
   onBookingCreated,
+  linkedOwnerVenueId,
+  preselectedExperienceEventId,
+  preselectedEventDate,
+  preselectedEventTime,
 }: EventBookingFlowProps) {
   const isStaff = bookingAudience === 'staff';
   const isPublicGuest = !isStaff;
@@ -155,7 +183,9 @@ export function EventBookingFlow({
   const terms = venue.terminology ?? { client: 'Member', booking: 'Booking', staff: 'Instructor' };
   const sym = symForCurrency(currency);
 
-  const [step, setStep] = useState<Step>('pick-event');
+  const [step, setStep] = useState<Step>(() =>
+    preselectedExperienceEventId ? 'summary' : 'pick-event',
+  );
   const advanceToGuestDetails = useCallback(async () => {
     if (isPublicGuest && !(await accountGate.ensureSignedIn())) return;
     setStep('details');
@@ -180,16 +210,24 @@ export function EventBookingFlow({
     payment_url?: string;
     staffMessage?: string;
   } | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(() => Boolean(preselectedExperienceEventId));
+  const [offeringsReady, setOfferingsReady] = useState(() => !preselectedExperienceEventId);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const prefillAppliedRef = useRef(false);
 
   const fetchOfferings = useCallback(async () => {
+    if (preselectedExperienceEventId) {
+      prefillAppliedRef.current = false;
+    }
+    setOfferingsReady(false);
     setLoading(true);
     setError(null);
     try {
-      const from = localTodayISO();
-      const res = await fetch(eventOfferingsUrl(bookingAudience, venue.id));
+      const { from, days } = eventOfferingsRange(preselectedEventDate);
+      const res = await fetch(
+        eventOfferingsUrl(bookingAudience, venue.id, linkedOwnerVenueId, { from, days }),
+      );
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? 'Failed to load events');
       setRangeFrom(data.from ?? from);
@@ -202,12 +240,59 @@ export function EventBookingFlow({
       setInstances([]);
     } finally {
       setLoading(false);
+      setOfferingsReady(true);
     }
-  }, [venue.id, bookingAudience]);
+  }, [venue.id, bookingAudience, linkedOwnerVenueId, preselectedEventDate]);
 
   useEffect(() => {
     void fetchOfferings();
   }, [fetchOfferings]);
+
+  const eventPrefillActive = Boolean(preselectedExperienceEventId);
+  const eventPrefillPending =
+    eventPrefillActive && !selectedOccurrence && (loading || !offeringsReady);
+
+  useEffect(() => {
+    if (!preselectedExperienceEventId) {
+      prefillAppliedRef.current = false;
+      return;
+    }
+    if (loading || !offeringsReady || prefillAppliedRef.current) return;
+
+    const normalizedTime = preselectedEventTime?.slice(0, 5);
+    const matchesEvent = (i: EventInstance) =>
+      i.event_id === preselectedExperienceEventId &&
+      (!preselectedEventDate || i.event_date === preselectedEventDate) &&
+      i.remaining_capacity > 0;
+
+    const match =
+      (normalizedTime
+        ? instances.find(
+            (i) => matchesEvent(i) && i.start_time.slice(0, 5) === normalizedTime,
+          )
+        : undefined) ?? instances.find(matchesEvent);
+
+    prefillAppliedRef.current = true;
+
+    if (!match) {
+      setError('This event is no longer available to book.');
+      setStep('pick-event');
+      return;
+    }
+
+    setSelectedSeriesKey(match.series_key);
+    setSelectedOccurrence(match);
+    setTicketSelections({});
+    setStep('summary');
+    setError(null);
+  }, [
+    preselectedExperienceEventId,
+    preselectedEventDate,
+    preselectedEventTime,
+    instances,
+    loading,
+    offeringsReady,
+  ]);
 
   const selectedSummary = useMemo(
     () => eventSummaries.find((e) => e.series_key === selectedSeriesKey) ?? null,
@@ -306,6 +391,8 @@ export function EventBookingFlow({
               ticket_lines,
               dietary_notes: details.dietary_notes,
               source: staffBookingSource,
+              ...(details.returning_guest ? { returning_guest: true } : {}),
+              ...(linkedOwnerVenueId ? { owner_venue_id: linkedOwnerVenueId } : {}),
             }),
           });
           const data = await res.json();
@@ -370,6 +457,7 @@ export function EventBookingFlow({
       isPublicGuest,
       accountGate,
       staffBookingSource,
+      linkedOwnerVenueId,
     ],
   );
 
@@ -491,19 +579,28 @@ export function EventBookingFlow({
         </div>
       )}
 
+      {step === 'summary' && eventPrefillPending && (
+        <div className="flex flex-col items-center justify-center gap-3 py-12">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
+          <p className="text-sm text-slate-500">Loading tickets for this event…</p>
+        </div>
+      )}
+
       {step === 'summary' && selectedOccurrence && (
         <div>
-          <button
-            type="button"
-            onClick={() => {
-              setSelectedOccurrence(null);
-              setTicketSelections({});
-              setStep('pick-date');
-            }}
-            className="mb-4 text-sm text-brand-600 hover:underline"
-          >
-            &larr; Back
-          </button>
+          {!eventPrefillActive ? (
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedOccurrence(null);
+                setTicketSelections({});
+                setStep('pick-date');
+              }}
+              className="mb-4 text-sm text-brand-600 hover:underline"
+            >
+              &larr; Back
+            </button>
+          ) : null}
           <div className="mb-4 rounded-xl border border-slate-200 bg-white p-4 text-sm shadow-sm">
             <div className="font-semibold text-slate-900">{selectedOccurrence.event_name}</div>
             <div className="text-slate-500">

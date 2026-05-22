@@ -12,6 +12,7 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { checkCalendarLimit, isAppointmentPlanTier } from '@/lib/tier-enforcement';
 import { defaultNewUnifiedCalendarWorkingHours } from '@/lib/availability/practitioner-defaults';
 import { venueUsesUnifiedAppointmentServiceData } from '@/lib/booking/uses-unified-appointment-data';
+import { resolveLinkedStaffCatalogScope } from '@/lib/booking/staff-booking-access';
 import { ensureUnifiedMirrorForPractitionerId } from '@/lib/class-instances/instructor-calendar-block';
 import { planDisplayName } from '@/lib/pricing-constants';
 import { z } from 'zod';
@@ -194,6 +195,9 @@ const practitionerSchema = z.object({
  * resource calendars e.g. courts/rooms — those are not staff-managed bookable columns).
  * Omit it for admin flows that must list inactive rows (e.g. availability settings).
  */
+const OWNER_VENUE_UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export async function GET(request: NextRequest) {
   try {
     const supabase = await createClient();
@@ -205,13 +209,24 @@ export async function GET(request: NextRequest) {
     const staffAssignable = request.nextUrl.searchParams.get('staff_assignable') === '1';
 
     const admin = getSupabaseAdminClient();
-    const venueMode = await getVenueCalendarMode(admin, staff.venue_id);
+    const ownerVenueParam = request.nextUrl.searchParams.get('owner_venue_id');
+    const scope = await resolveLinkedStaffCatalogScope(
+      admin,
+      staff.venue_id,
+      ownerVenueParam && OWNER_VENUE_UUID_RE.test(ownerVenueParam) ? ownerVenueParam : null,
+    );
+    if (!scope.ok) {
+      return NextResponse.json({ error: scope.error }, { status: scope.status });
+    }
+    const catalogVenueId = scope.venueId;
+
+    const venueMode = await getVenueCalendarMode(admin, catalogVenueId);
     const bookingModel = venueMode.bookingModel;
 
     /** Experience events, classes, etc. use `unified_calendars.id`. Prefer UC list whenever rows exist (mirrors share practitioner ids). */
     const useUnifiedCalendarList = await checkVenueUsesUnifiedCalendarList(
       admin,
-      staff.venue_id,
+      catalogVenueId,
       bookingModel,
       venueMode.pricingTier,
     );
@@ -220,7 +235,7 @@ export async function GET(request: NextRequest) {
       let { data, error } = await admin
         .from('unified_calendars')
         .select('*')
-        .eq('venue_id', staff.venue_id)
+        .eq('venue_id', catalogVenueId)
         .order('sort_order', { ascending: true });
 
       if (error) {
@@ -229,11 +244,11 @@ export async function GET(request: NextRequest) {
       }
 
       if ((data ?? []).length === 0 && isAppointmentPlanTier(venueMode.pricingTier)) {
-        await mirrorLegacyPractitionersToUnifiedCalendars(admin, staff.venue_id);
+        await mirrorLegacyPractitionersToUnifiedCalendars(admin, catalogVenueId);
         const retry = await admin
           .from('unified_calendars')
           .select('*')
-          .eq('venue_id', staff.venue_id)
+          .eq('venue_id', catalogVenueId)
           .order('sort_order', { ascending: true });
         data = retry.data;
         error = retry.error;
@@ -246,7 +261,7 @@ export async function GET(request: NextRequest) {
       const { data: assignRows, error: assignErr } = await admin
         .from('staff_calendar_assignments')
         .select('calendar_id, staff_id')
-        .eq('venue_id', staff.venue_id);
+        .eq('venue_id', catalogVenueId);
 
       if (assignErr) {
         console.error(
@@ -299,7 +314,7 @@ export async function GET(request: NextRequest) {
     const { data, error } = await admin
       .from('practitioners')
       .select('*')
-      .eq('venue_id', staff.venue_id)
+      .eq('venue_id', catalogVenueId)
       .order('sort_order', { ascending: true });
 
     if (error) {

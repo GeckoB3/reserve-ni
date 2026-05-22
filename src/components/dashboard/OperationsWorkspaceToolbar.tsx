@@ -37,6 +37,11 @@ function formatDateHeading(isoDate: string): string {
   return `${WEEKDAYS_SHORT[d.getDay()]} ${d.getDate()} ${MONTHS_SHORT[d.getMonth()]} ${d.getFullYear()}`;
 }
 
+/** Fixed-width day strip so prev/next arrows stay put while the label changes. */
+const DATE_NAV_GRID_CLASS_COMPACT = 'grid shrink-0 grid-cols-[2rem_9.75rem_2rem] items-center gap-1';
+const DATE_NAV_GRID_CLASS_DEFAULT =
+  'grid shrink-0 grid-cols-[2.5rem_11.25rem_2.5rem] items-center gap-1 sm:grid-cols-[2.25rem_11.25rem_2.25rem]';
+
 function KpiChips({
   summary,
   onCoversChipClick,
@@ -374,66 +379,75 @@ export function OperationsWorkspaceToolbar({
       {showDateNavigator ? (
         <>
           <div className="flex shrink-0 items-center gap-1">
-            <button
-              type="button"
-              onClick={onPreviousDate ?? (() => onDateChange(shiftDate(date, -1)))}
-              className={compact
-                ? 'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 shadow-sm hover:bg-slate-50 hover:text-slate-800'
-                : 'inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 shadow-sm hover:bg-slate-50 hover:text-slate-800 sm:h-9 sm:w-9'}
-              aria-label="Previous day"
-            >
-              <svg className={compact ? 'h-4 w-4' : 'h-5 w-5'} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
-              </svg>
-            </button>
-            <div ref={datePopoverRef} className="relative shrink-0">
+            <div className={compact ? DATE_NAV_GRID_CLASS_COMPACT : DATE_NAV_GRID_CLASS_DEFAULT}>
               <button
-                ref={dateTriggerRef}
                 type="button"
-                onClick={() => setOpen((p) => (p === 'date' ? 'none' : 'date'))}
-                title={typeof dateLabel === 'string' ? dateLabel : formatDateHeading(date)}
+                onClick={onPreviousDate ?? (() => onDateChange(shiftDate(date, -1)))}
                 className={compact
-                  ? 'inline-flex min-h-8 shrink-0 items-center rounded-lg border border-slate-200 bg-white px-2 py-1 text-left text-[11px] font-semibold leading-tight text-slate-700 shadow-sm hover:bg-slate-50 whitespace-nowrap sm:text-xs'
-                  : 'inline-flex min-h-10 shrink-0 flex-col items-start justify-center rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-left text-xs font-semibold text-slate-800 shadow-sm hover:bg-slate-50 whitespace-nowrap sm:px-3 sm:text-sm'}
-                aria-expanded={open === 'date'}
-                aria-controls={datePanelId}
+                  ? 'inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 shadow-sm hover:bg-slate-50 hover:text-slate-800'
+                  : 'inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 shadow-sm hover:bg-slate-50 hover:text-slate-800 sm:h-9 sm:w-9'}
+                aria-label="Previous day"
               >
-                <span className="whitespace-nowrap tabular-nums">{dateLabel ?? formatDateHeading(date)}</span>
-                {!compact && isToday ? (
-                  <span className="text-[10px] font-semibold uppercase tracking-wide text-brand-600">Today</span>
-                ) : null}
+                <svg className={compact ? 'h-4 w-4' : 'h-5 w-5'} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
+                </svg>
               </button>
-              <ClampedFixedDropdown
-                open={inlineDateOpen}
-                triggerRef={dateTriggerRef}
-                verticalAnchorRef={compact ? panelSurfaceRef : undefined}
-                horizontalCenter={compact}
-                gapPx={4}
-                align="start"
-                maxWidthPx={352}
-                id={datePanelId}
-                onDismiss={close}
-                ignoreDismissIf={(target) =>
-                  target instanceof Element && Boolean(target.closest(CALENDAR_PICKER_SUBPOPOVER_SELECTOR))
-                }
-                aria-label="Date and calendar"
-                className="animate-fade-in z-50 rounded-xl border border-slate-200 bg-white p-2 text-left shadow-xl shadow-slate-900/10 ring-1 ring-slate-100 sm:p-3"
+              <div ref={datePopoverRef} className="relative min-w-0">
+                <button
+                  ref={dateTriggerRef}
+                  type="button"
+                  onClick={() => setOpen((p) => (p === 'date' ? 'none' : 'date'))}
+                  title={typeof dateLabel === 'string' ? dateLabel : formatDateHeading(date)}
+                  className={compact
+                    ? 'inline-flex min-h-8 w-full min-w-0 items-center justify-center rounded-lg border border-slate-200 bg-white px-2 py-1 text-center text-[11px] font-semibold leading-tight text-slate-700 shadow-sm hover:bg-slate-50 sm:text-xs'
+                    : 'inline-flex min-h-10 w-full min-w-0 flex-col items-center justify-center rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-center text-xs font-semibold text-slate-800 shadow-sm hover:bg-slate-50 sm:px-2.5 sm:text-sm'}
+                  aria-expanded={open === 'date'}
+                  aria-controls={datePanelId}
+                >
+                  <span className="w-full min-w-0 truncate tabular-nums">{dateLabel ?? formatDateHeading(date)}</span>
+                  {!compact ? (
+                    <span
+                      className={`mt-0.5 block min-h-[0.875rem] w-full min-w-0 truncate text-[10px] font-semibold uppercase tracking-wide ${
+                        isToday ? 'text-brand-600' : 'text-transparent'
+                      }`}
+                      aria-hidden={!isToday}
+                    >
+                      Today
+                    </span>
+                  ) : null}
+                </button>
+                <ClampedFixedDropdown
+                  open={inlineDateOpen}
+                  triggerRef={dateTriggerRef}
+                  verticalAnchorRef={compact ? panelSurfaceRef : undefined}
+                  horizontalCenter={compact}
+                  gapPx={4}
+                  align="start"
+                  maxWidthPx={352}
+                  id={datePanelId}
+                  onDismiss={close}
+                  ignoreDismissIf={(target) =>
+                    target instanceof Element && Boolean(target.closest(CALENDAR_PICKER_SUBPOPOVER_SELECTOR))
+                  }
+                  aria-label="Date and calendar"
+                  className="animate-fade-in z-50 rounded-xl border border-slate-200 bg-white p-2 text-left shadow-xl shadow-slate-900/10 ring-1 ring-slate-100 sm:p-3"
+                >
+                  {datePickerPanel}
+                </ClampedFixedDropdown>
+              </div>
+              <button
+                type="button"
+                onClick={onNextDate ?? (() => onDateChange(shiftDate(date, 1)))}
+                className={compact
+                  ? 'inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 shadow-sm hover:bg-slate-50 hover:text-slate-800'
+                  : 'inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 shadow-sm hover:bg-slate-50 hover:text-slate-800 sm:h-9 sm:w-9'}
+                aria-label="Next day"
               >
-                {datePickerPanel}
-              </ClampedFixedDropdown>
+                <svg className={compact ? 'h-4 w-4' : 'h-5 w-5'} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
+                </svg>
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={onNextDate ?? (() => onDateChange(shiftDate(date, 1)))}
-              className={compact
-                ? 'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 shadow-sm hover:bg-slate-50 hover:text-slate-800'
-                : 'inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 shadow-sm hover:bg-slate-50 hover:text-slate-800 sm:h-9 sm:w-9'}
-              aria-label="Next day"
-            >
-              <svg className={compact ? 'h-4 w-4' : 'h-5 w-5'} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
-              </svg>
-            </button>
           </div>
           <button
             type="button"

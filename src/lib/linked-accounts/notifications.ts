@@ -207,6 +207,64 @@ export async function notifyPermissionReduced(
   });
 }
 
+export async function notifyPermissionIncreased(
+  admin: SupabaseClient,
+  venueId: string,
+  otherVenueName: string,
+  changeBullets: string[],
+): Promise<void> {
+  await notifyVenue(admin, venueId, `${otherVenueName} expanded your linked-account access`, {
+    heading: 'Linked-account access expanded',
+    paragraphs: [
+      `${otherVenueName} has expanded the access granted to your venue on your shared link.`,
+      'Your updated access is shown below and is effective immediately.',
+    ],
+    bullets: changeBullets,
+    ctaLabel: 'View linked accounts',
+    ctaUrl: settingsUrl(),
+  });
+}
+
+export async function notifyPermissionChangeAccepted(
+  admin: SupabaseClient,
+  proposerVenueId: string,
+  responderVenueName: string,
+): Promise<void> {
+  await notifyVenue(
+    admin,
+    proposerVenueId,
+    `${responderVenueName} accepted your permission change`,
+    {
+      heading: 'Permission change accepted',
+      paragraphs: [
+        `${responderVenueName} accepted the permission change you proposed. The new permissions are now active.`,
+      ],
+      ctaLabel: 'View linked accounts',
+      ctaUrl: settingsUrl(),
+    },
+  );
+}
+
+export async function notifyPermissionChangeDeclined(
+  admin: SupabaseClient,
+  proposerVenueId: string,
+  responderVenueName: string,
+): Promise<void> {
+  await notifyVenue(
+    admin,
+    proposerVenueId,
+    `${responderVenueName} declined your permission change`,
+    {
+      heading: 'Permission change declined',
+      paragraphs: [
+        `${responderVenueName} declined the permission change you proposed. The existing permissions remain in force.`,
+      ],
+      ctaLabel: 'View linked accounts',
+      ctaUrl: settingsUrl(),
+    },
+  );
+}
+
 /**
  * §6.7 foreseeable-lapse warning: sent ~7 days before a linked venue's
  * subscription is expected to lapse, to every venue linked to it.
