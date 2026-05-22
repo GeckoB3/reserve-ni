@@ -189,6 +189,10 @@ function linkedBookingToDashboardRow(
     guest_attendance_confirmed_at: lb.guestAttendanceConfirmedAt ?? null,
     staff_attendance_confirmed_at: lb.staffAttendanceConfirmedAt ?? null,
     booking_model: lb.bookingModel ?? null,
+    experience_event_id: lb.experienceEventId ?? null,
+    class_instance_id: lb.classInstanceId ?? null,
+    event_session_id: lb.eventSessionId ?? null,
+    resource_id: lb.resourceId ?? null,
     booking_item_name: timeOnly ? null : (lb.serviceName ?? null),
     _linked: {
       sourceVenueId: venue.venueId,
@@ -465,6 +469,8 @@ export function AppointmentBookingsDashboard({
     bookingId: string;
     snapshot: BookingDetailPanelSnapshot;
     isAppointment: boolean;
+    venueId: string;
+    linkedAct?: import('@/lib/linked-accounts/types').LinkActionLevel;
   } | null>(null);
   const [detailById, setDetailById] = useState<Record<string, BookingDetailLite>>({});
   const [detailLoadingIds, setDetailLoadingIds] = useState<string[]>([]);
@@ -865,6 +871,14 @@ export function AppointmentBookingsDashboard({
     return map;
   }, [linkedVenues]);
 
+  const linkedVenueTimezoneById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const venue of linkedVenues) {
+      map.set(venue.venueId, venue.venueTimezone?.trim() || venueTimezone);
+    }
+    return map;
+  }, [linkedVenues, venueTimezone]);
+
   const filteredLinkedBookings = useMemo(() => {
     let list = flattenLinkedDashboardRows(linkedVenues);
     list = list.filter((b) => matchesAppointmentStatusFilter(b, selectedStatusFilter));
@@ -1239,7 +1253,9 @@ export function AppointmentBookingsDashboard({
         if (prev.includes(id)) return [];
         return [id];
       });
-      const row = bookings.find((b) => b.id === id);
+      const row =
+        bookings.find((b) => b.id === id) ??
+        scopeBookings.find((b) => b.id === id);
       const fromCache = bookingDetailLiteFromCachePayload(id, peekVenueBookingDetail(id));
       const fromRow = row ? bookingDetailLiteFromListRow(row) : undefined;
       const seed = fromCache ?? fromRow;
@@ -1248,7 +1264,7 @@ export function AppointmentBookingsDashboard({
       }
       void loadBookingDetail(id);
     },
-    [bookings, loadBookingDetail, peekVenueBookingDetail],
+    [bookings, scopeBookings, loadBookingDetail, peekVenueBookingDetail],
   );
 
   function SortControl() {
@@ -1342,9 +1358,12 @@ export function AppointmentBookingsDashboard({
 
   function renderAppointmentRow(b: DashboardRegistryRow) {
     const linkedMeta = b._linked;
-    const linkedReadOnly =
-      linkedMeta != null && (linkedMeta.visibility === 'time_only' || !linkedMeta.editable);
+    const linkedTimeOnly = linkedMeta?.visibility === 'time_only';
+    const linkedFullDetails = linkedMeta?.visibility === 'full_details';
     const rowVenueId = linkedMeta?.sourceVenueId ?? venueId;
+    const rowVenueTimezone = linkedMeta
+      ? linkedVenueTimezoneById.get(linkedMeta.sourceVenueId) ?? venueTimezone
+      : venueTimezone;
     const cid = columnIdForRegistry(b);
     const sid = serviceIdForRegistry(b);
     const pracName = linkedMeta
@@ -1383,27 +1402,27 @@ export function AppointmentBookingsDashboard({
         key={b.id}
         role="button"
         tabIndex={0}
-        aria-expanded={linkedReadOnly ? undefined : expanded}
-        aria-controls={linkedReadOnly ? undefined : `appt-expand-${b.id}`}
+        aria-expanded={linkedTimeOnly ? undefined : expanded}
+        aria-controls={linkedTimeOnly ? undefined : `appt-expand-${b.id}`}
         onClick={() => {
-          if (linkedReadOnly) {
+          if (linkedTimeOnly) {
             openLinkedReadOnlyDetail();
             return;
           }
           toggleExpanded(b.id);
         }}
-        {...(linkedReadOnly ? {} : bindDetailPrefetchHandlers(b.id, prefetchBookingDetail))}
+        {...(linkedTimeOnly ? {} : bindDetailPrefetchHandlers(b.id, prefetchBookingDetail))}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();
-            if (linkedReadOnly) {
+            if (linkedTimeOnly) {
               openLinkedReadOnlyDetail();
               return;
             }
             toggleExpanded(b.id);
           }
         }}
-        className={`cursor-pointer rounded-xl border border-slate-200 bg-white px-2 py-2 shadow-sm shadow-slate-900/[0.04] ring-1 ring-slate-900/[0.06] transition-[border-color,box-shadow,background-color] duration-150 sm:px-3 sm:py-3 border-l-[3px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/35 focus-visible:ring-offset-2 ${statusBorderClass(b)} ${expanded && !linkedReadOnly ? 'border-slate-300 bg-brand-50/50 shadow-md ring-brand-900/15' : 'hover:border-slate-300 hover:bg-slate-50/90 hover:shadow-md hover:shadow-slate-900/[0.07] hover:ring-slate-900/[0.09]'}`}
+        className={`cursor-pointer rounded-xl border border-slate-200 bg-white px-2 py-2 shadow-sm shadow-slate-900/[0.04] ring-1 ring-slate-900/[0.06] transition-[border-color,box-shadow,background-color] duration-150 sm:px-3 sm:py-3 border-l-[3px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/35 focus-visible:ring-offset-2 ${statusBorderClass(b)} ${expanded && !linkedTimeOnly ? 'border-slate-300 bg-brand-50/50 shadow-md ring-brand-900/15' : 'hover:border-slate-300 hover:bg-slate-50/90 hover:shadow-md hover:shadow-slate-900/[0.07] hover:ring-slate-900/[0.09]'}`}
       >
         <div className="flex min-h-[2.75rem] min-w-0 items-center gap-1.5 sm:min-h-[3rem] sm:gap-2">
           <div onClick={(e) => e.stopPropagation()} className="flex shrink-0 items-center">
@@ -1538,7 +1557,7 @@ export function AppointmentBookingsDashboard({
             </div>
           </div>
           <svg
-            className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${expanded && !linkedReadOnly ? 'rotate-180' : ''}`}
+            className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${expanded && !linkedTimeOnly ? 'rotate-180' : ''}`}
             fill="none"
             viewBox="0 0 24 24"
             strokeWidth={2}
@@ -1548,7 +1567,7 @@ export function AppointmentBookingsDashboard({
             <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
           </svg>
         </div>
-        {expanded && !linkedReadOnly && (
+        {expanded && (!linkedMeta || linkedFullDetails) && (
           <div
             id={`appt-expand-${b.id}`}
             onClick={(e) => e.stopPropagation()}
@@ -1562,7 +1581,7 @@ export function AppointmentBookingsDashboard({
               tableManagementEnabled={bookingModel === 'table_reservation'}
               venueId={rowVenueId}
               venueCurrency={currency}
-              venueTimezone={venueTimezone}
+              venueTimezone={rowVenueTimezone}
               guestHistoryListRefresh={guestHistoryRevisionById[b.id] ?? 0}
               relatedBookingsStackDepth={0}
               onOpenRelatedGuestBooking={(payload) => {
@@ -1570,6 +1589,8 @@ export function AppointmentBookingsDashboard({
                   bookingId: payload.bookingId,
                   snapshot: payload.snapshot,
                   isAppointment: !isTableReservationBooking(payload.row),
+                  venueId: rowVenueId,
+                  linkedAct: linkedFullDetails ? linkedMeta?.action : undefined,
                 });
               }}
               draftMessage={draftMessage}
@@ -1591,6 +1612,7 @@ export function AppointmentBookingsDashboard({
               }}
               venueStaffBookingModel={primaryBookingModel}
               venueStaffEnabledBookingModels={enabledModels}
+              linkedAct={linkedFullDetails ? linkedMeta?.action : undefined}
             />
           </div>
         )}
@@ -2062,7 +2084,7 @@ export function AppointmentBookingsDashboard({
         <BookingDetailPanel
           key={relatedGuestHistoryBooking.bookingId}
           bookingId={relatedGuestHistoryBooking.bookingId}
-          venueId={venueId}
+          venueId={relatedGuestHistoryBooking.venueId}
           venueCurrency={currency}
           initialSnapshot={relatedGuestHistoryBooking.snapshot}
           isAppointment={relatedGuestHistoryBooking.isAppointment}
@@ -2070,6 +2092,7 @@ export function AppointmentBookingsDashboard({
           anchor={null}
           stackDepth={0}
           venueTimezone={venueTimezone}
+          linkedAct={relatedGuestHistoryBooking.linkedAct}
           onClose={() => setRelatedGuestHistoryBooking(null)}
           onUpdated={() => {
             setGuestHistoryRevisionById((prev) => {

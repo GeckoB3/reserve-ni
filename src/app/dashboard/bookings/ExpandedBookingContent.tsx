@@ -244,6 +244,7 @@ export function ExpandedBookingContent({
   relatedBookingsStackDepth = 0,
   venueStaffBookingModel,
   venueStaffEnabledBookingModels,
+  linkedAct,
 }: {
   booking: BookingRow;
   detail: BookingDetailLite | undefined;
@@ -269,6 +270,8 @@ export function ExpandedBookingContent({
   /** Venue primary + enabled models for staff “New booking” default tab (falls back to this row’s inferred model). */
   venueStaffBookingModel?: BookingModel;
   venueStaffEnabledBookingModels?: BookingModel[];
+  /** When set, restricts toolbar actions to what the linked-account grant allows (§5.3). */
+  linkedAct?: import('@/lib/linked-accounts/types').LinkActionLevel;
 }) {
   const [showMessageBox, setShowMessageBox] = useState(false);
   const [guestMessageChannel, setGuestMessageChannel] = useState<GuestMessageChannel>('email');
@@ -444,9 +447,13 @@ export function ExpandedBookingContent({
     [booking, rowOverlay],
   );
 
-  const canStaffModifyBooking = ['Pending', 'Booked', 'Confirmed', 'Seated'].includes(
-    String(effectiveBooking.status),
-  );
+  const linkedViewOnly = linkedAct === 'none';
+  const linkedLimitedEdit = linkedAct === 'edit_existing';
+  const linkedBookingContext = linkedAct != null;
+
+  const canStaffModifyBooking =
+    !linkedViewOnly &&
+    ['Pending', 'Booked', 'Confirmed', 'Seated'].includes(String(effectiveBooking.status));
 
   const staffNewBookingPrimary = venueStaffBookingModel ?? inferredBookingModel;
   const staffNewBookingEnabledModels = useMemo(
@@ -491,8 +498,10 @@ export function ExpandedBookingContent({
   const rebookGuestPrefill = staffNewBookingGuestContacts;
 
   const canExpandStaffRebook = useMemo(
-    () => buildStaffRebookBootstrapFromBookingSource(booking, staffNewBookingGuestContacts) !== null,
-    [booking, staffNewBookingGuestContacts],
+    () =>
+      (!linkedAct || linkedAct === 'create_edit_cancel') &&
+      buildStaffRebookBootstrapFromBookingSource(booking, staffNewBookingGuestContacts) !== null,
+    [booking, staffNewBookingGuestContacts, linkedAct],
   );
 
 
@@ -513,9 +522,10 @@ export function ExpandedBookingContent({
     window.requestAnimationFrame(() => messageTextareaRef.current?.focus());
   }, []);
   const contactsGuestId = profileGuestId;
-  const contactsHref = contactsGuestId
-    ? `/dashboard/contacts?guest=${encodeURIComponent(contactsGuestId)}`
-    : null;
+  const contactsHref =
+    contactsGuestId && !linkedBookingContext
+      ? `/dashboard/contacts?guest=${encodeURIComponent(contactsGuestId)}`
+      : null;
   const visitCount =
     activeDetail?.guest?.visit_count ?? booking.guest_visit_count ?? profileGuest?.visit_count ?? 0;
   const previousVisitDate = activeDetail?.guest?.last_visit_date ?? profileGuest?.last_visit_date ?? null;
@@ -628,7 +638,9 @@ export function ExpandedBookingContent({
     }
   };
 
-  const canCancel = canTransitionBookingStatus(effectiveBooking.status, 'Cancelled');
+  const canCancel =
+    canTransitionBookingStatus(effectiveBooking.status, 'Cancelled') &&
+    (!linkedAct || linkedAct === 'create_edit_cancel');
   const canNoShow = canTransitionBookingStatus(effectiveBooking.status, 'No-Show');
   const canUndoNoShow =
     effectiveBooking.status === 'No-Show' &&
@@ -751,6 +763,16 @@ export function ExpandedBookingContent({
       onClick={(e) => e.stopPropagation()}
       onKeyDown={(e) => e.stopPropagation()}
     >
+      {linkedViewOnly ? (
+        <p className="rounded-lg border border-sky-200 bg-sky-50/80 px-3 py-2 text-xs text-sky-900">
+          Linked booking — view only. You can see full details here but cannot edit, reschedule or
+          cancel this booking.
+        </p>
+      ) : linkedLimitedEdit ? (
+        <p className="rounded-lg border border-amber-200/80 bg-amber-50/60 px-3 py-2 text-xs text-amber-950">
+          Linked booking — you can edit existing bookings but cannot create new ones or cancel.
+        </p>
+      ) : null}
       <SectionCard
         className={`rounded-xl ring-1 ring-slate-900/[0.04] ${detailHydrating ? 'opacity-[0.98]' : ''}`}
         aria-busy={detailHydrating}
@@ -844,17 +866,18 @@ export function ExpandedBookingContent({
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
-                    openGuestMessageComposer('email');
+                    if (!linkedViewOnly) openGuestMessageComposer('email');
                   }}
-                  className="inline-flex min-h-8 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 text-[11px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+                  disabled={linkedViewOnly}
+                  className="inline-flex min-h-8 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 text-[11px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:cursor-default disabled:opacity-50"
                 >
                   Email
                 </button>
               ) : null}
             </div>
           </div>
-          <div className="mt-2 grid grid-cols-2 gap-1.5 sm:grid-cols-4">
-            <div className="min-w-0 rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
+          <div className="mt-2 grid grid-cols-1 gap-1.5 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
               <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Email</p>
               {guestEmail ? (
                 <button
@@ -863,7 +886,7 @@ export function ExpandedBookingContent({
                     e.stopPropagation();
                     openGuestMessageComposer('email');
                   }}
-                  className="block min-w-0 break-words text-left text-xs font-bold leading-snug text-slate-800 [overflow-wrap:anywhere] hover:text-brand-700"
+                  className="block w-full break-words text-left text-xs font-bold leading-snug text-slate-800 [overflow-wrap:anywhere] hover:text-brand-700"
                 >
                   {guestEmail}
                 </button>
@@ -871,12 +894,12 @@ export function ExpandedBookingContent({
                 <p className="text-xs font-bold leading-snug text-slate-400">Not provided</p>
               )}
             </div>
-            <div className="min-w-0 rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
+            <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
               <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Telephone</p>
               {guestPhone ? (
                 <a
                   href={`tel:${guestPhone}`}
-                  className="block min-w-0 break-words text-xs font-bold leading-snug text-slate-800 tabular-nums [overflow-wrap:anywhere] hover:text-brand-700"
+                  className="block w-full break-words text-xs font-bold leading-snug text-slate-800 tabular-nums [overflow-wrap:anywhere] hover:text-brand-700"
                 >
                   {guestPhone}
                 </a>
@@ -884,26 +907,26 @@ export function ExpandedBookingContent({
                 <p className="text-xs font-bold leading-snug text-slate-400">Not provided</p>
               )}
             </div>
-            <div className="min-w-0 rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
+            <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
               <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Previous visit</p>
-              <p className="truncate text-xs font-bold leading-snug text-slate-800">
+              <p className="break-words text-xs font-bold leading-snug text-slate-800 [overflow-wrap:anywhere]">
                 {previousVisitDate ? formatDateNice(previousVisitDate) : 'None yet'}
               </p>
             </div>
-            <div className="min-w-0 rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
+            <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
               <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Visits</p>
-              <p className="truncate text-xs font-bold leading-snug text-slate-800">
+              <p className="break-words text-xs font-bold leading-snug text-slate-800 [overflow-wrap:anywhere]">
                 {visitCount > 0 ? `${visitCount} visit${visitCount === 1 ? '' : 's'}` : 'First visit'}
               </p>
             </div>
             {tableStyle ? (
               <div className={`rounded-lg border px-2 py-1.5 ${tableNames.length > 0 ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'}`}>
                 <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Table</p>
-                <p className={`truncate text-xs font-bold ${tableNames.length > 0 ? 'text-emerald-900' : 'text-amber-800'}`}>
+                <p className={`break-words text-xs font-bold leading-snug [overflow-wrap:anywhere] ${tableNames.length > 0 ? 'text-emerald-900' : 'text-amber-800'}`}>
                   {tableNames.length > 0 ? tableNames.join(' + ') : tableManagementEnabled ? 'Unassigned' : 'N/A'}
                 </p>
                 {activeDetail?.combination_staff_notes ? (
-                  <p className="mt-1 line-clamp-2 text-[10px] font-medium leading-snug text-emerald-800">
+                  <p className="mt-1 break-words text-[10px] font-medium leading-snug text-emerald-800 [overflow-wrap:anywhere]">
                     {activeDetail.combination_staff_notes}
                   </p>
                 ) : null}
@@ -911,12 +934,12 @@ export function ExpandedBookingContent({
             ) : booking.party_size > 1 ? (
               <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
                 <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Party</p>
-                <p className="truncate text-xs font-bold text-slate-700">{booking.party_size} people</p>
+                <p className="break-words text-xs font-bold leading-snug text-slate-700 [overflow-wrap:anywhere]">{booking.party_size} people</p>
               </div>
             ) : null}
             <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
               <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Deposit</p>
-              <p className={`truncate text-xs font-bold ${effectiveBooking.deposit_status === 'Paid' ? 'text-emerald-700' : effectiveBooking.deposit_status === 'Pending' ? 'text-amber-700' : 'text-slate-700'}`}>
+              <p className={`break-words text-xs font-bold leading-snug [overflow-wrap:anywhere] ${effectiveBooking.deposit_status === 'Paid' ? 'text-emerald-700' : effectiveBooking.deposit_status === 'Pending' ? 'text-amber-700' : 'text-slate-700'}`}>
                 {effectiveBooking.deposit_status === 'Not Required'
                   ? 'None'
                   : effectiveBooking.deposit_status === 'Paid' && depositAmtStr
@@ -927,19 +950,19 @@ export function ExpandedBookingContent({
             {activeDetail?.checked_in_at ? (
               <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
                 <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Checked in</p>
-                <p className="truncate text-xs font-bold text-slate-700">{formatRelative(activeDetail.checked_in_at)}</p>
+                <p className="break-words text-xs font-bold leading-snug text-slate-700 [overflow-wrap:anywhere]">{formatRelative(activeDetail.checked_in_at)}</p>
               </div>
             ) : null}
             <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
               <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Source</p>
-              <p className="truncate text-xs font-bold text-slate-700">{booking.source}</p>
+              <p className="break-words text-xs font-bold leading-snug text-slate-700 [overflow-wrap:anywhere]">{booking.source}</p>
             </div>
             <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
               <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Ref</p>
               <button
                 type="button"
                 onClick={() => { void copyBookingRef(); }}
-                className="truncate text-left text-xs font-bold text-slate-700 hover:text-brand-700"
+                className="break-words text-left text-xs font-bold leading-snug text-slate-700 [overflow-wrap:anywhere] hover:text-brand-700"
                 title={refCopied ? 'Copied!' : 'Copy booking reference'}
                 aria-label={refCopied ? 'Booking reference copied' : 'Copy booking reference'}
               >
@@ -950,7 +973,8 @@ export function ExpandedBookingContent({
         </SectionCard.Body>
       </SectionCard>
 
-      {/* Actions bar */}
+      {/* Actions bar — hidden for linked view-only grants (§5.3). */}
+      {!linkedViewOnly ? (
       <div
         className={bookingExpandActionsBarClass}
         onClick={(e) => e.stopPropagation()}
@@ -1053,6 +1077,7 @@ export function ExpandedBookingContent({
               </button>
             )}
 
+            {!linkedBookingContext ? (
             <button
               type="button"
               aria-label="New booking"
@@ -1076,6 +1101,7 @@ export function ExpandedBookingContent({
               </svg>
               New
             </button>
+            ) : null}
 
             {canExpandStaffRebook && (
               <button
@@ -1144,6 +1170,7 @@ export function ExpandedBookingContent({
           </div>
         </div>
       </div>
+      ) : null}
 
       {profileGuestId ? (
         <details className={bookingExpandAccordionDetailsClass}>
@@ -1162,7 +1189,7 @@ export function ExpandedBookingContent({
             <GuestTagEditor
               tags={Array.isArray(activeDetail?.guest?.tags) ? activeDetail!.guest!.tags : []}
               venueId={venueId}
-              disabled={!profileGuestId || detailHydrating}
+              disabled={!profileGuestId || detailHydrating || linkedViewOnly}
               onTagsChange={async (nextTags) => {
                 if (!profileGuestId) return;
                 const res = await fetch(`/api/venue/guests/${profileGuestId}`, {
@@ -1181,7 +1208,7 @@ export function ExpandedBookingContent({
               embedded
               guestId={profileGuestId}
               value={activeDetail?.guest?.customer_profile_notes ?? profileGuest?.customer_profile_notes ?? null}
-              disabled={!profileGuestId || detailHydrating}
+              disabled={!profileGuestId || detailHydrating || linkedViewOnly}
               onSaved={onDetailUpdated}
             />
             <div className="border-t border-slate-100 pt-2">
@@ -1202,6 +1229,7 @@ export function ExpandedBookingContent({
                 notesVariant={notesVariant}
                 compact
                 embedded
+                disabled={linkedViewOnly}
               />
             </div>
           </div>
@@ -1217,6 +1245,7 @@ export function ExpandedBookingContent({
             currentBookingId={booking.id}
             guestDisplayNameForSnapshots={guestName}
             venueTimeZone={venueTimezone}
+            historyVenueId={linkedBookingContext ? venueId : undefined}
             canOpenNested={Boolean(onOpenRelatedGuestBooking) && relatedBookingsStackDepth + 1 < BOOKING_DETAIL_MAX_STACK_DEPTH}
             onOpenBookingDetail={(payload) => {
               onOpenRelatedGuestBooking?.(payload);
@@ -1224,10 +1253,12 @@ export function ExpandedBookingContent({
             listRefreshKey={guestHistoryListRefresh}
             rebookGuestPrefill={rebookGuestPrefill}
             onStaffBookingCreated={onDetailUpdated}
+            allowRebook={!linkedAct || linkedAct === 'create_edit_cancel'}
           />
         </div>
       ) : null}
 
+      {!linkedViewOnly ? (
       <details
         className={bookingExpandAccordionDetailsClass}
         open={showMessageBox}
@@ -1324,6 +1355,7 @@ export function ExpandedBookingContent({
           ) : null}
         </div>
       </details>
+      ) : null}
 
       <details className={bookingExpandAccordionDetailsClass}>
         <summary className={bookingExpandAccordionSummaryClass}>
@@ -1334,6 +1366,7 @@ export function ExpandedBookingContent({
           </svg>
         </summary>
         <div className={`${bookingExpandAccordionBodyClass} space-y-2`}>
+          {!linkedViewOnly ? (
           <div className="flex flex-wrap gap-1">
             {effectiveBooking.deposit_status !== 'Paid' && effectiveBooking.deposit_status !== 'Refunded' ? (
               <>
@@ -1347,6 +1380,9 @@ export function ExpandedBookingContent({
             ) : null}
             <button type="button" disabled={inlineActionLoading !== null || statusActionPending} onClick={() => { void resendConfirmation(); }} className="rounded-lg border border-slate-200 bg-white px-[9px] py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">Resend confirmation</button>
           </div>
+          ) : (
+            <p className="text-[11px] text-slate-500">Deposit status: {effectiveBooking.deposit_status}</p>
+          )}
           {activeDetail?.cancellation_deadline ? (
             <p className="text-[11px] text-slate-500">Cancellation deadline: {formatRelative(activeDetail.cancellation_deadline)}</p>
           ) : null}
@@ -1376,6 +1412,7 @@ export function ExpandedBookingContent({
             onSaved={onDetailUpdated}
             notesVariant={notesVariant}
             compact
+            disabled={linkedViewOnly}
           />
           {booking.occasion ? (
             <p className="mt-2 rounded-lg border border-violet-100 bg-violet-50 px-2 py-1.5 text-xs font-semibold text-violet-800">
@@ -1585,6 +1622,7 @@ export function ExpandedBookingContent({
           venueId={venueId}
           venueCurrency={venueCurrency}
           tableManagementEnabled={tableManagementEnabled}
+          linkedAct={linkedAct}
           booking={booking}
           detail={
             activeDetail

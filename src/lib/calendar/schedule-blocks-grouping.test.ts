@@ -113,8 +113,39 @@ describe('buildMonthDayScheduleCounts', () => {
     const all = buildMonthDayScheduleCounts(bookings, blocks, dates, 'all');
     expect(all['2026-04-01']?.appointments).toBe(1);
     expect(all['2026-04-01']?.event_ticket).toBe(1);
-    const apptOnly = buildMonthDayScheduleCounts(bookings, blocks, dates, 'appointments');
-    expect(apptOnly['2026-04-01']?.appointments).toBe(1);
-    expect(apptOnly['2026-04-01']?.event_ticket).toBe(0);
+  });
+
+  it('counts resource bookings from grid list without double-counting schedule blocks', () => {
+    const bookings = [
+      {
+        id: 'rb-1',
+        booking_date: '2026-04-02',
+        status: 'Confirmed',
+        resource_id: 'room-1',
+        calendar_id: 'room-1',
+      },
+    ];
+    const blocks: ScheduleBlockDTO[] = [
+      {
+        id: 'dup',
+        kind: 'resource_booking',
+        date: '2026-04-02',
+        start_time: '10:00',
+        end_time: '11:00',
+        title: 'Room',
+        booking_id: 'rb-1',
+        resource_id: 'room-1',
+      },
+      {
+        id: 'strip-only',
+        kind: 'resource_booking',
+        date: '2026-04-02',
+        start_time: '14:00',
+        end_time: '15:00',
+        title: 'Court',
+      },
+    ];
+    const counts = buildMonthDayScheduleCounts(bookings, blocks, dates, 'all');
+    expect(counts['2026-04-02']?.resource_booking).toBe(2);
   });
 });

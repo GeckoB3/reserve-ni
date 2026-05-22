@@ -39,10 +39,16 @@ function SectionCardHeader({
         {eyebrow ? (
           <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">{eyebrow}</p>
         ) : null}
-        {title ? <h2 className="mt-1 text-lg font-bold tracking-tight text-slate-900 sm:text-xl">{title}</h2> : null}
-        {description ? <p className="mt-1 text-sm text-slate-600">{description}</p> : null}
+        {title ? (
+          <h2 className="mt-1 break-words text-lg font-bold tracking-tight text-slate-900 sm:text-xl">{title}</h2>
+        ) : null}
+        {description ? <p className="mt-1 break-words text-sm text-slate-600">{description}</p> : null}
       </div>
-      {right ? <div className="flex shrink-0 flex-wrap items-center gap-2">{right}</div> : null}
+      {right ? (
+        <div className="flex w-full min-w-0 flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
+          {right}
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -546,7 +546,9 @@ async function handleAppointmentAvailability(
   const variantId = searchParams.get('variant_id');
   const durationParam = searchParams.get('duration_minutes');
   const waitlistOfferId = searchParams.get('waitlist_offer');
-  let skipPastSlotFilter = false;
+  const excludeBookingId = searchParams.get('exclude_booking_id') ?? undefined;
+  let skipPastSlotFilter =
+    searchParams.get('skip_past_slots') === '1' || searchParams.get('skip_past_slots') === 'true';
 
   if (waitlistOfferId) {
     const offer = await loadActiveWaitlistOfferForGuestAccess(supabase, waitlistOfferId, venueId);
@@ -594,6 +596,10 @@ async function handleAppointmentAvailability(
     if (phantomBookings.length > 0) {
       input.phantomBookings = phantomBookings;
     }
+    if (excludeBookingId) {
+      const excludeLc = excludeBookingId.toLowerCase();
+      input.existingBookings = input.existingBookings.filter((b) => b.id.toLowerCase() !== excludeLc);
+    }
     if (variantOverride && serviceId) {
       applyVariantToAppointmentInput({ services: input.services, serviceId, variant: variantOverride });
     }
@@ -616,6 +622,7 @@ async function handleAppointmentAvailability(
             serviceId,
             slot.start_time,
             endHHmm,
+            excludeBookingId,
           ).ok;
         }),
       }));

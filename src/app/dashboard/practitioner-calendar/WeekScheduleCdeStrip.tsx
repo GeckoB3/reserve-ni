@@ -10,6 +10,7 @@ interface Props {
   onBookingClick: (bookingId: string, anchor: { x: number; y: number }) => void;
   onClassInstanceClick?: (block: ScheduleBlockDTO, anchor: { x: number; y: number }) => void;
   onEventInstanceClick?: (block: ScheduleBlockDTO) => void;
+  onResourceBookingClick?: (block: ScheduleBlockDTO, anchor: { x: number; y: number }) => void;
 }
 
 /**
@@ -21,11 +22,12 @@ export function WeekScheduleCdeStrip({
   onBookingClick,
   onClassInstanceClick,
   onEventInstanceClick,
+  onResourceBookingClick,
 }: Props) {
   return (
     <tr className="border-t border-slate-200 bg-slate-50/80">
       <td className="sticky left-0 z-10 bg-slate-50 px-3 py-2 align-top text-xs font-semibold text-slate-600">
-        Events
+        Events &amp; resources
       </td>
       {weekDays.map((d) => {
         const dayBlocks = (blocksByDate.get(d) ?? []).filter((b) => b.status !== 'Cancelled');
@@ -79,6 +81,18 @@ export function WeekScheduleCdeStrip({
                         key={b.id}
                         type="button"
                         onClick={() => onEventInstanceClick(b)}
+                        className="block w-full text-left"
+                      >
+                        {body}
+                      </button>
+                    );
+                  }
+                  if (b.kind === 'resource_booking' && b.booking_id && b.resource_id && onResourceBookingClick) {
+                    return (
+                      <button
+                        key={b.id}
+                        type="button"
+                        onClick={(e) => onResourceBookingClick(b, { x: e.clientX, y: e.clientY })}
                         className="block w-full text-left"
                       >
                         {body}

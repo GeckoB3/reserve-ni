@@ -28,6 +28,28 @@ import {
 } from '@/lib/booking/resource-booking-defaults';
 import type { WorkingHours } from '@/types/booking-models';
 import { useVenuePostgresLiveSync } from '@/lib/realtime/useVenuePostgresLiveSync';
+import { BookingDetailPanel } from '@/app/dashboard/bookings/BookingDetailPanel';
+import { bookingDetailPanelSnapshotFromListRow } from '@/lib/booking/booking-detail-from-row';
+import { ResourceBookingFlow } from '@/components/booking/ResourceBookingFlow';
+import { Dialog } from '@/components/ui/primitives/Dialog';
+import { mapApiVenueToVenuePublic } from '@/lib/booking/map-api-venue-to-public';
+import type { VenuePublic } from '@/components/booking/types';
+import { Button } from '@/components/ui/primitives/Button';
+import { cn } from '@/components/ui/primitives/cn';
+import {
+  BookingsDateToolbar,
+  fieldHintClass,
+  fieldInputClass,
+  fieldLabelClass,
+  fieldSelectClass,
+  FormStickyActions,
+  ResourceFormHeader,
+  ResourceFormSection,
+  ResourceMobileStrip,
+  ResourcePaymentCards,
+  WeekHoursEditor,
+  type ResourceListItem,
+} from './resource-timeline-ui';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -64,10 +86,15 @@ interface ResourceBooking {
   booking_end_time: string | null;
   status: string;
   guest_name: string;
+  guest_first_name?: string | null;
+  guest_last_name?: string | null;
+  guest_email?: string | null;
+  guest_phone?: string | null;
   party_size: number;
   deposit_amount_pence: number | null;
   deposit_status: string | null;
   resource_payment_requirement: ResourcePaymentRequirement | null;
+  resource_id?: string | null;
 }
 
 type DayHours = { enabled: boolean; start: string; end: string };
@@ -284,6 +311,7 @@ export function ResourceTimelineView({
 
   const [resources, setResources] = useState<Resource[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -338,11 +366,30 @@ export function ResourceTimelineView({
   const canAddCalendar = canAddCalendarColumn(calendarEntitlement, entitlementLoaded);
 
   // Bookings for selected resource
-  const [bookingsDate, setBookingsDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [bookingsDate, setBookingsDate] = useState(() => formatYmdLocal(new Date()));
   const [bookings, setBookings] = useState<ResourceBooking[]>([]);
   const [bookingsLoading, setBookingsLoading] = useState(false);
+  const [detailBookingId, setDetailBookingId] = useState<string | null>(null);
+  const [showResourceBooking, setShowResourceBooking] = useState(false);
+  const [resourceBookingSessionKey, setResourceBookingSessionKey] = useState(0);
+  const [resourceBookingVenue, setResourceBookingVenue] = useState<VenuePublic | null>(null);
+  const [resourceBookingVenueError, setResourceBookingVenueError] = useState<string | null>(null);
 
   const selected = useMemo(() => resources.find((r) => r.id === selectedId) ?? null, [resources, selectedId]);
+
+  const resourceListItems = useMemo((): ResourceListItem[] => {
+    return resources.map((r) => ({
+      id: r.id,
+      name: r.name,
+      resource_type: r.resource_type,
+      is_active: r.is_active,
+      hostLabel: hostCalendars.find((c) => c.id === r.display_on_calendar_id)?.name ?? 'Calendar',
+      metaLine: [
+        r.price_per_slot_pence != null ? `${formatPrice(r.price_per_slot_pence)}/slot` : 'Free',
+        resourcePaymentSummary(r, formatPrice),
+      ].join(' · '),
+    }));
+  }, [resources, hostCalendars, formatPrice]);
   const selectedHostCalendar = useMemo(
     () => hostCalendars.find((c) => c.id === formDisplayCalendarId) ?? null,
     [formDisplayCalendarId, hostCalendars],
@@ -366,13 +413,20 @@ export function ResourceTimelineView({
     const silent = opts?.silent ?? false;
     if (!silent) {
       setLoading(true);
+      setLoadError(null);
     }
     try {
       const res = await fetch('/api/venue/resources');
       const data = await res.json();
+      if (!res.ok) {
+        throw new Error((data as { error?: string }).error ?? 'Could not load resources');
+      }
       setResources(data.resources ?? []);
     } catch {
-      // ignore
+      if (!silent) {
+        setLoadError('We couldn’t load your resources. Check your connection and try again.');
+        setResources([]);
+      }
     } finally {
       if (!silent) {
         setLoading(false);
@@ -406,10 +460,15 @@ export function ResourceTimelineView({
             booking_end_time: b.booking_end_time ? (b.booking_end_time as string).slice(0, 5) : null,
             status: b.status as string,
             guest_name: (b.guest_name as string) ?? 'Guest',
+            guest_first_name: (b.guest_first_name as string | null) ?? null,
+            guest_last_name: (b.guest_last_name as string | null) ?? null,
+            guest_email: (b.guest_email as string | null) ?? null,
+            guest_phone: (b.guest_phone as string | null) ?? null,
             party_size: (b.party_size as number) ?? 1,
             deposit_amount_pence: (b.deposit_amount_pence as number | null) ?? null,
             deposit_status: (b.deposit_status as string | null) ?? null,
             resource_payment_requirement: (b.resource_payment_requirement as ResourcePaymentRequirement | null) ?? null,
+            resource_id: (b.resource_id as string | null) ?? selectedId,
           }))
           .sort((a, b) => a.booking_time.localeCompare(b.booking_time)),
       );
@@ -526,6 +585,65 @@ export function ResourceTimelineView({
   useEffect(() => {
     void fetchResourceBookings();
   }, [fetchResourceBookings]);
+
+  useEffect(() => {
+    if (!showResourceBooking || resourceBookingVenue) return;
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch('/api/venue');
+        const data = (await res.json()) as Record<string, unknown>;
+        if (!res.ok) {
+          if (!cancelled) {
+            setResourceBookingVenueError(typeof data.error === 'string' ? data.error : 'Could not load venue');
+          }
+          return;
+        }
+        if (!cancelled) {
+          setResourceBookingVenue(mapApiVenueToVenuePublic(data));
+          setResourceBookingVenueError(null);
+        }
+      } catch {
+        if (!cancelled) setResourceBookingVenueError('Could not load venue');
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [showResourceBooking, resourceBookingVenue]);
+
+  const detailBookingSnapshot = useMemo(() => {
+    if (!detailBookingId) return null;
+    const b = bookings.find((x) => x.id === detailBookingId);
+    if (!b) return null;
+    return bookingDetailPanelSnapshotFromListRow({
+      id: b.id,
+      booking_date: b.booking_date,
+      booking_time: b.booking_time,
+      booking_end_time: b.booking_end_time,
+      party_size: b.party_size,
+      status: b.status,
+      guest_name: b.guest_name,
+      guest_first_name: b.guest_first_name,
+      guest_last_name: b.guest_last_name,
+      guest_email: b.guest_email,
+      guest_phone: b.guest_phone,
+      deposit_status: b.deposit_status ?? undefined,
+      resource_id: b.resource_id ?? selectedId,
+      inferred_booking_model: 'resource_booking',
+      booking_model: 'resource_booking',
+      service_name: selected?.name ?? null,
+    });
+  }, [bookings, detailBookingId, selected, selectedId]);
+
+  const openResourceBookingDialog = useCallback(() => {
+    if (!selectedId) return;
+    setResourceBookingVenueError(null);
+    setResourceBookingSessionKey((k) => k + 1);
+    setShowResourceBooking(true);
+  }, [selectedId]);
 
   // Select first resource on load
   useEffect(() => {
@@ -867,45 +985,46 @@ export function ResourceTimelineView({
         title="Resource timeline"
         subtitle="Manage bookable assets, weekly hours, and upcoming reservations tied to team calendar columns."
         actions={
-          canManageResources ? (
-            <button
-              type="button"
-              onClick={openCreate}
-              className="rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700"
-            >
+          canManageResources && !showForm ? (
+            <Button type="button" size="lg" className="w-full sm:w-auto" onClick={openCreate}>
               + Add resource
-            </button>
+            </Button>
           ) : null
         }
       />
 
-      <SectionCard>
-        <SectionCard.Body className="!py-3 text-sm text-slate-600">
-          <p>
-            Resource bookings and free slots appear on the team calendar column you choose under Show on calendar when
-            editing a resource.{' '}
-            <Link href="/dashboard/calendar" className="font-semibold text-brand-600 underline hover:text-brand-800">
-              Open dashboard calendar
-            </Link>
-            {' · '}
-            <Link
-              href="/dashboard/calendar-availability?tab=calendars"
-              className="font-semibold text-brand-600 underline hover:text-brand-800"
-            >
-              Calendar availability
-            </Link>
-          </p>
-        </SectionCard.Body>
-      </SectionCard>
+      {!showForm ? (
+        <>
+          <SectionCard>
+            <SectionCard.Body className="!py-3 text-sm text-slate-600">
+              <p className="leading-relaxed">
+                Resource bookings and free slots appear on the team calendar column you choose under{' '}
+                <strong className="font-medium text-slate-800">Show on calendar</strong> when editing a resource.
+              </p>
+              <p className="mt-2 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-4">
+                <Link href="/dashboard/calendar" className="font-semibold text-brand-600 underline hover:text-brand-800">
+                  Open dashboard calendar
+                </Link>
+                <Link
+                  href="/dashboard/calendar-availability?tab=calendars"
+                  className="font-semibold text-brand-600 underline hover:text-brand-800"
+                >
+                  Calendar availability
+                </Link>
+              </p>
+            </SectionCard.Body>
+          </SectionCard>
 
-      {!isAdmin ? (
-        <SectionCard>
-          <SectionCard.Body className="!py-3 text-sm text-slate-600">
-            {linkedPractitionerIds.length === 0
-              ? 'Your account is not linked to a calendar yet. Ask an admin to assign at least one calendar before you can create, edit, or delete resources.'
-              : 'You can create, edit, or delete resources when they are shown on a calendar column you control (choose under Show on calendar). Admins can assign any column.'}
-          </SectionCard.Body>
-        </SectionCard>
+          {!isAdmin ? (
+            <SectionCard>
+              <SectionCard.Body className="!py-3 text-sm text-slate-600">
+                {linkedPractitionerIds.length === 0
+                  ? 'Your account is not linked to a calendar yet. Ask an admin to assign at least one calendar before you can create, edit, or delete resources.'
+                  : 'You can create, edit, or delete resources when they are shown on a calendar column you control (choose under Show on calendar). Admins can assign any column.'}
+              </SectionCard.Body>
+            </SectionCard>
+          ) : null}
+        </>
       ) : null}
     </div>
   );
@@ -914,8 +1033,8 @@ export function ResourceTimelineView({
     return (
       <div className="space-y-6">
         {pageChrome}
-        <div className="flex min-h-0 flex-col gap-6 lg:flex-row lg:items-start">
-          <div className="w-full shrink-0 lg:w-72 xl:w-80">
+        <div className="flex min-h-0 min-w-0 flex-col gap-6 overflow-x-hidden lg:flex-row lg:items-start">
+          <div className="hidden w-full shrink-0 lg:block lg:w-72 xl:w-80">
             <SectionCard>
               <SectionCard.Header eyebrow="Resources" title="All resources" />
               <SectionCard.Body className="space-y-3">
@@ -941,81 +1060,114 @@ export function ResourceTimelineView({
   }
 
   return (
-    <div className="space-y-6">
+    <div className="min-w-0 space-y-6 overflow-x-hidden">
       {pageChrome}
-      <div className="flex min-h-0 flex-col gap-6 lg:flex-row lg:items-start">
+      {loadError ? (
+        <div
+          role="alert"
+          className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
+        >
+          <p>{loadError}</p>
+          <button
+            type="button"
+            onClick={() => void fetchResources()}
+            className="mt-2 text-sm font-semibold text-red-900 underline underline-offset-2 hover:text-red-950"
+          >
+            Try again
+          </button>
+        </div>
+      ) : null}
+      <div className="flex min-w-0 flex-col gap-4 lg:flex-row lg:items-start lg:gap-6">
       {/* ─── Sidebar: resource list ─── */}
-      <div className="w-full shrink-0 lg:w-72 xl:w-80">
-        <SectionCard>
-          <SectionCard.Header
-            eyebrow="Directory"
-            title="All resources"
-            right={
-              canManageResources ? (
-                <button
-                  type="button"
-                  onClick={openCreate}
-                  className="min-h-10 rounded-xl bg-brand-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-700"
-                >
-                  + Add
-                </button>
-              ) : null
-            }
-          />
-          {resources.length === 0 ? (
-            <SectionCard.Body className="!py-8">
-              <EmptyState
-                title="No resources yet"
-                description="Create courts, rooms, or equipment your guests can book in fixed slots."
-                action={
-                  canManageResources ? (
+      <aside
+        className={cn(
+          'hidden min-w-0 shrink-0 lg:block lg:w-72 xl:w-80',
+          showForm && 'lg:hidden',
+        )}
+        aria-label="Resource directory"
+      >
+        <div className="lg:sticky lg:top-4 lg:max-h-[calc(100dvh-5rem)] lg:overflow-y-auto lg:overscroll-contain">
+          <SectionCard>
+            <SectionCard.Header
+              eyebrow="Directory"
+              title="All resources"
+              right={
+                canManageResources ? (
+                  <Button type="button" size="sm" onClick={openCreate}>
+                    + Add
+                  </Button>
+                ) : null
+              }
+            />
+            {resources.length === 0 ? (
+              <SectionCard.Body className="!py-8">
+                <EmptyState
+                  title="No resources yet"
+                  description="Create courts, rooms, or equipment your guests can book in fixed slots."
+                  action={
+                    canManageResources ? (
+                      <button
+                        type="button"
+                        onClick={openCreate}
+                        className="text-sm font-semibold text-brand-600 hover:text-brand-800"
+                      >
+                        Create your first resource
+                      </button>
+                    ) : undefined
+                  }
+                />
+              </SectionCard.Body>
+            ) : (
+              <ul className="divide-y divide-slate-100">
+                {resources.map((r) => (
+                  <li key={r.id}>
                     <button
                       type="button"
-                      onClick={openCreate}
-                      className="text-sm font-semibold text-brand-600 hover:text-brand-800"
+                      onClick={() => {
+                        setSelectedId(r.id);
+                        setShowForm(false);
+                      }}
+                      className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors ${
+                        selectedId === r.id && !showForm
+                          ? 'bg-brand-50/40 ring-1 ring-inset ring-brand-200'
+                          : 'hover:bg-slate-50'
+                      }`}
                     >
-                      Create your first resource
-                    </button>
-                  ) : undefined
-                }
-              />
-            </SectionCard.Body>
-          ) : (
-            <ul className="divide-y divide-slate-100">
-              {resources.map((r) => (
-                <li key={r.id}>
-                  <button
-                    type="button"
-                    onClick={() => { setSelectedId(r.id); setShowForm(false); }}
-                    className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors ${
-                      selectedId === r.id && !showForm
-                        ? 'bg-brand-50/40 ring-1 ring-inset ring-brand-200'
-                        : 'hover:bg-slate-50'
-                    }`}
-                  >
-                    <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${r.is_active ? 'bg-emerald-500' : 'bg-slate-300'}`} />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium text-slate-900">{r.name}</span>
-                      <span className="block truncate text-xs text-slate-500">
-                        {hostCalendars.find((c) => c.id === r.display_on_calendar_id)?.name ?? 'Calendar'}
-                        {r.resource_type ? ` · ${r.resource_type}` : ''}
-                        {r.price_per_slot_pence != null && ` · ${formatPrice(r.price_per_slot_pence)}/slot`}
-                        {` · ${resourcePaymentSummary(r, formatPrice)}`}
+                      <span
+                        className={`h-2.5 w-2.5 shrink-0 rounded-full ${r.is_active ? 'bg-emerald-500' : 'bg-slate-300'}`}
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium text-slate-900">{r.name}</span>
+                        <span className="block truncate text-xs text-slate-500">
+                          {hostCalendars.find((c) => c.id === r.display_on_calendar_id)?.name ?? 'Calendar'}
+                          {r.resource_type ? ` · ${r.resource_type}` : ''}
+                          {r.price_per_slot_pence != null && ` · ${formatPrice(r.price_per_slot_pence)}/slot`}
+                          {` · ${resourcePaymentSummary(r, formatPrice)}`}
+                        </span>
                       </span>
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </SectionCard>
-        {!isAdmin && (
-          <p className="mt-3 text-xs text-slate-500">Permission rules are explained in the note above.</p>
-        )}
-      </div>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </SectionCard>
+          {!isAdmin ? (
+            <p className="mt-3 text-xs text-slate-500">Permission rules are explained in the note above.</p>
+          ) : null}
+        </div>
+      </aside>
 
       {/* ─── Main panel ─── */}
       <div className="min-w-0 flex-1">
+        <ResourceMobileStrip
+          resources={resourceListItems}
+          selectedId={selectedId}
+          showForm={showForm}
+          onSelect={(id) => {
+            setSelectedId(id);
+            setShowForm(false);
+          }}
+        />
         {availabilityWarning && (
           <div
             className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950 shadow-sm"
@@ -1026,7 +1178,7 @@ export function ResourceTimelineView({
             <div className="mt-3 flex flex-wrap items-center gap-3">
               <Link
                 href="/dashboard/calendar-availability?tab=availability"
-                className="inline-flex min-h-10 items-center rounded-lg bg-amber-800 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-900"
+                className="inline-flex min-h-10 items-center rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700"
               >
                 Open Calendar availability
               </Link>
@@ -1041,63 +1193,68 @@ export function ResourceTimelineView({
           </div>
         )}
         {showForm ? (
-          /* ── Create / Edit form ── */
-          <SectionCard elevated>
-            <SectionCard.Header title={editingId ? 'Edit resource' : 'New resource'} />
-            <SectionCard.Body className="space-y-4">
-            {isAdmin && !editingId && (
-              <div className="mt-3 rounded-lg border border-blue-100 bg-blue-50/90 px-3 py-2.5 text-xs text-slate-700">
-                <p className="font-semibold text-slate-900">Calendar assignment and permissions</p>
-                <p className="mt-1.5 leading-relaxed text-slate-600">
-                  You can assign this resource to <strong>any</strong> team calendar column. Staff linked to a column can{' '}
-                  <strong>create</strong>, <strong>edit</strong>, and <strong>delete</strong> resources on that column
-                  only.
+          <div className="min-w-0 w-full space-y-5 pb-6">
+            <ResourceFormHeader
+              eyebrow={editingId ? 'Editing' : 'New resource'}
+              title={editingId ? formName || 'Resource' : 'Add a bookable resource'}
+              description="Courts, rooms, studios, and equipment guests reserve in time slots."
+              onBack={() => setShowForm(false)}
+            />
+
+            {isAdmin && !editingId ? (
+              <div className="rounded-xl border border-blue-100/90 bg-blue-50/80 px-4 py-3 text-sm text-slate-700">
+                <p className="font-semibold text-slate-900">Permissions</p>
+                <p className="mt-1 leading-relaxed">
+                  Assign any team calendar. Staff can only manage resources on calendars they control.
                 </p>
               </div>
-            )}
-            {!isAdmin && !editingId && linkedPractitionerIds.length > 0 && (
-              <p className="mt-3 text-xs leading-relaxed text-slate-600">
-                Choose a calendar column you control under <strong>Show on calendar</strong>. Only admins can assign a
-                resource to columns you do not manage or clear the calendar assignment.
+            ) : null}
+            {!isAdmin && !editingId && linkedPractitionerIds.length > 0 ? (
+              <p className="rounded-xl border border-slate-200/80 bg-slate-50/80 px-4 py-3 text-sm text-slate-600">
+                Pick a calendar you control under <strong>Show on calendar</strong>.
               </p>
-            )}
-            {!isAdmin && editingId && (
-              <p className="mt-3 text-xs leading-relaxed text-slate-600">
-                You can change this resource because it is shown on a calendar column you control. You may move it to
-                another column you control below. Only admins can clear the calendar assignment.
-              </p>
-            )}
+            ) : null}
 
-            {/* Basic info */}
-            <div className="mt-4 grid gap-4 sm:grid-cols-2">
-              <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600">Resource name *</label>
-                <input type="text" value={formName} onChange={(e) => setFormName(e.target.value)} placeholder="e.g. Room 1, Studio A" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
+            <ResourceFormSection
+              step={1}
+              title="Basics"
+              description="Name and type shown to guests and staff."
+            >
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <div className="min-w-0">
+                <label className={fieldLabelClass}>Resource name *</label>
+                <input
+                  type="text"
+                  value={formName}
+                  onChange={(e) => setFormName(e.target.value)}
+                  placeholder="e.g. Court 1, Studio A"
+                  className={fieldInputClass}
+                />
               </div>
-              <div>
-                <label className="mb-1 flex items-center gap-1.5 text-xs font-medium text-slate-600">
+              <div className="min-w-0">
+                <label className={`${fieldLabelClass} flex items-center gap-1.5`}>
                   Type
                   <HelpTooltip
                     icon="?"
-                    content="Choose one of the quick-pick types below or write your own label. This is shown to guests as extra context, but it does not change availability, price, or booking rules."
+                    content="Optional label for guests. Does not change rules or pricing."
                   />
                 </label>
                 <input
                   type="text"
                   value={formType}
                   onChange={(e) => setFormType(e.target.value)}
-                  placeholder="Short label (e.g. meeting room, equipment bay)"
+                  placeholder="Meeting room, pitch, bay…"
                   autoComplete="off"
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                  className={fieldInputClass}
                 />
-                <p className="mt-1 text-[11px] text-slate-500">Optional. Quick picks (tap to fill — you can still edit the text):</p>
-                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                <p className={fieldHintClass}>Quick picks:</p>
+                <div className="mt-2 flex flex-wrap gap-2">
                   {RESOURCE_TYPE_SUGGESTIONS.map((s) => (
                     <button
                       key={s}
                       type="button"
                       onClick={() => setFormType(s)}
-                      className="rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-100"
+                      className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm transition hover:border-brand-200 hover:bg-brand-50/50"
                     >
                       {s}
                     </button>
@@ -1105,13 +1262,19 @@ export function ResourceTimelineView({
                 </div>
               </div>
             </div>
+            </ResourceFormSection>
 
-            <div className="mt-4 max-w-xl">
-              <label className="mb-1 block text-xs font-medium text-slate-600">Show on calendar *</label>
+            <ResourceFormSection
+              step={2}
+              title="Team calendar"
+              description="Where this resource appears on your dashboard calendar."
+            >
+            <div className="w-full min-w-0 max-w-xl">
+              <label className={fieldLabelClass}>Show on calendar *</label>
               <select
                 value={formDisplayCalendarId}
                 onChange={(e) => setFormDisplayCalendarId(e.target.value)}
-                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                className={fieldSelectClass}
               >
                 {(isAdmin || !editingId) && <option value="">Select a calendar column</option>}
                 {hostCalendars.map((c) => (
@@ -1155,12 +1318,12 @@ export function ResourceTimelineView({
                           {inlineCalendarError && (
                             <p className="text-xs text-red-600">{inlineCalendarError}</p>
                           )}
-                          <div className="flex flex-wrap gap-2">
+                          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                             <button
                               type="button"
                               onClick={() => void handleCreateInlineCalendar()}
                               disabled={creatingCalendar}
-                              className="rounded-lg bg-brand-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-50"
+                              className="min-h-10 w-full rounded-lg bg-brand-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-50 sm:w-auto"
                             >
                               {creatingCalendar ? 'Creating…' : 'Create and select'}
                             </button>
@@ -1172,7 +1335,7 @@ export function ResourceTimelineView({
                                 setInlineCalendarError(null);
                               }}
                               disabled={creatingCalendar}
-                              className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                              className="min-h-10 w-full rounded-lg border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 sm:w-auto"
                             >
                               Cancel
                             </button>
@@ -1194,23 +1357,19 @@ export function ResourceTimelineView({
                   )}
                 </div>
               )}
-              <p className="mt-1 text-xs text-slate-500">
-                Resource bookings and free slots appear on that calendar. Two resources can use the same calendar only if
-                their weekly hours do not overlap (e.g. 9–1 vs 3–6).
-                {isAdmin && (
-                  <span className="mt-1 block text-slate-600">
-                    Staff can only manage resources tied to calendars they control — choose the column accordingly.
-                  </span>
-                )}
+              <p className={fieldHintClass}>
+                Bookings and availability blocks appear on that column. Two resources can share a column only if weekly
+                hours do not overlap.
+                {isAdmin ? ' Staff only manage resources on calendars they control.' : ''}
               </p>
             </div>
+            </ResourceFormSection>
 
-            {/* Booking rules */}
-            <h3 className="mt-6 text-sm font-semibold text-slate-800">Booking rules</h3>
-            <p className="mt-1.5 text-xs leading-relaxed text-slate-600">
-              Start times use a fixed step. Online price uses the same step: total = (price per step) × (booking length ÷
-              step).
-            </p>
+            <ResourceFormSection
+              step={3}
+              title="Booking rules"
+              description="Slot grid, duration limits, and when guests can book online."
+            >
             <div className="mt-3 grid gap-4 sm:grid-cols-2">
               <div>
                 <label className="mb-1 flex items-center gap-1.5 text-xs font-medium text-slate-600">
@@ -1255,12 +1414,12 @@ export function ResourceTimelineView({
               </div>
             </div>
             <div className="mt-4 rounded-lg border border-slate-100 bg-slate-50/80 p-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <label className="mb-1 flex items-center gap-1.5 text-xs font-medium text-slate-600">
+              <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+                <label className="mb-0 flex items-center gap-1.5 text-xs font-medium text-slate-600 sm:mb-1">
                   Shortest booking (minutes)
                   <HelpTooltip icon="?" maxWidth={320} content={RESOURCE_MIN_BOOKING_HELP} />
                 </label>
-                <label className="flex cursor-pointer items-center gap-2 text-[11px] font-medium text-slate-600">
+                <label className="flex cursor-pointer items-start gap-2 text-[11px] font-medium leading-snug text-slate-600 sm:items-center">
                   <input
                     type="checkbox"
                     checked={formAdvancedMinBooking}
@@ -1300,7 +1459,7 @@ export function ResourceTimelineView({
             </div>
             <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50/80 p-3">
               <p className="mb-2 text-xs font-medium text-slate-700">Guest online booking</p>
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                 <div>
                   <label className="mb-1 block text-xs font-medium text-slate-600">Max advance (days)</label>
                   <NumericInput
@@ -1344,159 +1503,93 @@ export function ResourceTimelineView({
                 </div>
               </div>
             </div>
-            <div className="mt-3 grid gap-4 sm:grid-cols-2">
-              <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600">
+            </ResourceFormSection>
+
+            <ResourceFormSection step={4} title="Pricing & payment" description="Slot price and how guests pay when booking online.">
+              <div className="w-full min-w-0 max-w-md">
+                <label className={fieldLabelClass}>
                   {formSlotMinutesParsed != null
                     ? `Price per ${formSlotMinutesParsed}-minute step (${sym})`
                     : `Price per start-time step (${sym})`}
                 </label>
-                <input type="text" inputMode="decimal" autoComplete="off" value={formPrice} onChange={(e) => setFormPrice(e.target.value)} placeholder="Leave blank for free" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
-                <p className="mt-1 text-[11px] text-slate-500">
-                  Charged per step of your start-time grid (see above).
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  autoComplete="off"
+                  value={formPrice}
+                  onChange={(e) => setFormPrice(e.target.value)}
+                  placeholder="Leave blank for free"
+                  className={fieldInputClass}
+                />
+                <p className={fieldHintClass}>
+                  Charged per step of your start-time grid (set in Booking rules above).
                 </p>
               </div>
-              <div className="flex items-end pb-1">
-                <label className="flex items-center gap-2 text-sm text-slate-700">
-                  <input type="checkbox" checked={formActive} onChange={(e) => setFormActive(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500" />
-                  Active (bookable by guests)
-                </label>
-              </div>
-            </div>
-            <div className="mt-4">
-              <p className="mb-2 text-xs font-medium text-slate-600">Guest payment</p>
-              <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-                {(
-                  [
-                    { v: 'none' as const, label: 'Pay at venue' },
-                    { v: 'deposit' as const, label: 'Deposit online' },
-                    { v: 'full_payment' as const, label: 'Pay in full online' },
-                  ] as const
-                ).map((opt) => (
-                  <label
-                    key={opt.v}
-                    className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm ${
-                      formPaymentReq === opt.v ? 'border-brand-500 bg-brand-50 text-slate-900' : 'border-slate-200 text-slate-700'
-                    }`}
-                  >
-                    <input
-                      type="radio"
-                      name="resource-payment-req"
-                      checked={formPaymentReq === opt.v}
-                      onChange={() => setFormPaymentReq(opt.v)}
-                      className="h-4 w-4 border-slate-300 text-brand-600 focus:ring-brand-500"
-                    />
-                    {opt.label}
-                  </label>
-                ))}
-              </div>
+              <div className="mt-4">
+              <ResourcePaymentCards
+                value={formPaymentReq}
+                onChange={setFormPaymentReq}
+                sym={sym}
+                depositValue={formDeposit}
+                onDepositChange={setFormDeposit}
+                stripeConnected={stripeConnected}
+              />
               <StripePaymentWarning
                 stripeConnected={stripeConnected}
                 requiresOnlinePayment={formPaymentReq === 'deposit' || formPaymentReq === 'full_payment'}
               />
-              {formPaymentReq === 'deposit' && (
-                <div className="mt-3 max-w-xs">
-                  <label className="mb-1 block text-xs font-medium text-slate-600">Deposit amount ({sym})</label>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    autoComplete="off"
-                    value={formDeposit}
-                    onChange={(e) => setFormDeposit(e.target.value)}
-                    placeholder="e.g. 10.00"
-                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-                  />
-                  <p className="mt-1 text-xs text-slate-500">Charged when the guest books (Stripe). Balance due at venue if applicable.</p>
-                </div>
-              )}
-            </div>
-
-            {/* Weekly availability */}
-            <div className="mt-6 flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <h3 className="text-sm font-semibold text-slate-800">Weekly availability</h3>
-                <p className="mt-1 text-xs text-slate-500">
-                  Resource hours can be wider than the calendar, but guests can only book where all opening hours overlap.
-                </p>
               </div>
-              <button
-                type="button"
-                onClick={() => {
-                  const next = !formMatchCalendarHours;
-                  setFormMatchCalendarHours(next);
-                  if (next && selectedHostCalendar) {
-                    setFormHours(weekHoursFromJSON(selectedHostCalendar.working_hours));
-                  }
-                }}
-                className={`rounded-lg border px-3 py-2 text-xs font-semibold transition-colors ${
-                  formMatchCalendarHours
-                    ? 'border-brand-300 bg-brand-50 text-brand-700 hover:bg-brand-100'
-                    : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-                }`}
-              >
-                {formMatchCalendarHours
+              <label className="mt-4 flex cursor-pointer items-center gap-2.5 text-sm font-medium text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={formActive}
+                  onChange={(e) => setFormActive(e.target.checked)}
+                  className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                />
+                Active (bookable by guests)
+              </label>
+            </ResourceFormSection>
+
+            <ResourceFormSection
+              step={5}
+              title="Weekly hours"
+              description="Guests can only book when resource, venue, and host calendar hours all overlap."
+            >
+            {formCalendarRestrictionWarning ? (
+              <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-900">
+                {formCalendarRestrictionWarning}
+              </div>
+            ) : null}
+            <WeekHoursEditor
+              days={DAY_LABELS}
+              hours={formHours}
+              matchCalendar={formMatchCalendarHours}
+              matchLabel={
+                formMatchCalendarHours
                   ? formDisplayCalendarId
                     ? 'Matching calendar hours'
                     : 'Will match selected calendar'
-                  : 'Match selected calendar hours'}
-              </button>
-            </div>
-            {formCalendarRestrictionWarning && (
-              <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-                {formCalendarRestrictionWarning}
-              </div>
-            )}
-            <div className="mt-2 space-y-2">
-              {DAY_LABELS.map((d) => {
-                const day = formHours[d.key]!;
-                return (
-                  <div key={d.key} className="flex items-center gap-3 rounded-lg border border-slate-100 bg-slate-50/60 px-3 py-2">
-                    <label className="flex w-24 shrink-0 items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={day.enabled}
-                        onChange={(e) => {
-                          setFormMatchCalendarHours(false);
-                          setFormHours((h) => ({ ...h, [d.key]: { ...h[d.key]!, enabled: e.target.checked } }));
-                        }}
-                        className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
-                      />
-                      {d.label.slice(0, 3)}
-                    </label>
-                    {day.enabled && (
-                      <div className="flex items-center gap-1.5 text-sm">
-                        <input
-                          type="time"
-                          value={day.start}
-                          onChange={(e) => {
-                            setFormMatchCalendarHours(false);
-                            setFormHours((h) => ({ ...h, [d.key]: { ...h[d.key]!, start: e.target.value } }));
-                          }}
-                          className="rounded border border-slate-200 px-2 py-1 text-xs"
-                        />
-                        <span className="text-slate-400">&ndash;</span>
-                        <input
-                          type="time"
-                          value={day.end}
-                          onChange={(e) => {
-                            setFormMatchCalendarHours(false);
-                            setFormHours((h) => ({ ...h, [d.key]: { ...h[d.key]!, end: e.target.value } }));
-                          }}
-                          className="rounded border border-slate-200 px-2 py-1 text-xs"
-                        />
-                      </div>
-                    )}
-                    {!day.enabled && <span className="text-xs text-slate-400">Closed</span>}
-                  </div>
-                );
-              })}
-            </div>
+                  : 'Match selected calendar hours'
+              }
+              onToggleMatchCalendar={() => {
+                const next = !formMatchCalendarHours;
+                setFormMatchCalendarHours(next);
+                if (next && selectedHostCalendar) {
+                  setFormHours(weekHoursFromJSON(selectedHostCalendar.working_hours));
+                }
+              }}
+              onChange={(key, patch) => {
+                setFormMatchCalendarHours(false);
+                setFormHours((h) => ({ ...h, [key]: { ...h[key]!, ...patch } }));
+              }}
+            />
+            </ResourceFormSection>
 
-            {/* Date exceptions */}
-            <h3 className="mt-6 text-sm font-semibold text-slate-800">Date exceptions</h3>
-            <p className="mt-1 text-xs text-slate-500">
-              Override holidays or special hours. Choose closed or amended hours below, then tap the calendar: first day starts a range, second day completes it (or tap &quot;Apply&quot; after one day for a single date). Tap a day that already has an amendment to edit or remove it.
-            </p>
+            <ResourceFormSection
+              step={6}
+              title="Date exceptions"
+              description="Closures or special hours on specific dates. Tap the calendar to select a day or range."
+            >
 
             {exceptionEditingDay ? (
               <div className="mt-4 rounded-xl border border-slate-300 bg-slate-50 p-4">
@@ -1513,13 +1606,13 @@ export function ResourceTimelineView({
                     Close
                   </button>
                 </div>
-                <div className="mt-3 flex flex-wrap items-end gap-2">
-                  <div>
+                <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 sm:items-end lg:grid-cols-4">
+                  <div className="min-w-0 sm:col-span-2 lg:col-span-1">
                     <label className="mb-1 block text-xs text-slate-600">Closure or amended hours</label>
                     <select
                       value={formExceptionType}
                       onChange={(e) => setFormExceptionType(e.target.value as 'closed' | 'custom')}
-                      className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm"
+                      className="min-h-10 w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm"
                     >
                       <option value="closed">Closed (not open)</option>
                       <option value="custom">Amended hours (custom times)</option>
@@ -1527,39 +1620,39 @@ export function ResourceTimelineView({
                   </div>
                   {formExceptionType === 'custom' && (
                     <>
-                      <div>
+                      <div className="min-w-0">
                         <label className="mb-1 block text-xs text-slate-600">From</label>
                         <input
                           type="time"
                           value={formExceptionStart}
                           onChange={(e) => setFormExceptionStart(e.target.value)}
-                          className="rounded border border-slate-200 bg-white px-2 py-1.5 text-sm"
+                          className="min-h-10 w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm"
                         />
                       </div>
-                      <div>
+                      <div className="min-w-0">
                         <label className="mb-1 block text-xs text-slate-600">To</label>
                         <input
                           type="time"
                           value={formExceptionEnd}
                           onChange={(e) => setFormExceptionEnd(e.target.value)}
-                          className="rounded border border-slate-200 bg-white px-2 py-1.5 text-sm"
+                          className="min-h-10 w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm"
                         />
                       </div>
                     </>
                   )}
                 </div>
-                <div className="mt-3 flex flex-wrap gap-2">
+                <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                   <button
                     type="button"
                     onClick={saveExceptionEdit}
-                    className="min-h-10 rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-700"
+                    className="min-h-10 w-full rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-700 sm:w-auto"
                   >
                     Save changes
                   </button>
                   <button
                     type="button"
                     onClick={() => removeException(exceptionEditingDay)}
-                    className="min-h-10 rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
+                    className="min-h-10 w-full rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50 sm:w-auto"
                   >
                     Remove this day
                   </button>
@@ -1568,13 +1661,13 @@ export function ResourceTimelineView({
             ) : (
               <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50/80 p-4">
                 <p className="text-xs font-semibold text-slate-700">Add closure or amended hours</p>
-                <div className="mt-2 flex flex-wrap items-end gap-2">
-                  <div>
+                <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2 sm:items-end lg:grid-cols-4">
+                  <div className="min-w-0 sm:col-span-2 lg:col-span-1">
                     <label className="mb-1 block text-xs text-slate-600">Closure or amended hours</label>
                     <select
                       value={formExceptionType}
                       onChange={(e) => setFormExceptionType(e.target.value as 'closed' | 'custom')}
-                      className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm"
+                      className="min-h-10 w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm"
                     >
                       <option value="closed">Closed (not open)</option>
                       <option value="custom">Amended hours (custom times)</option>
@@ -1582,55 +1675,55 @@ export function ResourceTimelineView({
                   </div>
                   {formExceptionType === 'custom' && (
                     <>
-                      <div>
+                      <div className="min-w-0">
                         <label className="mb-1 block text-xs text-slate-600">From</label>
                         <input
                           type="time"
                           value={formExceptionStart}
                           onChange={(e) => setFormExceptionStart(e.target.value)}
-                          className="rounded border border-slate-200 bg-white px-2 py-1.5 text-sm"
+                          className="min-h-10 w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm"
                         />
                       </div>
-                      <div>
+                      <div className="min-w-0">
                         <label className="mb-1 block text-xs text-slate-600">To</label>
                         <input
                           type="time"
                           value={formExceptionEnd}
                           onChange={(e) => setFormExceptionEnd(e.target.value)}
-                          className="rounded border border-slate-200 bg-white px-2 py-1.5 text-sm"
+                          className="min-h-10 w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm"
                         />
                       </div>
                     </>
                   )}
                 </div>
-                <div className="mt-3 flex flex-wrap items-center gap-2">
+                <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
                   <button
                     type="button"
                     onClick={applyExceptionRange}
                     disabled={!exceptionRangeStart}
-                    className="min-h-10 rounded-lg bg-brand-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-50"
+                    className="min-h-10 w-full rounded-lg bg-brand-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-50 sm:w-auto"
                   >
                     Apply to calendar selection
                   </button>
                   <button
                     type="button"
                     onClick={clearExceptionRangeSelection}
-                    className="min-h-10 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                    className="min-h-10 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 sm:w-auto"
                   >
                     Clear selection
                   </button>
-                  {exceptionRangeStart && (
-                    <span className="text-xs text-slate-500">
+                  {exceptionRangeStart ? (
+                    <span className="text-xs text-slate-500 sm:ml-1">
                       {exceptionRangeEnd
                         ? `${exceptionRangeStart} → ${exceptionRangeEnd}`
                         : `${exceptionRangeStart} (single day — tap Apply)`}
                     </span>
-                  )}
+                  ) : null}
                 </div>
               </div>
             )}
 
-            <div className="mt-4 max-w-2xl">
+            <div className="mt-4 w-full min-w-0 max-w-2xl">
               <ResourceExceptionsCalendar
                 year={exceptionMonth.year}
                 month={exceptionMonth.month}
@@ -1644,21 +1737,18 @@ export function ResourceTimelineView({
               />
             </div>
 
-            {error && <p className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+            </ResourceFormSection>
 
-            <div className="mt-6 flex gap-2">
-              <button type="button" onClick={() => void handleSave()} disabled={saving} className="rounded-lg bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-50 transition-colors">
-                {saving ? 'Saving\u2026' : editingId ? 'Save changes' : 'Create resource'}
-              </button>
-              <button type="button" onClick={() => setShowForm(false)} className="rounded-lg border border-slate-200 px-5 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors">
-                Cancel
-              </button>
-            </div>
-            </SectionCard.Body>
-          </SectionCard>
+            <FormStickyActions
+              saving={saving}
+              saveLabel={saving ? 'Saving…' : editingId ? 'Save changes' : 'Create resource'}
+              error={error}
+              onCancel={() => setShowForm(false)}
+              onSave={() => void handleSave()}
+            />
+          </div>
         ) : selected ? (
-          /* ── Selected resource detail ── */
-          <div className="space-y-4">
+          <div className="min-w-0 space-y-4">
             <SectionCard elevated>
               <SectionCard.Header
                 eyebrow="Resource detail"
@@ -1666,17 +1756,29 @@ export function ResourceTimelineView({
                 description={
                   selected.resource_type ? (
                     <span>{selected.resource_type}</span>
-                  ) : undefined
+                  ) : (
+                    <span className="text-slate-500">
+                      {hostCalendars.find((c) => c.id === selected.display_on_calendar_id)?.name ?? 'No calendar assigned'}
+                    </span>
+                  )
                 }
                 right={
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Pill variant={selected.is_active ? 'success' : 'neutral'} size="sm">
+                  <div className="flex w-full min-w-0 flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center">
+                    <button
+                      type="button"
+                      onClick={openResourceBookingDialog}
+                      className="min-h-10 w-full rounded-xl bg-brand-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 sm:w-auto"
+                    >
+                      + Book this resource
+                    </button>
+                    <Pill variant={selected.is_active ? 'success' : 'neutral'} size="sm" className="w-fit">
                       {selected.is_active ? 'Active' : 'Inactive'}
                     </Pill>
                     {(isAdmin ||
                       (selected.display_on_calendar_id !== null &&
                         linkedPractitionerIds.includes(selected.display_on_calendar_id))) ? (
                       <DashboardEntityRowActions
+                        className="w-full justify-stretch sm:w-auto sm:justify-end [&>button]:min-h-10 [&>button]:flex-1 sm:[&>button]:flex-initial"
                         onEdit={() => openEdit(selected)}
                         onDelete={() => requestDeleteResource(selected.id)}
                       />
@@ -1686,7 +1788,30 @@ export function ResourceTimelineView({
               />
             </SectionCard>
 
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+            {!selected.display_on_calendar_id ? (
+              <div
+                className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950"
+                role="alert"
+              >
+                <p className="font-medium text-amber-900">Not visible on team calendar</p>
+                <p className="mt-1">
+                  Choose a <strong>Display on calendar</strong> host so resource bookings appear on{' '}
+                  <Link href="/dashboard/calendar" className="font-medium text-brand-600 underline hover:text-brand-800">
+                    Calendar
+                  </Link>
+                  . Until then, manage bookings here on the timeline only.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => openEdit(selected)}
+                  className="mt-3 inline-flex min-h-10 w-full items-center justify-center rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 sm:w-auto"
+                >
+                  Set host calendar
+                </button>
+              </div>
+            ) : null}
+
+            <div className="grid grid-cols-1 gap-3 min-[400px]:grid-cols-2 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
               <StatTile
                 label="Start-time step"
                 value={formatDuration(selected.slot_interval_minutes)}
@@ -1714,10 +1839,12 @@ export function ResourceTimelineView({
                   const ranges = selected.availability_hours?.[d.key];
                   const open = ranges && ranges.length > 0;
                   return (
-                    <div key={d.key} className="flex items-center gap-3 text-sm">
-                      <span className="w-20 text-slate-600">{d.label.slice(0, 3)}</span>
+                    <div key={d.key} className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-sm sm:flex-nowrap sm:items-center">
+                      <span className="w-12 shrink-0 font-medium text-slate-600 sm:w-20">{d.label.slice(0, 3)}</span>
                       {open ? (
-                        <span className="text-slate-900">{ranges![0].start} &ndash; {ranges![0].end}</span>
+                        <span className="text-slate-900">
+                          {ranges![0].start} &ndash; {ranges![0].end}
+                        </span>
                       ) : (
                         <span className="text-slate-400">Closed</span>
                       )}
@@ -1744,46 +1871,32 @@ export function ResourceTimelineView({
             </SectionCard>
 
             <SectionCard>
-              <SectionCard.Header
-                title="Bookings"
-                right={
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => setBookingsDate((d) => { const t = new Date(`${d}T12:00:00`); t.setDate(t.getDate() - 1); return t.toISOString().slice(0, 10); })}
-                    className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700 outline-none hover:bg-slate-50 focus-visible:border-brand-500 focus-visible:ring-1 focus-visible:ring-brand-500"
-                  >
-                    &larr;
-                  </button>
-                  <input
-                    type="date"
-                    value={bookingsDate}
-                    onChange={(e) => setBookingsDate(e.target.value)}
-                    className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setBookingsDate((d) => { const t = new Date(`${d}T12:00:00`); t.setDate(t.getDate() + 1); return t.toISOString().slice(0, 10); })}
-                    className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700 outline-none hover:bg-slate-50 focus-visible:border-brand-500 focus-visible:ring-1 focus-visible:ring-brand-500"
-                  >
-                    &rarr;
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setBookingsDate(new Date().toISOString().slice(0, 10))}
-                    className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-medium text-slate-700 outline-none hover:bg-slate-50 focus-visible:border-brand-500 focus-visible:ring-1 focus-visible:ring-brand-500"
-                  >
-                    Today
-                  </button>
-                </div>
+              <SectionCard.Header title="Bookings" />
+              <SectionCard.Body className="!pt-0 sm:!pt-0">
+              <BookingsDateToolbar
+                dateIso={bookingsDate}
+                onPrev={() =>
+                  setBookingsDate((d) => {
+                    const t = new Date(`${d}T12:00:00`);
+                    t.setDate(t.getDate() - 1);
+                    return formatYmdLocal(t);
+                  })
                 }
+                onNext={() =>
+                  setBookingsDate((d) => {
+                    const t = new Date(`${d}T12:00:00`);
+                    t.setDate(t.getDate() + 1);
+                    return formatYmdLocal(t);
+                  })
+                }
+                onToday={() => setBookingsDate(formatYmdLocal(new Date()))}
+                onDateChange={setBookingsDate}
               />
-              <SectionCard.Body className="!pt-0">
               {bookingsLoading ? (
                 <div className="mt-4 space-y-2" role="status" aria-label="Loading bookings">
-                  <Skeleton.Line className="w-full" />
-                  <Skeleton.Line className="w-4/5" />
-                  <Skeleton.Line className="w-3/5" />
+                  {[1, 2, 3].map((i) => (
+                    <Skeleton.Block key={i} className="h-14" />
+                  ))}
                 </div>
               ) : bookings.length === 0 ? (
                 <EmptyState
@@ -1808,6 +1921,7 @@ export function ResourceTimelineView({
                           title={b.guest_name}
                           subtitle={subtitle || undefined}
                           stripClassName={bookingScheduleStripClass(b.status)}
+                          onClick={() => setDetailBookingId(b.id)}
                           trailing={
                             <Pill variant={resourceBookingStatusVariant(b.status)} size="sm">
                               {b.status}
@@ -1823,7 +1937,6 @@ export function ResourceTimelineView({
             </SectionCard>
           </div>
         ) : (
-          /* ── Empty state ── */
           <div className="flex min-h-[30vh] items-center justify-center">
             <EmptyState
               title={resources.length > 0 ? 'Select a resource' : 'Create a resource'}
@@ -1831,6 +1944,17 @@ export function ResourceTimelineView({
                 resources.length > 0
                   ? 'Choose a resource from the list to view availability and bookings.'
                   : 'Add your first bookable resource to start taking slot reservations.'
+              }
+              action={
+                canManageResources ? (
+                  <button
+                    type="button"
+                    onClick={openCreate}
+                    className="text-sm font-semibold text-brand-600 hover:text-brand-800"
+                  >
+                    Create your first resource
+                  </button>
+                ) : undefined
               }
             />
           </div>
@@ -1850,7 +1974,7 @@ export function ResourceTimelineView({
             aria-modal="true"
             aria-labelledby="delete-resource-title"
             aria-describedby="delete-resource-desc"
-            className="w-full max-w-md rounded-2xl border border-slate-200/80 bg-white p-6 shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100"
+            className="max-h-[min(90dvh,90vh)] w-full max-w-md overflow-y-auto rounded-2xl border border-slate-200/80 bg-white p-5 shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100 sm:p-6"
             onClick={(e) => e.stopPropagation()}
           >
             <h3 id="delete-resource-title" className="text-base font-semibold text-slate-900">
@@ -1869,12 +1993,12 @@ export function ResourceTimelineView({
                 {deleteResourceModalError}
               </div>
             ) : null}
-            <div className="mt-6 flex flex-wrap justify-end gap-2">
+            <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
               <button
                 type="button"
                 onClick={() => setResourceToDelete(null)}
                 disabled={deleteResourceBusy}
-                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                className="min-h-10 w-full rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 sm:w-auto"
               >
                 Cancel
               </button>
@@ -1882,7 +2006,7 @@ export function ResourceTimelineView({
                 type="button"
                 onClick={() => void confirmDeleteResource()}
                 disabled={deleteResourceBusy}
-                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-red-700 disabled:opacity-50"
+                className="min-h-10 w-full rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-red-700 disabled:opacity-50 sm:w-auto"
               >
                 {deleteResourceBusy ? 'Deleting…' : 'Delete resource'}
               </button>
@@ -1890,6 +2014,59 @@ export function ResourceTimelineView({
           </div>
         </div>
       )}
+
+      {detailBookingId ? (
+        <BookingDetailPanel
+          key={detailBookingId}
+          bookingId={detailBookingId}
+          venueId={venueId}
+          venueCurrency={currency}
+          initialSnapshot={detailBookingSnapshot}
+          presentation="drawer"
+          onClose={() => setDetailBookingId(null)}
+          onUpdated={() => {
+            void fetchResourceBookings();
+          }}
+        />
+      ) : null}
+
+      {showResourceBooking && selectedId ? (
+        <Dialog
+          open
+          onOpenChange={(open) => {
+            if (!open) {
+              setShowResourceBooking(false);
+            }
+          }}
+          title={selected ? `Book ${selected.name}` : 'Book resource'}
+          size="lg"
+          contentClassName="max-h-[min(92dvh,92vh)] max-w-xl overflow-y-auto"
+        >
+          {resourceBookingVenueError ? (
+            <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+              {resourceBookingVenueError}
+            </div>
+          ) : resourceBookingVenue ? (
+            <ResourceBookingFlow
+              key={`${selectedId}-${resourceBookingSessionKey}`}
+              venue={resourceBookingVenue}
+              bookingAudience="staff"
+              staffBookingSource="phone"
+              onBookingCreated={() => {
+                setShowResourceBooking(false);
+                void fetchResourceBookings();
+              }}
+              initialResourceId={selectedId}
+            />
+          ) : (
+            <div className="space-y-3 py-6" role="status" aria-label="Loading booking form">
+              <Skeleton.Line className="w-1/3" />
+              <Skeleton.Block className="h-16" />
+              <Skeleton.Block className="h-32" />
+            </div>
+          )}
+        </Dialog>
+      ) : null}
     </div>
   );
 }

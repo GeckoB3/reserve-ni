@@ -310,6 +310,7 @@ export function GuestBookingsForGuestAccordion({
   currentBookingId,
   guestDisplayNameForSnapshots,
   venueTimeZone,
+  historyVenueId,
   canOpenNested,
   onOpenBookingDetail,
   listRefreshKey,
@@ -317,12 +318,15 @@ export function GuestBookingsForGuestAccordion({
   onStaffBookingCreated,
   initialRows,
   fetchWhenOpen = true,
+  allowRebook = true,
 }: {
   guestId: string | null | undefined;
   currentBookingId: string;
   /** Used when opening a related booking (placeholder snapshot). */
   guestDisplayNameForSnapshots: string;
   venueTimeZone: string;
+  /** Owner venue for guest history (linked bookings). */
+  historyVenueId?: string;
   canOpenNested: boolean;
   onOpenBookingDetail: (payload: GuestHistoryRelatedBookingPayload) => void;
   /** Bumped when this panel reloads booking detail so the list stays in sync after edits. */
@@ -335,6 +339,8 @@ export function GuestBookingsForGuestAccordion({
   initialRows?: GuestBookingHistoryRow[];
   /** When true, defer list fetch until the guest-bookings accordion is expanded. */
   fetchWhenOpen?: boolean;
+  /** When false, hide Rebook on history rows (e.g. linked view-only / edit-existing grants). */
+  allowRebook?: boolean;
 }) {
   const router = useRouter();
   const [rows, setRows] = useState<GuestBookingHistoryRow[] | null>(
@@ -452,6 +458,9 @@ export function GuestBookingsForGuestAccordion({
           guest: guestId,
           guest_history: '1',
         });
+        if (historyVenueId) {
+          qs.set('owner_venue_id', historyVenueId);
+        }
         const res = await fetch(`/api/venue/bookings/list?${qs.toString()}`);
         const payload = await readResponseJson<{ error?: string; bookings?: GuestBookingHistoryRow[] }>(res);
         if (!res.ok) {
@@ -478,7 +487,7 @@ export function GuestBookingsForGuestAccordion({
     return () => {
       cancelled = true;
     };
-  }, [guestId, listRefreshKey, detailsOpen, fetchWhenOpen]);
+  }, [guestId, listRefreshKey, detailsOpen, fetchWhenOpen, historyVenueId]);
 
   const { upcomingRows, previousRows } = useMemo(() => {
     if (!rows?.length) {
@@ -545,7 +554,9 @@ export function GuestBookingsForGuestAccordion({
                       canOpenNested={canOpenNested}
                       guestDisplayNameForSnapshots={guestDisplayNameForSnapshots}
                       onOpenBookingDetail={onOpenBookingDetail}
-                      showRebook={buildStaffRebookBootstrapFromBookingSource(r, {}) !== null}
+                      showRebook={
+                        allowRebook && buildStaffRebookBootstrapFromBookingSource(r, {}) !== null
+                      }
                       onRebook={handleRebookRow}
                     />
                   ))}
@@ -566,7 +577,9 @@ export function GuestBookingsForGuestAccordion({
                       canOpenNested={canOpenNested}
                       guestDisplayNameForSnapshots={guestDisplayNameForSnapshots}
                       onOpenBookingDetail={onOpenBookingDetail}
-                      showRebook={buildStaffRebookBootstrapFromBookingSource(r, {}) !== null}
+                      showRebook={
+                        allowRebook && buildStaffRebookBootstrapFromBookingSource(r, {}) !== null
+                      }
                       onRebook={handleRebookRow}
                     />
                   ))}

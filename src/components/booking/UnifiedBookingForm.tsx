@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CountryCode } from 'libphonenumber-js';
 import { useToast } from '@/components/ui/Toast';
-import { PhoneWithCountryField } from '@/components/phone/PhoneWithCountryField';
+import { StaffGuestContactFields } from '@/components/booking/staff-guest-contact/StaffGuestContactFields';
 import { normalizeToE164 } from '@/lib/phone/e164';
 import { defaultPhoneCountryForVenueCurrency } from '@/lib/phone/default-country';
 import MiniFloorPlanPicker, { type MiniFloorTableRow } from '@/components/floor-plan/MiniFloorPlanPicker';
@@ -180,6 +180,7 @@ export function UnifiedBookingForm({
   const staffTableRebookAppliedRef = useRef(false);
   /** Staff “New booking” from expanded row: guest contact only (no table / date / service). */
   const staffGuestContactBootstrapAppliedRef = useRef(false);
+  const selectedKnownContactRef = useRef(false);
 
   const [coverDurationMinutes, setCoverDurationMinutes] = useState(() =>
     editSnapshot ? suggestDurationFromEditSnapshot(editSnapshot) : 90,
@@ -1053,7 +1054,9 @@ export function UnifiedBookingForm({
           ...(staffBookingFlowDurationMs(staffFlowStartedAtRef.current) != null
             ? { staff_booking_duration_ms: staffBookingFlowDurationMs(staffFlowStartedAtRef.current) }
             : {}),
-          ...(staffRebookBootstrap?.guest ? { returning_guest: true } : {}),
+          ...(staffRebookBootstrap?.guest || selectedKnownContactRef.current
+            ? { returning_guest: true }
+            : {}),
         }),
       });
 
@@ -1500,68 +1503,28 @@ export function UnifiedBookingForm({
 
       {/* Guest Details */}
       <div className="space-y-3 sm:space-y-3.5">
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div>
-            <label htmlFor="ubf-first-name" className="mb-1 block text-xs font-medium text-slate-700 sm:text-sm">
-              First name <span className="text-slate-400">(optional)</span>
-            </label>
-            <input
-              ref={firstNameRef}
-              id="ubf-first-name"
-              type="text"
-              autoComplete="given-name"
-              value={firstName}
-              onChange={(e) => setFirstName(e.target.value)}
-              placeholder="First name"
-              className="min-h-[44px] w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-base transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 sm:rounded-xl sm:px-3.5 sm:py-2.5"
-            />
-          </div>
-          <div>
-            <label htmlFor="ubf-last-name" className="mb-1 block text-xs font-medium text-slate-700 sm:text-sm">
-              Surname <span className="text-slate-400">(optional)</span>
-            </label>
-            <input
-              id="ubf-last-name"
-              type="text"
-              autoComplete="family-name"
-              value={lastName}
-              onChange={(e) => setLastName(e.target.value)}
-              placeholder="Surname"
-              className="min-h-[44px] w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-base transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 sm:rounded-xl sm:px-3.5 sm:py-2.5"
-            />
-          </div>
-        </div>
-
-        <div>
-          <label htmlFor="ubf-phone" className="mb-1 block text-xs font-medium text-slate-700 sm:text-sm">
-            Phone number{' '}
-            <span className="text-red-600" aria-hidden="true">
-              *
-            </span>
-            <span className="sr-only">(required)</span>
-          </label>
-          <PhoneWithCountryField
-            id="ubf-phone"
-            value={phone}
-            onChange={setPhone}
-            defaultCountry={phoneDefaultCountry}
-            inputClassName="min-h-[44px] w-full min-w-0 rounded-lg border border-slate-200 bg-white px-3 py-2 text-base transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 sm:rounded-xl sm:px-3.5 sm:py-2.5"
-          />
-        </div>
-
-        <div>
-          <label htmlFor="ubf-email" className="mb-1 block text-xs font-medium text-slate-700 sm:text-sm">
-            Email <span className="text-slate-400">(optional)</span>
-          </label>
-          <input
-            id="ubf-email"
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="guest@example.com"
-            className="min-h-[44px] w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-base transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 sm:rounded-xl sm:px-3.5 sm:py-2.5"
-          />
-        </div>
+        <StaffGuestContactFields
+          values={{ firstName, lastName, email, phone }}
+          onFieldChange={(field, value) => {
+            selectedKnownContactRef.current = false;
+            if (field === 'firstName') setFirstName(value);
+            else if (field === 'lastName') setLastName(value);
+            else if (field === 'email') setEmail(value);
+            else setPhone(value);
+          }}
+          onContactSelected={() => {
+            selectedKnownContactRef.current = true;
+          }}
+          phoneDefaultCountry={phoneDefaultCountry}
+          firstNameRef={firstNameRef}
+          firstNameId="ubf-first-name"
+          lastNameId="ubf-last-name"
+          emailId="ubf-email"
+          phoneId="ubf-phone"
+          inputClassName="min-h-[44px] w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-base transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 sm:rounded-xl sm:px-3.5 sm:py-2.5"
+          phoneInputClassName="min-h-[44px] w-full min-w-0 rounded-lg border border-slate-200 bg-white px-3 py-2 text-base transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 sm:rounded-xl sm:px-3.5 sm:py-2.5"
+          labelClassName="mb-1 block text-xs font-medium text-slate-700 sm:text-sm"
+        />
 
         {!isEdit && (
           <>

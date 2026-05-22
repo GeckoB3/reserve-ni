@@ -9,6 +9,7 @@ import {
   resolveLinkedBookingColumnId,
   type LinkedBooking,
   type LinkedPractitioner,
+  type LinkedResource,
   type LinkedService,
   type LinkedVenueCalendar,
 } from '@/lib/linked-accounts/calendar';
@@ -18,8 +19,133 @@ import {
   normaliseGuestNamePart,
 } from '@/lib/guests/name';
 import { resolveBookingListRowLabels } from '@/lib/booking/booking-list-row-label';
+import type { WorkingHours } from '@/types/booking-models';
+import {
+  DEFAULT_RESOURCE_MIN_BOOKING_MINUTES,
+  DEFAULT_RESOURCE_SLOT_INTERVAL_MINUTES,
+} from '@/lib/booking/resource-booking-defaults';
+import {
+  buildLinkedVenueScheduleBlocks,
+  loadLinkedCdeColumnMaps,
+} from '@/lib/linked-accounts/linked-schedule-blocks';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function linkedWorkingHoursFromDb(raw: unknown): WorkingHours {
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    return raw as WorkingHours;
+  }
+  return {};
+}
+
+/** Resource id → host staff column id (mirrors native calendar `resourceParentById`). */
+async function loadLinkedResourceHostByResourceId(
+  admin: ReturnType<typeof getSupabaseAdminClient>,
+  venueId: string,
+  columnIds: ReadonlySet<string>,
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+
+  const [{ data: resourceRows }, { data: calendarResourceRows }] = await Promise.all([
+    admin.from('venue_resources').select('id, display_on_calendar_id').eq('venue_id', venueId),
+    admin
+      .from('unified_calendars')
+      .select('id, display_on_calendar_id')
+      .eq('venue_id', venueId)
+      .eq('calendar_type', 'resource'),
+  ]);
+
+  for (const row of resourceRows ?? []) {
+    const host = (row as { display_on_calendar_id?: string | null }).display_on_calendar_id;
+    const id = (row as { id: string }).id;
+    if (host && columnIds.has(host)) out.set(id, host);
+  }
+
+  for (const row of calendarResourceRows ?? []) {
+    const host = (row as { display_on_calendar_id?: string | null }).display_on_calendar_id;
+    const id = (row as { id: string }).id;
+    if (host && columnIds.has(host)) out.set(id, host);
+  }
+
+  return out;
+}
+
+async function loadLinkedResourcesForCalendar(
+  admin: ReturnType<typeof getSupabaseAdminClient>,
+  venueId: string,
+  usesUnified: boolean,
+  columnIds: ReadonlySet<string>,
+): Promise<LinkedResource[]> {
+  if (usesUnified) {
+    const { data: rows } = await admin
+      .from('unified_calendars')
+      .select(
+        'id, name, is_active, display_on_calendar_id, min_booking_minutes, max_booking_minutes, slot_interval_minutes, working_hours, availability_exceptions',
+      )
+      .eq('venue_id', venueId)
+      .eq('calendar_type', 'resource')
+      .order('sort_order', { ascending: true });
+    return (rows ?? [])
+      .map((row) => {
+        const host = (row as { display_on_calendar_id?: string | null }).display_on_calendar_id;
+        if (!host || !columnIds.has(host)) return null;
+        return {
+          id: (row as { id: string }).id,
+          name: ((row as { name?: string | null }).name ?? 'Resource').trim() || 'Resource',
+          displayOnCalendarId: host,
+          minBookingMinutes:
+            (row as { min_booking_minutes?: number | null }).min_booking_minutes ??
+            DEFAULT_RESOURCE_MIN_BOOKING_MINUTES,
+          maxBookingMinutes: (row as { max_booking_minutes?: number | null }).max_booking_minutes ?? 180,
+          slotIntervalMinutes:
+            (row as { slot_interval_minutes?: number | null }).slot_interval_minutes ??
+            DEFAULT_RESOURCE_SLOT_INTERVAL_MINUTES,
+          isActive: (row as { is_active?: boolean | null }).is_active ?? true,
+          availabilityHours: linkedWorkingHoursFromDb(
+            (row as { working_hours?: unknown }).working_hours,
+          ),
+          availabilityExceptions:
+            ((row as { availability_exceptions?: LinkedResource['availabilityExceptions'] })
+              .availability_exceptions ?? undefined),
+        } as LinkedResource;
+      })
+      .filter((r): r is LinkedResource => r != null);
+  }
+
+  const { data: rows } = await admin
+    .from('venue_resources')
+    .select(
+      'id, name, is_active, display_on_calendar_id, min_booking_minutes, max_booking_minutes, slot_interval_minutes, availability_hours, availability_exceptions',
+    )
+    .eq('venue_id', venueId)
+    .order('sort_order', { ascending: true });
+
+  return (rows ?? [])
+    .map((row) => {
+      const host = (row as { display_on_calendar_id?: string | null }).display_on_calendar_id;
+      if (!host || !columnIds.has(host)) return null;
+      return {
+        id: (row as { id: string }).id,
+        name: ((row as { name?: string | null }).name ?? 'Resource').trim() || 'Resource',
+        displayOnCalendarId: host,
+        minBookingMinutes:
+          (row as { min_booking_minutes?: number | null }).min_booking_minutes ??
+          DEFAULT_RESOURCE_MIN_BOOKING_MINUTES,
+        maxBookingMinutes: (row as { max_booking_minutes?: number | null }).max_booking_minutes ?? 180,
+        slotIntervalMinutes:
+          (row as { slot_interval_minutes?: number | null }).slot_interval_minutes ??
+          DEFAULT_RESOURCE_SLOT_INTERVAL_MINUTES,
+        isActive: (row as { is_active?: boolean | null }).is_active ?? true,
+        availabilityHours: linkedWorkingHoursFromDb(
+          (row as { availability_hours?: unknown }).availability_hours,
+        ),
+        availabilityExceptions:
+          ((row as { availability_exceptions?: LinkedResource['availabilityExceptions'] })
+            .availability_exceptions ?? undefined),
+      } as LinkedResource;
+    })
+    .filter((r): r is LinkedResource => r != null);
+}
 
 /** Same column set as staff calendar list (`view=calendar`). */
 const LINKED_CALENDAR_BOOKING_SELECT =
@@ -72,11 +198,16 @@ export async function GET(request: NextRequest) {
     const venueIds = accessible.map((a) => a.venueId);
     const { data: venueRows } = await admin
       .from('venues')
-      .select('id, name')
+      .select('id, name, timezone')
       .in('id', venueIds);
     const venueNames: Record<string, string> = {};
+    const venueTimezones: Record<string, string> = {};
     for (const v of venueRows ?? []) {
-      venueNames[v.id as string] = (v.name as string) ?? 'Linked venue';
+      const id = v.id as string;
+      venueNames[id] = (v.name as string) ?? 'Linked venue';
+      const tzRaw = v.timezone as string | null | undefined;
+      venueTimezones[id] =
+        typeof tzRaw === 'string' && tzRaw.trim() !== '' ? tzRaw.trim() : 'Europe/London';
     }
 
     const calendars: LinkedVenueCalendar[] = [];
@@ -92,7 +223,7 @@ export async function GET(request: NextRequest) {
       if (usesUnified) {
         const { data: calendarRows } = await admin
           .from('unified_calendars')
-          .select('id, name, is_active, calendar_type')
+          .select('id, name, is_active, calendar_type, working_hours')
           .eq('venue_id', access.venueId)
           .order('sort_order', { ascending: true });
         practitioners = (calendarRows ?? [])
@@ -101,17 +232,19 @@ export async function GET(request: NextRequest) {
             id: c.id as string,
             name: (c.name as string) ?? 'Calendar',
             isActive: (c.is_active as boolean) ?? true,
+            workingHours: linkedWorkingHoursFromDb(c.working_hours),
           }));
       } else {
         const { data: practitionerRows } = await admin
           .from('practitioners')
-          .select('id, name, is_active')
+          .select('id, name, is_active, working_hours')
           .eq('venue_id', access.venueId)
           .order('sort_order', { ascending: true });
         practitioners = (practitionerRows ?? []).map((p) => ({
           id: p.id as string,
           name: (p.name as string) ?? 'Calendar',
           isActive: (p.is_active as boolean) ?? true,
+          workingHours: linkedWorkingHoursFromDb(p.working_hours),
         }));
       }
 
@@ -218,6 +351,23 @@ export async function GET(request: NextRequest) {
         access.grant.act === 'edit_existing' || access.grant.act === 'create_edit_cancel';
 
       const columnIds = new Set(practitioners.map((p) => p.id));
+      const resourceParentById = await loadLinkedResourceHostByResourceId(
+        admin,
+        access.venueId,
+        columnIds,
+      );
+      const resources = await loadLinkedResourcesForCalendar(
+        admin,
+        access.venueId,
+        usesUnified,
+        columnIds,
+      );
+
+      const { eventCalendarByEventId, classCalendarByInstanceId } = await loadLinkedCdeColumnMaps(
+        admin,
+        access.venueId,
+        rawBookings,
+      );
 
       const bookings: LinkedBooking[] = rawBookings.map((b) => {
         const guestId = b.guest_id as string | null;
@@ -230,13 +380,17 @@ export async function GET(request: NextRequest) {
         const snapshotPresent =
           Boolean(normaliseGuestNamePart(b.guest_first_name as string | null | undefined)) ||
           Boolean(normaliseGuestNamePart(b.guest_last_name as string | null | undefined));
-        const guestLabel =
-          canSeePii && guestId
-            ? guestNames[guestId] ??
-              (snapshotPresent
-                ? formatGuestDisplayName(snapshotMerged.first, snapshotMerged.last)
-                : null)
-            : null;
+        const snapshotName = snapshotPresent
+          ? formatGuestDisplayName(snapshotMerged.first, snapshotMerged.last)
+          : null;
+        const guestLabel = fullDetails
+          ? canSeePii && guestId
+            ? guestNames[guestId] ?? snapshotName
+            : snapshotName
+          : null;
+
+        const experienceEventId = b.experience_event_id as string | null;
+        const classInstanceId = b.class_instance_id as string | null;
 
         const base: LinkedBooking = {
           id: b.id as string,
@@ -244,8 +398,20 @@ export async function GET(request: NextRequest) {
             {
               practitioner_id: b.practitioner_id as string | null,
               calendar_id: b.calendar_id as string | null,
+              resource_id: b.resource_id as string | null,
+              experience_event_id: experienceEventId,
+              class_instance_id: classInstanceId,
             },
             columnIds,
+            resourceParentById,
+            {
+              eventCalendarId: experienceEventId
+                ? (eventCalendarByEventId.get(experienceEventId) ?? null)
+                : null,
+              classCalendarId: classInstanceId
+                ? (classCalendarByInstanceId.get(classInstanceId) ?? null)
+                : null,
+            },
           ),
           bookingDate: b.booking_date as string,
           bookingTime: (b.booking_time as string) ?? '',
@@ -285,18 +451,36 @@ export async function GET(request: NextRequest) {
           resourceId: (b.resource_id as string | null) ?? null,
           calendarId: (b.calendar_id as string | null) ?? null,
           practitionerIdRaw: (b.practitioner_id as string | null) ?? null,
+          experienceEventId,
+          classInstanceId,
+          eventSessionId: (b.event_session_id as string | null) ?? null,
         };
       });
+
+      const scheduleBlocks = fullDetails
+        ? await buildLinkedVenueScheduleBlocks(
+            admin,
+            access.venueId,
+            rangeFrom,
+            rangeTo,
+            rawBookings,
+            columnIds,
+          )
+        : [];
 
       calendars.push({
         venueId: access.venueId,
         venueName: venueNames[access.venueId] ?? 'Linked venue',
+        venueTimezone: venueTimezones[access.venueId] ?? 'Europe/London',
         linkId: access.linkId,
         visibility: access.grant.calendar,
         action: access.grant.act,
+        pii: access.grant.pii,
         practitioners,
         services,
+        resources,
         bookings,
+        scheduleBlocks,
       });
 
       // Record the cross-venue calendar view (debounced 5 minutes).

@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Pill } from '@/components/ui/dashboard/Pill';
+import { LINKED_ACCOUNT_INCOMING_CHANGED_EVENT } from '@/lib/linked-accounts/incoming-banner-events';
 
 interface IncomingItem {
   id: string;
@@ -53,33 +54,35 @@ export function LinkedAccountBanner() {
   const [dismissed, setDismissed] = useState<Record<string, number>>({});
   const [visible, setVisible] = useState<IncomingItem[]>([]);
 
+  const refresh = useCallback(async () => {
+    try {
+      const res = await fetch('/api/venue/account-links/incoming');
+      if (!res.ok) return;
+      const json = await res.json();
+      const merged: IncomingItem[] = [
+        ...(json.incomingRequests ?? []).map((r: { id: string; otherVenueName: string }) => ({
+          id: `request:${r.id}`,
+          otherVenueName: r.otherVenueName,
+        })),
+        ...(json.pendingChanges ?? []).map((c: { id: string; otherVenueName: string }) => ({
+          id: `change:${c.id}`,
+          otherVenueName: c.otherVenueName,
+        })),
+      ];
+      setItems(merged);
+    } catch {
+      // The banner is best-effort; stay silent on failure.
+    }
+  }, []);
+
   useEffect(() => {
     setDismissed(loadDismissals());
 
-    let cancelled = false;
-    const refresh = async () => {
-      try {
-        const res = await fetch('/api/venue/account-links/incoming');
-        if (!res.ok) return;
-        const json = await res.json();
-        if (cancelled) return;
-        const merged: IncomingItem[] = [
-          ...(json.incomingRequests ?? []).map((r: { id: string; otherVenueName: string }) => ({
-            id: `request:${r.id}`,
-            otherVenueName: r.otherVenueName,
-          })),
-          ...(json.pendingChanges ?? []).map((c: { id: string; otherVenueName: string }) => ({
-            id: `change:${c.id}`,
-            otherVenueName: c.otherVenueName,
-          })),
-        ];
-        setItems(merged);
-      } catch {
-        // The banner is best-effort; stay silent on failure.
-      }
-    };
-
     void refresh();
+
+    const onIncomingChanged = () => {
+      void refresh();
+    };
 
     // Re-check when the tab regains focus so a request that arrives while the
     // dashboard is open surfaces without a manual reload (§8.3).
@@ -88,13 +91,14 @@ export function LinkedAccountBanner() {
     };
     document.addEventListener('visibilitychange', onVisible);
     window.addEventListener('focus', onVisible);
+    window.addEventListener(LINKED_ACCOUNT_INCOMING_CHANGED_EVENT, onIncomingChanged);
 
     return () => {
-      cancelled = true;
       document.removeEventListener('visibilitychange', onVisible);
       window.removeEventListener('focus', onVisible);
+      window.removeEventListener(LINKED_ACCOUNT_INCOMING_CHANGED_EVENT, onIncomingChanged);
     };
-  }, []);
+  }, [refresh]);
 
   useEffect(() => {
     setVisible(filterVisible(items, dismissed));

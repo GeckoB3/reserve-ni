@@ -30,7 +30,7 @@ export async function GET() {
     const { data, error } = await admin
       .from('unified_calendars')
       .select(
-        'id, name, resource_type, min_booking_minutes, max_booking_minutes, slot_interval_minutes, price_per_slot_pence, sort_order',
+        'id, name, resource_type, min_booking_minutes, max_booking_minutes, slot_interval_minutes, price_per_slot_pence, payment_requirement, deposit_amount_pence, cancellation_notice_hours, sort_order',
       )
       .eq('venue_id', staff.venue_id)
       .eq('calendar_type', 'resource')
@@ -52,6 +52,12 @@ export async function GET() {
         max_booking_minutes: (r.max_booking_minutes as number | null) ?? 180,
         slot_interval_minutes: (r.slot_interval_minutes as number | null) ?? DEFAULT_RESOURCE_SLOT_INTERVAL_MINUTES,
         price_per_slot_pence: (r.price_per_slot_pence as number | null) ?? null,
+        payment_requirement: (r.payment_requirement as string) ?? 'none',
+        deposit_amount_pence: (r.deposit_amount_pence as number | null) ?? null,
+        cancellation_notice_hours:
+          typeof r.cancellation_notice_hours === 'number' && Number.isFinite(r.cancellation_notice_hours)
+            ? r.cancellation_notice_hours
+            : 48,
       };
     });
 

@@ -21,7 +21,7 @@ import {
   venueWideBlocksQueryForRange,
 } from '@/lib/availability/venue-wide-blocks-fetch';
 import { sameDaySlotCutoffForBookingDate } from '@/lib/venue/venue-local-clock';
-import { entityBookingWindowFromRow } from '@/lib/booking/entity-booking-window';
+import { entityBookingWindowFromRow, isGuestBookingDateAllowed } from '@/lib/booking/entity-booking-window';
 import {
   DEFAULT_RESOURCE_MIN_BOOKING_MINUTES,
   DEFAULT_RESOURCE_SLOT_INTERVAL_MINUTES,
@@ -260,9 +260,26 @@ export function mergedResourceEffectiveRangesForHost(
   return unionMinuteRanges(all);
 }
 
-// ---------------------------------------------------------------------------
-// Core engine
-// ---------------------------------------------------------------------------
+/** Earliest bookable start minute on the venue-local calendar day (same-day + min notice). Returns null when same-day is disabled. */
+function earliestGuestSlotStartMinute(
+  resource: VenueResource,
+  date: string,
+  sameDaySlotCutoff: { venueDateYmd: string; minutesNow: number } | undefined,
+): number | null {
+  if (!sameDaySlotCutoff || date !== sameDaySlotCutoff.venueDateYmd) return null;
+  const win = entityBookingWindowFromRow(resource as unknown as Record<string, unknown>);
+  if (!win.allow_same_day_booking) return null;
+  return sameDaySlotCutoff.minutesNow + Math.max(0, win.min_booking_notice_hours) * 60;
+}
+
+function resourceDateAllowedForGuestBooking(
+  resource: VenueResource,
+  date: string,
+  venueTimezone: string,
+): boolean {
+  const win = entityBookingWindowFromRow(resource as unknown as Record<string, unknown>);
+  return isGuestBookingDateAllowed(date, win, venueTimezone);
+}
 
 /** True if this start time is today in the venue TZ and not strictly after "now" (minute precision). */
 export function isResourceBookingStartInPast(
@@ -298,6 +315,11 @@ export function computeResourceAvailability(
       getEffectiveAvailabilityRanges(resource, date);
     if (ranges.length === 0) continue;
 
+    const earliestStart = earliestGuestSlotStartMinute(resource, date, sameDaySlotCutoff);
+    if (sameDaySlotCutoff && date === sameDaySlotCutoff.venueDateYmd && earliestStart === null) {
+      continue;
+    }
+
     const resourceBookings = existingBookings.filter(
       (b) => b.resource_id === resource.id && CAPACITY_CONSUMING_STATUSES.includes(b.status)
     );
@@ -311,6 +333,9 @@ export function computeResourceAvailability(
           date === sameDaySlotCutoff.venueDateYmd &&
           t <= sameDaySlotCutoff.minutesNow
         ) {
+          continue;
+        }
+        if (earliestStart != null && t < earliestStart) {
           continue;
         }
 
@@ -369,6 +394,15 @@ export function resourceHasAvailabilityForAnyDurationCandidate(
     getEffectiveAvailabilityRanges(resource, input.date);
   if (ranges.length === 0) return false;
 
+  const earliestStart = earliestGuestSlotStartMinute(resource, input.date, input.sameDaySlotCutoff);
+  if (
+    input.sameDaySlotCutoff &&
+    input.date === input.sameDaySlotCutoff.venueDateYmd &&
+    earliestStart === null
+  ) {
+    return false;
+  }
+
   const resourceBookings = input.existingBookings.filter(
     (b) => b.resource_id === resource.id && CAPACITY_CONSUMING_STATUSES.includes(b.status),
   );
@@ -382,6 +416,9 @@ export function resourceHasAvailabilityForAnyDurationCandidate(
         input.date === sameDaySlotCutoff.venueDateYmd &&
         t <= sameDaySlotCutoff.minutesNow
       ) {
+        continue;
+      }
+      if (earliestStart != null && t < earliestStart) {
         continue;
       }
 
@@ -434,6 +471,15 @@ function resolveVenueTimezone(row: { timezone?: unknown } | null | undefined): s
   return typeof t === 'string' && t.trim() !== '' ? t.trim() : 'Europe/London';
 }
 
+function filterResourceBookingsForDate(
+  bookingsForDate: Record<string, unknown>[],
+  excludeBookingId?: string,
+): Record<string, unknown>[] {
+  if (!excludeBookingId) return bookingsForDate;
+  const lc = excludeBookingId.toLowerCase();
+  return bookingsForDate.filter((row) => String(row.id).toLowerCase() !== lc);
+}
+
 function buildResourceEngineInputFromParts(params: {
   date: string;
   resources: VenueResource[];
@@ -442,13 +488,25 @@ function buildResourceEngineInputFromParts(params: {
   venueOpeningHours: OpeningHours | null;
   venueWideBlocks: AvailabilityBlock[];
   venueTimezone?: string;
+  excludeBookingId?: string;
+  skipPastSlotFilter?: boolean;
 }): ResourceEngineInput {
-  const { date, resources, conflictResources, bookingsForDate, venueOpeningHours, venueWideBlocks, venueTimezone } =
-    params;
+  const {
+    date,
+    resources,
+    conflictResources,
+    bookingsForDate,
+    venueOpeningHours,
+    venueWideBlocks,
+    venueTimezone,
+    excludeBookingId,
+    skipPastSlotFilter,
+  } = params;
+  const filteredBookingsForDate = filterResourceBookingsForDate(bookingsForDate, excludeBookingId);
 
   const resourceIdSet = new Set(resources.map((r) => r.id));
 
-  const existingBookings: ResourceBooking[] = bookingsForDate
+  const existingBookings: ResourceBooking[] = filteredBookingsForDate
     .filter((b) => {
       const rid = b.resource_id as string | null;
       const cid = b.calendar_id as string | null;
@@ -515,7 +573,7 @@ function buildResourceEngineInputFromParts(params: {
   }
 
   const tz = venueTimezone ?? 'Europe/London';
-  const sameDaySlotCutoff = sameDaySlotCutoffForBookingDate(date, tz);
+  const sameDaySlotCutoff = skipPastSlotFilter ? undefined : sameDaySlotCutoffForBookingDate(date, tz);
 
   return {
     date,
@@ -564,6 +622,10 @@ export interface PrefetchResourceMonthOptions {
    * when the route already loaded the row.
    */
   reuseEnrichedResourceRow?: boolean;
+  /** When modifying a booking, exclude it from capacity so its current slot stays selectable. */
+  excludeBookingId?: string;
+  /** Staff modify: allow today's past start times and skip guest notice cutoff. */
+  skipPastSlotFilter?: boolean;
 }
 
 /**
@@ -625,9 +687,13 @@ async function prefetchResourceMonthForAvailability(
     console.warn('[prefetchResourceMonthForAvailability] availability_blocks:', blocksRes.error.message);
   }
 
+  const excludeLc = options?.excludeBookingId?.toLowerCase();
   const bookingsByDate = new Map<string, Record<string, unknown>[]>();
   for (const raw of bookingsRes.data ?? []) {
     const row = raw as Record<string, unknown>;
+    if (excludeLc && String(row.id).toLowerCase() === excludeLc) {
+      continue;
+    }
     const bd = row.booking_date as string;
     const list = bookingsByDate.get(bd) ?? [];
     list.push(row);
@@ -673,6 +739,9 @@ export async function computeResourceAvailableDatesInMonth(
 
   for (let d = 1; d <= lastDay; d++) {
     const dateStr = `${year}-${pad(month)}-${pad(d)}`;
+    if (!resourceDateAllowedForGuestBooking(resource, dateStr, prefetch.venueTimezone)) {
+      continue;
+    }
     const input = buildResourceEngineInputFromParts({
       date: dateStr,
       resources: prefetch.resources,
@@ -681,6 +750,8 @@ export async function computeResourceAvailableDatesInMonth(
       venueOpeningHours: prefetch.venueOpeningHours,
       venueWideBlocks: prefetch.venueWideBlocks,
       venueTimezone: prefetch.venueTimezone,
+      excludeBookingId: prefetchOptions?.excludeBookingId,
+      skipPastSlotFilter: prefetchOptions?.skipPastSlotFilter,
     });
     const results = computeResourceAvailability(input, durationMinutes);
     const row = results.find((r) => r.id === resource.id);
@@ -720,6 +791,9 @@ export async function computeResourceAvailableDatesInMonthAnyDuration(
   const tLoop0 = typeof performance !== 'undefined' ? performance.now() : 0;
   for (let day = 1; day <= lastDay; day++) {
     const dateStr = `${year}-${pad(month)}-${pad(day)}`;
+    if (!resourceDateAllowedForGuestBooking(resource, dateStr, prefetch.venueTimezone)) {
+      continue;
+    }
     const input = buildResourceEngineInputFromParts({
       date: dateStr,
       resources: prefetch.resources,
@@ -728,6 +802,8 @@ export async function computeResourceAvailableDatesInMonthAnyDuration(
       venueOpeningHours: prefetch.venueOpeningHours,
       venueWideBlocks: prefetch.venueWideBlocks,
       venueTimezone: prefetch.venueTimezone,
+      excludeBookingId: prefetchOptions?.excludeBookingId,
+      skipPastSlotFilter: prefetchOptions?.skipPastSlotFilter,
     });
     if (resourceHasAvailabilityForAnyDurationCandidate(input, resource.id, durations)) {
       out.push(dateStr);
@@ -812,6 +888,9 @@ export function mapCalendarToResource(row: Record<string, unknown>): VenueResour
     payment_requirement: payReq ?? 'none',
     deposit_amount_pence: (row.deposit_amount_pence as number | null) ?? null,
     cancellation_notice_hours: win.cancellation_notice_hours,
+    max_advance_booking_days: win.max_advance_booking_days,
+    min_booking_notice_hours: win.min_booking_notice_hours,
+    allow_same_day_booking: win.allow_same_day_booking,
     availability_hours: (row.working_hours as WorkingHours) ?? {},
     availability_exceptions: (row.availability_exceptions as VenueResource['availability_exceptions']) ?? undefined,
     is_active: (row.is_active as boolean | null) ?? true,
@@ -882,8 +961,10 @@ export async function fetchResourceInput(params: {
   venueId: string;
   date: string;
   resourceId?: string;
+  excludeBookingId?: string;
+  skipPastSlotFilter?: boolean;
 }): Promise<ResourceEngineInput> {
-  const { supabase, venueId, date, resourceId } = params;
+  const { supabase, venueId, date, resourceId, excludeBookingId, skipPastSlotFilter } = params;
 
   let resourcesQuery = supabase
     .from('unified_calendars')
@@ -928,5 +1009,7 @@ export async function fetchResourceInput(params: {
     venueOpeningHours,
     venueWideBlocks,
     venueTimezone: resolveVenueTimezone(venueRes.data),
+    excludeBookingId,
+    skipPastSlotFilter,
   });
 }

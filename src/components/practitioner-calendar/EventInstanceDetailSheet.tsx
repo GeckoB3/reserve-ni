@@ -3,11 +3,10 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import type { ScheduleBlockDTO } from '@/types/schedule-blocks';
-import {
-  PRACTITIONER_BOOKING_STATUS_BADGE as STATUS_BADGE,
-  formatDashboardMoneyPence as formatMoneyPence,
-} from './detail-sheet-primitives';
+import type { LinkActionLevel } from '@/lib/linked-accounts/types';
 import { Sheet } from '@/components/ui/primitives/Sheet';
+import { Button } from '@/components/ui/primitives/Button';
+import { RegistryBookingAccordionList } from '@/app/dashboard/bookings/RegistryBookingAccordionList';
 
 interface TicketTypeRow {
   id?: string;
@@ -29,87 +28,111 @@ interface ExperienceEventPayload {
   ticket_types?: TicketTypeRow[] | null;
 }
 
-interface TicketLineRow {
-  label: string;
-  quantity: number;
-  unit_price_pence: number;
+export interface LinkedEventDetailContext {
+  ownerVenueId: string;
+  ownerVenueName: string;
+  ownerVenueTimezone: string;
+  ownerCurrency: string;
+  linkedAct: LinkActionLevel;
+  linkedPii: boolean;
 }
 
-interface AttendeeRow {
-  booking_id: string;
-  status: string;
-  party_size: number;
-  deposit_amount_pence: number | null;
-  deposit_status: string | null;
-  booking_date: string;
-  booking_time: string;
-  checked_in_at: string | null;
-  guest_name: string | null;
-  guest_email: string | null;
-  guest_phone: string | null;
-  ticket_lines: TicketLineRow[];
-}
-
-
-function ticketLinesSummary(lines: TicketLineRow[]): string {
-  if (!lines.length) return '—';
-  return lines.map((l) => `${l.label} ×${l.quantity}`).join(', ');
-}
+export type EventInstanceSheetSelection = {
+  eventId: string;
+  block: ScheduleBlockDTO;
+  linked?: LinkedEventDetailContext;
+};
 
 interface Props {
-  selection: { eventId: string; block: ScheduleBlockDTO } | null;
+  selection: EventInstanceSheetSelection | null;
   onClose: () => void;
+  venueId: string;
   currency?: string;
+  venueTimezone?: string;
+  onUpdated?: () => void;
+  /** When set, staff can start a pre-filled event booking from this sheet. */
+  onBookNow?: () => void;
+  canBook?: boolean;
 }
 
-export function EventInstanceDetailSheet({ selection, onClose, currency = 'GBP' }: Props) {
+export function EventInstanceDetailSheet({
+  selection,
+  onClose,
+  venueId,
+  currency = 'GBP',
+  venueTimezone = 'Europe/London',
+  onUpdated,
+  onBookNow,
+  canBook = false,
+}: Props) {
   const open = selection !== null;
+  const linked = selection?.linked ?? null;
+
   const [eventRow, setEventRow] = useState<ExperienceEventPayload | null>(null);
-  const [attendees, setAttendees] = useState<AttendeeRow[]>([]);
+  const [linkedCurrencyLoaded, setLinkedCurrencyLoaded] = useState<string | null>(null);
+  const [bookedGuests, setBookedGuests] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const effectiveVenueId = linked?.ownerVenueId ?? venueId;
+  const effectiveCurrency = linkedCurrencyLoaded ?? linked?.ownerCurrency ?? currency;
+  const effectiveTimezone = linked?.ownerVenueTimezone ?? venueTimezone;
+
   const eventId = selection?.eventId ?? null;
 
-  const load = useCallback(async () => {
+  const loadEvent = useCallback(async () => {
     if (!eventId) return;
     setLoading(true);
     setError(null);
     try {
-      const [evRes, attRes] = await Promise.all([
-        fetch(`/api/venue/experience-events/${eventId}`),
-        fetch(`/api/venue/experience-events/${eventId}/attendees`),
-      ]);
+      if (linked) {
+        const params = new URLSearchParams({
+          eventId,
+          ownerVenueId: linked.ownerVenueId,
+        });
+        const evRes = await fetch(`/api/venue/linked-calendar/event?${params}`);
+        if (!evRes.ok) {
+          const j = await evRes.json().catch(() => ({}));
+          throw new Error((j as { error?: string }).error ?? 'Could not load event');
+        }
+        const payload = (await evRes.json()) as {
+          event?: ExperienceEventPayload;
+          currency?: string;
+        };
+        setEventRow(payload.event ?? null);
+        setLinkedCurrencyLoaded(
+          typeof payload.currency === 'string' && payload.currency.trim() !== ''
+            ? payload.currency.trim()
+            : 'GBP',
+        );
+        return;
+      }
+
+      const evRes = await fetch(`/api/venue/experience-events/${eventId}`);
       if (!evRes.ok) {
         const j = await evRes.json().catch(() => ({}));
         throw new Error((j as { error?: string }).error ?? 'Could not load event');
       }
-      if (!attRes.ok) {
-        const j = await attRes.json().catch(() => ({}));
-        throw new Error((j as { error?: string }).error ?? 'Could not load bookings');
-      }
       const evJson = (await evRes.json()) as ExperienceEventPayload;
-      const attJson = (await attRes.json()) as { attendees?: AttendeeRow[] };
       setEventRow(evJson);
-      setAttendees(attJson.attendees ?? []);
     } catch (e) {
       setEventRow(null);
-      setAttendees([]);
       setError(e instanceof Error ? e.message : 'Something went wrong');
     } finally {
       setLoading(false);
     }
-  }, [eventId]);
+  }, [eventId, linked]);
 
   useEffect(() => {
     if (!selection || !eventId) {
       setEventRow(null);
-      setAttendees([]);
+      setLinkedCurrencyLoaded(null);
+      setBookedGuests(null);
       setError(null);
       return;
     }
-    void load();
-  }, [selection, eventId, load]);
+    void loadEvent();
+  }, [selection, eventId, loadEvent]);
 
   if (!open || !selection) return null;
 
@@ -119,12 +142,17 @@ export function EventInstanceDetailSheet({ selection, onClose, currency = 'GBP' 
   const startStr = eventRow?.start_time ? String(eventRow.start_time).slice(0, 5) : block.start_time.slice(0, 5);
   const endStr = eventRow?.end_time ? String(eventRow.end_time).slice(0, 5) : block.end_time.slice(0, 5);
   const cap = eventRow?.capacity ?? block.event_capacity;
+  const bookedDisplay = bookedGuests ?? block.event_party_total ?? 0;
 
-  const bookedActive = attendees
-    .filter((a) => a.status !== 'Cancelled')
-    .reduce((s, a) => s + (a.party_size ?? 1), 0);
-  const bookedDisplay =
-    loading && attendees.length === 0 ? (block.event_party_total ?? 0) : bookedActive;
+  const linkedReadOnly = linked != null && linked.linkedAct === 'none';
+  const spotsRemaining =
+    cap != null ? Math.max(0, cap - bookedDisplay) : null;
+  const showBookNow =
+    canBook &&
+    onBookNow != null &&
+    !linkedReadOnly &&
+    eventRow?.is_active !== false &&
+    (spotsRemaining == null || spotsRemaining > 0);
 
   return (
     <Sheet
@@ -136,17 +164,27 @@ export function EventInstanceDetailSheet({ selection, onClose, currency = 'GBP' 
       hideHeader
       showClose={false}
       side="right"
-      contentClassName="flex max-h-[90dvh] flex-col overflow-hidden p-0 lg:max-h-none lg:max-w-lg"
+      contentClassName="flex max-h-[90dvh] flex-col overflow-hidden p-0 lg:max-h-none lg:max-w-2xl"
     >
       <aside className="flex min-h-0 flex-1 flex-col overflow-y-auto" aria-labelledby="event-detail-title">
         <div className="sticky top-0 z-[1] flex items-start justify-between gap-3 border-b border-slate-100 bg-white px-4 py-3">
           <div className="min-w-0">
+            {linked ? (
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-sky-800">
+                Linked · {linked.ownerVenueName}
+              </p>
+            ) : null}
             <h2 id="event-detail-title" className="text-lg font-semibold text-slate-900">
               {title}
             </h2>
             <p className="mt-0.5 text-sm text-slate-600">
               {dateStr} · {startStr} – {endStr}
             </p>
+            {linkedReadOnly ? (
+              <p className="mt-1 text-xs text-slate-500">View only — this link does not allow changes.</p>
+            ) : linked && linked.linkedAct === 'edit_existing' ? (
+              <p className="mt-1 text-xs text-slate-500">Limited edit — cancel and rebook are not available on this link.</p>
+            ) : null}
             {eventRow?.is_active === false ? (
               <span className="mt-2 inline-block rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800">
                 Inactive
@@ -178,17 +216,34 @@ export function EventInstanceDetailSheet({ selection, onClose, currency = 'GBP' 
                 ' guests booked'
               )}
             </span>
-            <Link
-              href="/dashboard/event-manager"
-              className="text-sm font-medium text-brand-600 hover:text-brand-800"
-              onClick={onClose}
-            >
-              Event manager →
-            </Link>
+            {!linked ? (
+              <div className="flex flex-wrap items-center gap-3">
+                <Link
+                  href={`/dashboard/bookings?experience_event_id=${encodeURIComponent(selection.eventId)}`}
+                  className="text-sm font-medium text-brand-600 hover:text-brand-800"
+                  onClick={onClose}
+                >
+                  Open in bookings →
+                </Link>
+                <Link
+                  href="/dashboard/event-manager"
+                  className="text-sm font-medium text-slate-600 hover:text-slate-800"
+                  onClick={onClose}
+                >
+                  Event manager →
+                </Link>
+              </div>
+            ) : null}
           </div>
 
+          {showBookNow ? (
+            <Button type="button" variant="primary" className="w-full sm:w-auto" onClick={onBookNow}>
+              Book now
+            </Button>
+          ) : null}
+
           {eventRow?.description ? (
-            <p className="text-sm text-slate-600 whitespace-pre-wrap">{eventRow.description}</p>
+            <p className="whitespace-pre-wrap text-sm text-slate-600">{eventRow.description}</p>
           ) : null}
 
           {eventRow?.ticket_types && eventRow.ticket_types.length > 0 ? (
@@ -197,7 +252,7 @@ export function EventInstanceDetailSheet({ selection, onClose, currency = 'GBP' 
               <ul className="list-inside list-disc text-sm text-slate-600">
                 {eventRow.ticket_types.map((t, i) => (
                   <li key={t.id ?? i}>
-                    {t.name} — {formatMoneyPence(t.price_pence, currency)}
+                    {t.name}
                     {t.capacity != null ? ` (cap ${t.capacity})` : null}
                   </li>
                 ))}
@@ -209,71 +264,25 @@ export function EventInstanceDetailSheet({ selection, onClose, currency = 'GBP' 
           {loading && !eventRow ? <p className="text-sm text-slate-500">Loading details…</p> : null}
 
           <div>
-            <h3 className="mb-2 text-sm font-semibold text-slate-800">Bookings & guests</h3>
-            {loading && attendees.length === 0 && !error ? (
-              <p className="text-sm text-slate-500">Loading bookings…</p>
-            ) : attendees.length === 0 ? (
-              <p className="text-sm text-slate-500">No bookings for this event.</p>
-            ) : (
-              <div className="overflow-x-auto rounded-lg border border-slate-200">
-                <table className="w-full min-w-[480px] text-left text-sm">
-                  <thead>
-                    <tr className="border-b border-slate-200 bg-slate-50 text-slate-600">
-                      <th className="px-3 py-2 font-medium">Guest</th>
-                      <th className="px-3 py-2 font-medium">Contact</th>
-                      <th className="px-3 py-2 font-medium">Party</th>
-                      <th className="px-3 py-2 font-medium">Tickets</th>
-                      <th className="px-3 py-2 font-medium">Status</th>
-                      <th className="px-3 py-2 font-medium">Deposit</th>
-                      <th className="px-3 py-2 font-medium">Time</th>
-                      <th className="px-3 py-2 font-medium">Checked in</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {attendees.map((a) => (
-                      <tr
-                        key={a.booking_id}
-                        className={`border-b border-slate-100 last:border-0 ${a.status === 'Cancelled' ? 'opacity-60' : ''}`}
-                      >
-                        <td className="px-3 py-2 font-medium text-slate-900">{a.guest_name ?? '—'}</td>
-                        <td className="px-3 py-2 text-slate-600">
-                          <div className="max-w-[120px] truncate text-xs">{a.guest_email ?? '—'}</div>
-                          <div className="text-[11px] text-slate-500">{a.guest_phone ?? ''}</div>
-                        </td>
-                        <td className="px-3 py-2 text-slate-700">{a.party_size}</td>
-                        <td className="max-w-[140px] px-3 py-2 text-xs text-slate-600">
-                          {ticketLinesSummary(a.ticket_lines)}
-                        </td>
-                        <td className="px-3 py-2">
-                          <span
-                            className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_BADGE[a.status] ?? 'bg-slate-100 text-slate-700'}`}
-                          >
-                            {a.status}
-                          </span>
-                        </td>
-                        <td className="px-3 py-2 text-slate-600">
-                          {formatMoneyPence(a.deposit_amount_pence, currency)}
-                          {a.deposit_status ? (
-                            <span className="ml-1 text-[10px] text-slate-400">({a.deposit_status})</span>
-                          ) : null}
-                        </td>
-                        <td className="px-3 py-2 text-xs text-slate-600">
-                          {String(a.booking_time).slice(0, 5)}
-                        </td>
-                        <td className="px-3 py-2 text-xs text-slate-600">
-                          {a.checked_in_at
-                            ? new Date(a.checked_in_at).toLocaleString('en-GB', {
-                                dateStyle: 'short',
-                                timeStyle: 'short',
-                              })
-                            : '—'}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+            <h3 className="mb-2 text-sm font-semibold text-slate-800">Bookings</h3>
+            {linked && !linked.linkedPii ? (
+              <p className="mb-2 text-xs text-slate-500">
+                Guest contact details from {linked.ownerVenueName} are hidden on this link.
+              </p>
+            ) : null}
+            <RegistryBookingAccordionList
+              experienceEventId={selection.eventId}
+              venueId={effectiveVenueId}
+              ownerVenueId={linked?.ownerVenueId}
+              linkedAct={linked?.linkedAct}
+              venueCurrency={effectiveCurrency}
+              venueTimezone={effectiveTimezone}
+              hideDateInSummary
+              onBookingsCountChange={setBookedGuests}
+              onBookingsUpdated={() => {
+                onUpdated?.();
+              }}
+            />
           </div>
         </div>
       </aside>

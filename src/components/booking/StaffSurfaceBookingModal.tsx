@@ -33,6 +33,11 @@ export interface StaffSurfaceBookingModalProps {
   /** Linked venue the staff member is booking into (cross-venue create). */
   linkedOwnerVenueId?: string;
   linkedVenueName?: string;
+  /** Open the event tab with this occurrence pre-selected (calendar event detail). */
+  preselectedExperienceEventId?: string;
+  preselectedEventDate?: string;
+  /** Disambiguate when multiple sessions share the same event and date. */
+  preselectedEventTime?: string;
 }
 
 function defaultHeading(intent: 'new' | 'walk-in'): string {
@@ -61,6 +66,9 @@ export function StaffSurfaceBookingModal({
   stackKey,
   linkedOwnerVenueId,
   linkedVenueName,
+  preselectedExperienceEventId,
+  preselectedEventDate,
+  preselectedEventTime,
 }: StaffSurfaceBookingModalProps) {
   const titleId = useId();
   const title =
@@ -77,12 +85,14 @@ export function StaffSurfaceBookingModal({
       ? staffRebookBootstrap.surface
       : undefined;
 
-  /** Bootstrap surface wins; else empty-slot HH:mm prefers Appointment when hybrid. */
+  /** Bootstrap surface wins; calendar event prefill always targets Event tab (linked owner may expose events the viewer venue does not). */
   const initialStaffSurfaceTabId: StaffBookingSurfaceTabId | undefined =
-    bootstrapSurface ??
-    (timedSlotPrefill && staffSurfaceTabs.some((t) => t.id === 'unified_scheduling')
-      ? 'unified_scheduling'
-      : undefined);
+    preselectedExperienceEventId
+      ? 'event_ticket'
+      : bootstrapSurface ??
+        (timedSlotPrefill && staffSurfaceTabs.some((t) => t.id === 'unified_scheduling')
+          ? 'unified_scheduling'
+          : undefined);
 
   return (
     <div
@@ -123,6 +133,9 @@ export function StaffSurfaceBookingModal({
             staffRebookBootstrap={staffRebookBootstrap}
             linkedOwnerVenueId={linkedOwnerVenueId}
             linkedVenueName={linkedVenueName}
+            preselectedExperienceEventId={preselectedExperienceEventId}
+            preselectedEventDate={preselectedEventDate}
+            preselectedEventTime={preselectedEventTime}
           />
         </div>
       </div>

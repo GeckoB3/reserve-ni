@@ -5,6 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase/browser';
 import { useDismissibleLayer } from '@/lib/ui/use-dismissible-layer';
+import { FullscreenToggleButton } from '@/components/ui/FullscreenToggleButton';
 
 import { mergeModelNavEntries } from '@/lib/booking/enabled-models';
 import type { BookingModel } from '@/types/booking-models';
@@ -553,13 +554,18 @@ export function DashboardSidebar({
               </div>
             </div>
           </div>
-          <NavLinkItem
-            href="/dashboard/support"
-            label="Support"
-            icon={SupportIcon}
-            active={pathname.startsWith('/dashboard/support')}
-            onNavigate={closeMobile}
-          />
+          <div className="flex items-stretch gap-2">
+            <div className="min-w-0 flex-1">
+              <NavLinkItem
+                href="/dashboard/support"
+                label="Support"
+                icon={SupportIcon}
+                active={pathname.startsWith('/dashboard/support')}
+                onNavigate={closeMobile}
+              />
+            </div>
+            <FullscreenToggleButton />
+          </div>
           <button
             type="button"
             onClick={handleSignOut}

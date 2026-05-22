@@ -8,6 +8,8 @@ import {
   linkedBookingCreateSchema,
 } from '@/lib/linked-accounts/validation';
 import { venueUsesUnifiedCalendarList } from '@/lib/booking/unified-calendar-list';
+import { linkedGrantAllowsCancel, linkedGrantAllowsMutation } from '@/lib/booking/staff-booking-access';
+import { normalizeLinkedBookingRpcChanges } from '@/lib/linked-accounts/linked-booking-patch';
 
 /**
  * PATCH /api/venue/linked-calendar/booking — edit (or cancel, via status) a
@@ -44,7 +46,9 @@ export async function PATCH(request: NextRequest) {
     const admin = getSupabaseAdminClient();
     const { data: booking } = await admin
       .from('bookings')
-      .select('id, venue_id')
+      .select(
+        'id, venue_id, calendar_id, practitioner_id, booking_date, booking_time, booking_end_time',
+      )
       .eq('id', parsed.data.bookingId)
       .maybeSingle();
     if (!booking) {
@@ -66,7 +70,7 @@ export async function PATCH(request: NextRequest) {
         { status: 403 },
       );
     }
-    if (access.grant.act === 'none') {
+    if (!linkedGrantAllowsMutation(access.grant, false)) {
       return NextResponse.json(
         { error: 'This link does not allow editing the other venue’s bookings.' },
         { status: 403 },
@@ -76,7 +80,7 @@ export async function PATCH(request: NextRequest) {
     // edit_existing may reschedule and change status but not cancel.
     if (
       parsed.data.changes.status === 'Cancelled' &&
-      access.grant.act !== 'create_edit_cancel'
+      !linkedGrantAllowsCancel(access.grant, false)
     ) {
       return NextResponse.json(
         { error: 'This link does not allow cancelling the other venue’s bookings.' },
@@ -84,12 +88,25 @@ export async function PATCH(request: NextRequest) {
       );
     }
 
+    const rpcChanges = await normalizeLinkedBookingRpcChanges(
+      admin,
+      {
+        venue_id: ownerVenueId,
+        calendar_id: (booking.calendar_id as string | null) ?? null,
+        practitioner_id: (booking.practitioner_id as string | null) ?? null,
+        booking_date: booking.booking_date as string,
+        booking_time: String(booking.booking_time),
+        booking_end_time: booking.booking_end_time ? String(booking.booking_end_time) : null,
+      },
+      parsed.data.changes as Record<string, unknown>,
+    );
+
     const { data: updated, error: rpcError } = await admin.rpc('linked_apply_booking_update', {
       p_actor_user_id: user?.id ?? null,
       p_acting_venue_id: staff.venue_id,
       p_link_id: access.linkId,
       p_booking_id: parsed.data.bookingId,
-      p_changes: parsed.data.changes,
+      p_changes: rpcChanges,
     });
     if (rpcError) {
       console.error('linked_apply_booking_update RPC failed:', rpcError.message);

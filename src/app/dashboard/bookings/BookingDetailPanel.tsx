@@ -95,6 +95,7 @@ export function BookingDetailPanel({
   anchor,
   stackDepth = 0,
   venueTimezone = 'Europe/London',
+  linkedAct,
 }: {
   bookingId: string;
   onClose: () => void;
@@ -111,6 +112,8 @@ export function BookingDetailPanel({
   stackDepth?: number;
   /** Used to split upcoming vs previous guest bookings (defaults to UK). */
   venueTimezone?: string;
+  /** When viewing a linked-venue booking, restricts actions to the grant level (§5.3). */
+  linkedAct?: import('@/lib/linked-accounts/types').LinkActionLevel;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   const detailCache = useOptionalDashboardDetailCache();
@@ -698,6 +701,7 @@ export function BookingDetailPanel({
         anchor={null}
         stackDepth={stackDepth + 1}
         venueTimezone={venueTimezone}
+        linkedAct={linkedAct}
         onClose={() => setNestedBookingOpen(null)}
         onUpdated={() => {
           void load();
@@ -887,6 +891,7 @@ export function BookingDetailPanel({
               onSendMessage={async (_channel): Promise<GuestMessageSendResult> => ({ ok: true })}
               onStatusAction={() => {}}
               onDetailUpdated={() => {}}
+              linkedAct={linkedAct}
             />
         </BookingDetailSurface>
         {nestedDetailPanelEl}
@@ -931,6 +936,7 @@ export function BookingDetailPanel({
       guestHistoryListRefresh,
       stackDepth,
       setNestedBookingOpen,
+      linkedAct,
     };
 
 

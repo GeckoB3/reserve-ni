@@ -46,6 +46,9 @@ function isInSelectionRange(ymd: string, rangeStart: string | null, rangeEnd: st
   return ymd >= a && ymd <= b;
 }
 
+const NAV_BTN =
+  'min-h-10 min-w-10 rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2';
+
 export function ResourceExceptionsCalendar({
   year,
   month,
@@ -80,28 +83,20 @@ export function ResourceExceptionsCalendar({
   const title = `${MONTH_NAMES[month - 1]} ${year}`;
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-3">
-      <div className="mb-3 flex items-center justify-between gap-2">
-        <button
-          type="button"
-          onClick={onPrevMonth}
-          className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
-          aria-label="Previous month"
-        >
+    <div className="w-full min-w-0 max-w-full overflow-hidden rounded-xl border border-slate-200 bg-white p-2.5 shadow-sm sm:p-4">
+      <div className="mb-3 flex items-center justify-between gap-1 sm:gap-2">
+        <button type="button" onClick={onPrevMonth} className={NAV_BTN} aria-label="Previous month">
           ←
         </button>
-        <div className="text-center text-sm font-semibold text-slate-900">{title}</div>
-        <button
-          type="button"
-          onClick={onNextMonth}
-          className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
-          aria-label="Next month"
-        >
+        <div className="min-w-0 flex-1 px-1 text-center text-xs font-semibold tracking-tight text-slate-900 sm:text-sm">
+          {title}
+        </div>
+        <button type="button" onClick={onNextMonth} className={NAV_BTN} aria-label="Next month">
           →
         </button>
       </div>
 
-      <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+      <div className="grid grid-cols-7 gap-0.5 text-center text-[9px] font-semibold uppercase tracking-wide text-slate-500 sm:gap-1 sm:text-[11px]">
         {WEEKDAYS.map((w) => (
           <div key={w} className="py-1">
             {w}
@@ -114,10 +109,10 @@ export function ResourceExceptionsCalendar({
         which blows up the first row when the month does not start on Monday.
         Use the same min height as day buttons and uniform grid rows instead.
       */}
-      <div className="mt-1 grid grid-cols-7 gap-1 auto-rows-[minmax(2.75rem,auto)]">
+      <div className="mt-1 grid grid-cols-7 gap-0.5 auto-rows-[minmax(2.5rem,auto)] sm:gap-1 sm:auto-rows-[minmax(3rem,auto)]">
         {cells.map((d, idx) => {
           if (d === null) {
-            return <div key={`e-${idx}`} className="min-h-[2.75rem]" aria-hidden />;
+            return <div key={`e-${idx}`} className="min-h-[2.5rem] sm:min-h-[3rem]" aria-hidden />;
           }
           const ymd = `${year}-${pad2(month)}-${pad2(d)}`;
           const ex = exceptions[ymd];
@@ -167,7 +162,7 @@ export function ResourceExceptionsCalendar({
               key={ymd}
               type="button"
               onClick={() => onDayClick(ymd)}
-              className={`flex min-h-[2.75rem] flex-col items-center justify-center rounded-md px-0.5 text-xs font-medium text-slate-800 transition ${bg} ${ring}`}
+              className={`flex min-h-[2.5rem] flex-col items-center justify-center rounded-md px-0.5 text-[11px] font-medium text-slate-800 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-1 sm:min-h-[3rem] sm:rounded-lg sm:text-xs ${bg} ${ring}`}
               title={label}
               aria-label={`${ymd}${label ? `. ${label}` : ''}`}
               aria-pressed={isEditing || inRange}
@@ -189,7 +184,7 @@ export function ResourceExceptionsCalendar({
         })}
       </div>
 
-      <div className="mt-3 flex flex-wrap gap-3 text-[11px] text-slate-600">
+      <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-[11px] text-slate-600">
         <span className="inline-flex items-center gap-1.5">
           <span className="h-3 w-3 rounded border border-red-200 bg-red-50" aria-hidden />
           Closed

@@ -36,10 +36,12 @@ export function StatTile({
 }) {
   return (
     <div
-      className={`relative flex min-h-[4.5rem] flex-col justify-between rounded-xl border px-3 py-2.5 sm:min-h-0 sm:px-4 sm:py-3 ${colorClasses[color]}`}
+      className={`@container relative flex min-h-[4.5rem] min-w-0 flex-col justify-between overflow-hidden rounded-xl border px-3 py-2.5 sm:min-h-0 sm:px-4 sm:py-3 ${colorClasses[color]}`}
     >
-      <div className="flex items-start justify-between gap-2">
-        <p className="text-2xl font-bold tabular-nums leading-none tracking-tight sm:text-3xl">{value}</p>
+      <div className="flex min-w-0 items-start justify-between gap-2">
+        <p className="min-w-0 max-w-full text-lg font-bold leading-none tracking-tight text-balance tabular-nums @min-[10rem]:text-xl @min-[14rem]:text-2xl @min-[18rem]:text-3xl">
+          {value}
+        </p>
         <div className="flex shrink-0 items-center gap-1.5">
           {sparklineValues && sparklineValues.length > 1 ? <MiniSparkline values={sparklineValues} /> : null}
           {icon ? <span className="opacity-70">{icon}</span> : null}

@@ -18,7 +18,7 @@ import {
   parseVenueFeatureFlags,
 } from '@/lib/feature-flags';
 import { loadActiveVariantForService } from '@/lib/venue/service-variants';
-import { resolveLinkedStaffCreateScope } from '@/lib/booking/staff-booking-access';
+import { resolveLinkedStaffCatalogScope } from '@/lib/booking/staff-booking-access';
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -44,6 +44,7 @@ export async function GET(request: NextRequest) {
     const monthParam = searchParams.get('month');
     const variantId = searchParams.get('variant_id');
     const durationParam = searchParams.get('duration_minutes');
+    const excludeBookingId = searchParams.get('exclude_booking_id');
 
     if (!practitionerId || !serviceId) {
       return NextResponse.json(
@@ -68,11 +69,10 @@ export async function GET(request: NextRequest) {
     const admin = getSupabaseAdminClient();
 
     const ownerVenueParam = searchParams.get('owner_venue_id');
-    const scope = await resolveLinkedStaffCreateScope(
+    const scope = await resolveLinkedStaffCatalogScope(
       admin,
       staff.venue_id,
       ownerVenueParam && UUID_RE.test(ownerVenueParam) ? ownerVenueParam : null,
-      null,
     );
     if (!scope.ok) {
       return NextResponse.json({ error: scope.error }, { status: scope.status });
@@ -118,6 +118,14 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    const monthOptions = {
+      audience: 'staff' as const,
+      variantOverride,
+      customDurationMinutes,
+      excludeBookingId:
+        excludeBookingId && UUID_RE.test(excludeBookingId) ? excludeBookingId : null,
+    };
+
     const available_dates = anyAvailable
       ? await computeAnyAvailableAppointmentDatesInMonth(
           admin,
@@ -125,7 +133,7 @@ export async function GET(request: NextRequest) {
           serviceId,
           year,
           month,
-          { audience: 'staff', variantOverride, customDurationMinutes },
+          monthOptions,
         )
       : await computeAppointmentAvailableDatesInMonth(
           admin,
@@ -134,7 +142,7 @@ export async function GET(request: NextRequest) {
           serviceId,
           year,
           month,
-          { audience: 'staff', variantOverride, customDurationMinutes },
+          monthOptions,
         );
 
     return NextResponse.json(

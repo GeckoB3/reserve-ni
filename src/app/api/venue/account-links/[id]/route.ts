@@ -13,6 +13,8 @@ import {
   notifyLinkAccepted,
   notifyLinkRejected,
   notifyLinkUnlinked,
+  notifyPermissionChangeAccepted,
+  notifyPermissionChangeDeclined,
   notifyPermissionChangeProposed,
 } from '@/lib/linked-accounts/notifications';
 import { reconcileCollectivesAfterLinkChange } from '@/lib/linked-accounts/collectives';
@@ -267,7 +269,10 @@ export async function PATCH(
         ctx.admin,
         otherVenueId,
         ctx.venue.name,
-        describeGrant(theirs).map((s) => `Your venue would ${s}`),
+        [
+          ...describeGrant(mine).map((s) => `Your venue would ${s}`),
+          ...describeGrant(theirs).map((s) => `${ctx.venue.name} would ${s}`),
+        ],
       );
       return NextResponse.json({ link: await singleLinkView(ctx.admin, ctx.venueId, id) });
     }
@@ -299,6 +304,11 @@ export async function PATCH(
       }
       if (action === 'reject_change') {
         await ctx.admin.from('account_links').update({ pending_change: null }).eq('id', id);
+        await notifyPermissionChangeDeclined(
+          ctx.admin,
+          pc.by_venue_id,
+          ctx.venue.name,
+        );
         return NextResponse.json({ link: await singleLinkView(ctx.admin, ctx.venueId, id) });
       }
       // accept_change — apply proposed columns.
@@ -314,6 +324,7 @@ export async function PATCH(
           pending_change: null,
         })
         .eq('id', id);
+      await notifyPermissionChangeAccepted(ctx.admin, pc.by_venue_id, ctx.venue.name);
       // A change may drop visibility below full_details, invalidating any
       // collective that depends on this link (§7.5).
       await reconcileCollectivesAfterLinkChange(ctx.admin, [

@@ -33,6 +33,14 @@ export async function GET(request: NextRequest) {
         ? resourceIdParam
         : undefined;
 
+    const excludeBookingIdParam = request.nextUrl.searchParams.get('exclude_booking_id');
+    const excludeBookingId =
+      excludeBookingIdParam &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(excludeBookingIdParam)
+        ? excludeBookingIdParam
+        : undefined;
+    const skipPastSlots = request.nextUrl.searchParams.get('skip_past_slots') === '1';
+
     const admin = getSupabaseAdminClient();
     const venueMode = await resolveVenueMode(admin, staff.venue_id);
     const canResource =
@@ -47,6 +55,8 @@ export async function GET(request: NextRequest) {
       venueId: staff.venue_id,
       date,
       resourceId,
+      excludeBookingId,
+      skipPastSlotFilter: skipPastSlots,
     });
     const result = computeResourceAvailability(input, durationMinutes);
 

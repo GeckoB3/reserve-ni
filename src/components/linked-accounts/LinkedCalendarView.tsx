@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pill } from '@/components/ui/dashboard/Pill';
-import { Modal, btnDanger, btnPrimary, btnSecondary } from './linked-accounts-ui';
+import { Modal, btnDanger, btnPrimary, btnSecondary, linkedNewBookingButtonClass } from './linked-accounts-ui';
 import type { LinkedBooking, LinkedVenueCalendar } from '@/lib/linked-accounts/calendar';
 import { linkedBookingBarDetailLabel } from '@/lib/linked-accounts/calendar';
 
@@ -73,6 +73,9 @@ export function LinkedCalendarView({
     null,
   );
   const [creating, setCreating] = useState<LinkedVenueCalendar | null>(null);
+  const [viewing, setViewing] = useState<{ venue: LinkedVenueCalendar; booking: LinkedBooking } | null>(
+    null,
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -194,6 +197,7 @@ export function LinkedCalendarView({
               key={venue.venueId}
               venue={venue}
               onEdit={(booking) => setEditing({ venue, booking })}
+              onView={(booking) => setViewing({ venue, booking })}
               onCreate={() => setCreating(venue)}
             />
           ))}
@@ -210,6 +214,15 @@ export function LinkedCalendarView({
             setEditing(null);
             await load();
           }}
+        />
+      ) : null}
+
+      {viewing ? (
+        <LinkedBookingDetailModal
+          venueName={viewing.venue.venueName}
+          visibility={viewing.venue.visibility}
+          booking={viewing.booking}
+          onClose={() => setViewing(null)}
         />
       ) : null}
 
@@ -231,10 +244,12 @@ export function LinkedCalendarView({
 function VenueCalendarBlock({
   venue,
   onEdit,
+  onView,
   onCreate,
 }: {
   venue: LinkedVenueCalendar;
   onEdit: (booking: LinkedBooking) => void;
+  onView: (booking: LinkedBooking) => void;
   onCreate: () => void;
 }) {
   const timeOnly = venue.visibility === 'time_only';
@@ -261,14 +276,22 @@ function VenueCalendarBlock({
           <Pill variant="neutral" size="sm">
             Time blocks only
           </Pill>
+        ) : venue.action === 'none' ? (
+          <Pill variant="neutral" size="sm">
+            View only
+          </Pill>
+        ) : venue.action === 'edit_existing' ? (
+          <Pill variant="neutral" size="sm">
+            Edit existing
+          </Pill>
         ) : null}
         {canCreate ? (
           <button
             type="button"
             onClick={onCreate}
-            className="ml-auto rounded-lg border border-brand-200 bg-brand-50 px-2.5 py-1 text-xs font-semibold text-brand-700 hover:bg-brand-100"
+            className={`ml-auto shrink-0 ${linkedNewBookingButtonClass}`}
           >
-            + New booking
+            New booking
           </button>
         ) : null}
       </div>
@@ -298,6 +321,7 @@ function VenueCalendarBlock({
                           timeOnly={timeOnly}
                           venueName={venue.venueName}
                           onEdit={() => onEdit(b)}
+                          onView={() => onView(b)}
                         />
                       </li>
                     ))}
@@ -317,13 +341,16 @@ function LinkedBookingChip({
   timeOnly,
   venueName,
   onEdit,
+  onView,
 }: {
   booking: LinkedBooking;
   timeOnly: boolean;
   venueName: string;
   onEdit: () => void;
+  onView: () => void;
 }) {
   const canEdit = booking.editable && !timeOnly && booking.status !== 'Cancelled';
+  const canView = !timeOnly && !canEdit;
   const timeLabel = booking.bookingEndTime
     ? `${fmtTime(booking.bookingTime)}–${fmtTime(booking.bookingEndTime)}`
     : fmtTime(booking.bookingTime);
@@ -350,7 +377,9 @@ function LinkedBookingChip({
         <Pill variant={statusVariant(booking.status)} size="sm">
           {booking.status}
         </Pill>
-        {!canEdit ? (
+        {canView ? (
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">View</span>
+        ) : !canEdit ? (
           <span title="You cannot edit this booking" aria-label="Read-only" className="text-slate-400">
             🔒
           </span>
@@ -359,12 +388,21 @@ function LinkedBookingChip({
     </div>
   );
 
-  if (!canEdit) return body;
-  return (
-    <button type="button" onClick={onEdit} className="block w-full text-left hover:opacity-80">
-      {body}
-    </button>
-  );
+  if (canEdit) {
+    return (
+      <button type="button" onClick={onEdit} className="block w-full text-left hover:opacity-80">
+        {body}
+      </button>
+    );
+  }
+  if (canView) {
+    return (
+      <button type="button" onClick={onView} className="block w-full text-left hover:opacity-80">
+        {body}
+      </button>
+    );
+  }
+  return body;
 }
 
 export function EditLinkedBookingModal({
@@ -505,9 +543,7 @@ export function EditLinkedBookingModal({
 
 /**
  * Read-only detail for a linked-venue booking the viewer cannot edit — a
- * `time_only` link, or a `full_details` link granting `act = none` (§4.3).
- * Carries no edit controls; it exists so a click on the calendar grid always
- * does something rather than silently nothing.
+ * `time_only` link, or a `full_details` link granting `act = none` (§5.3).
  */
 export function LinkedBookingDetailModal({
   venueName,
@@ -534,19 +570,23 @@ export function LinkedBookingDetailModal({
       open
       onClose={onClose}
       title={`Booking in ${venueName}`}
-      description="Read-only — this link does not grant you permission to edit this booking."
+      description={
+        timeOnly
+          ? 'Read-only — this link shows busy/free time blocks only.'
+          : 'Read-only — you can view this booking but cannot edit, reschedule or cancel it.'
+      }
     >
       <div className="space-y-3">
-        <dl className="space-y-2 text-sm">
-          <div className="flex justify-between gap-3">
+        <dl className="divide-y divide-slate-100 rounded-xl border border-slate-200 bg-slate-50/40 text-sm">
+          <div className="flex justify-between gap-3 px-3 py-2">
             <dt className="font-medium text-slate-500">Date</dt>
             <dd className="text-slate-800">{booking.bookingDate}</dd>
           </div>
-          <div className="flex justify-between gap-3">
+          <div className="flex justify-between gap-3 px-3 py-2">
             <dt className="font-medium text-slate-500">Time</dt>
             <dd className="tabular-nums text-slate-800">{timeLabel}</dd>
           </div>
-          <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center justify-between gap-3 px-3 py-2">
             <dt className="font-medium text-slate-500">Status</dt>
             <dd>
               <Pill variant={statusVariant(booking.status)} size="sm">
@@ -556,14 +596,44 @@ export function LinkedBookingDetailModal({
           </div>
           {!timeOnly ? (
             <>
-              <div className="flex justify-between gap-3">
+              <div className="flex justify-between gap-3 px-3 py-2">
                 <dt className="font-medium text-slate-500">Client</dt>
-                <dd className="text-slate-800">{booking.guestName ?? '—'}</dd>
+                <dd className="text-right text-slate-800">{booking.guestName ?? '—'}</dd>
               </div>
-              <div className="flex justify-between gap-3">
+              {booking.guestEmail ? (
+                <div className="flex justify-between gap-3 px-3 py-2">
+                  <dt className="font-medium text-slate-500">Email</dt>
+                  <dd className="text-right text-slate-800">{booking.guestEmail}</dd>
+                </div>
+              ) : null}
+              {booking.guestPhone ? (
+                <div className="flex justify-between gap-3 px-3 py-2">
+                  <dt className="font-medium text-slate-500">Phone</dt>
+                  <dd className="text-right text-slate-800">{booking.guestPhone}</dd>
+                </div>
+              ) : null}
+              <div className="flex justify-between gap-3 px-3 py-2">
                 <dt className="font-medium text-slate-500">Service</dt>
-                <dd className="text-slate-800">{booking.serviceName ?? '—'}</dd>
+                <dd className="text-right text-slate-800">{booking.serviceName ?? '—'}</dd>
               </div>
+              {typeof booking.partySize === 'number' ? (
+                <div className="flex justify-between gap-3 px-3 py-2">
+                  <dt className="font-medium text-slate-500">Party size</dt>
+                  <dd className="text-slate-800">{booking.partySize}</dd>
+                </div>
+              ) : null}
+              {booking.depositStatus ? (
+                <div className="flex justify-between gap-3 px-3 py-2">
+                  <dt className="font-medium text-slate-500">Deposit</dt>
+                  <dd className="text-slate-800">{booking.depositStatus}</dd>
+                </div>
+              ) : null}
+              {booking.specialRequests?.trim() ? (
+                <div className="px-3 py-2">
+                  <dt className="font-medium text-slate-500">Guest notes</dt>
+                  <dd className="mt-1 whitespace-pre-wrap text-slate-800">{booking.specialRequests}</dd>
+                </div>
+              ) : null}
             </>
           ) : null}
         </dl>
@@ -572,7 +642,12 @@ export function LinkedBookingDetailModal({
             {venueName} shares time blocks only. Client and service detail are not visible on
             this link.
           </p>
-        ) : null}
+        ) : (
+          <p className="rounded-lg border border-sky-200 bg-sky-50/70 px-3 py-2 text-xs text-sky-900">
+            Linked read-only access — contact {venueName} or ask them to adjust link permissions
+            if you need to make changes.
+          </p>
+        )}
         <div className="flex justify-end">
           <button type="button" className={btnSecondary} onClick={onClose}>
             Close

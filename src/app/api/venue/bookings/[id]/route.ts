@@ -58,6 +58,7 @@ import {
   linkedGrantAllowsMutation,
   loadStaffAccessibleBooking,
 } from '@/lib/booking/staff-booking-access';
+import { validateResourceBookingModification } from '@/lib/booking/validate-resource-booking-modification';
 
 const statusSchema = z.enum(BOOKING_MUTABLE_STATUSES);
 const actualDepartedTimeSchema = z.string().datetime();
@@ -88,7 +89,8 @@ export async function GET(
     if (!loaded.ok) {
       return NextResponse.json({ error: loaded.error }, { status: loaded.status });
     }
-    const { booking, ownerVenueId: scopeVenueId } = loaded.ctx;
+    const { booking, ownerVenueId: scopeVenueId, isOwnVenue, linkedGrant } = loaded.ctx;
+    const scopeDb = isOwnVenue ? staff.db : getSupabaseAdminClient();
 
     const bookingAreaId = (booking as { area_id?: string | null }).area_id;
     const bookingVariantId = (booking as { service_variant_id?: string | null }).service_variant_id;
@@ -106,7 +108,7 @@ export async function GET(
       cde_context,
     ] = await Promise.all([
       bookingAreaId
-        ? staff.db
+        ? scopeDb
             .from('areas')
             .select('name')
             .eq('id', bookingAreaId)
@@ -114,29 +116,29 @@ export async function GET(
             .maybeSingle()
         : Promise.resolve({ data: null as { name?: string } | null }),
       bookingVariantId
-        ? staff.db
+        ? scopeDb
             .from('service_variants')
             .select('name, price_pence')
             .eq('id', bookingVariantId)
             .eq('venue_id', scopeVenueId)
             .maybeSingle()
         : Promise.resolve({ data: null as { name?: string; price_pence?: number | null } | null }),
-      staff.db
+      scopeDb
         .from('guests')
         .select('id, first_name, last_name, email, phone, visit_count, last_visit_date, tags, customer_profile_notes')
         .eq('id', booking.guest_id)
-        .single(),
-      staff.db
+        .maybeSingle(),
+      scopeDb
         .from('events')
         .select('id, event_type, payload, created_at')
         .eq('booking_id', id)
         .order('created_at', { ascending: true }),
-      loadBookingDetailCommunications(staff.db, id),
-      staff.db
+      loadBookingDetailCommunications(scopeDb, id),
+      scopeDb
         .from('booking_table_assignments')
         .select('table_id, table:venue_tables(id, name)')
         .eq('booking_id', id),
-      resolveCdeBookingContext(staff.db, booking as Parameters<typeof resolveCdeBookingContext>[1]),
+      resolveCdeBookingContext(scopeDb, booking as Parameters<typeof resolveCdeBookingContext>[1]),
     ]);
 
     const area_name = (areaResult.data as { name?: string } | null)?.name ?? null;
@@ -149,7 +151,48 @@ export async function GET(
       service_variant_price_pence = (sv as { price_pence?: number | null }).price_pence ?? null;
     }
 
-    const guest = guestResult.data;
+    let guest = guestResult.data as {
+      id: string;
+      first_name: string | null;
+      last_name: string | null;
+      email: string | null;
+      phone: string | null;
+      visit_count?: number | null;
+      last_visit_date?: string | null;
+      tags?: string[] | null;
+      customer_profile_notes?: string | null;
+    } | null;
+    if (!isOwnVenue && linkedGrant && !linkedGrant.pii) {
+      if (guest) {
+        guest = {
+          ...guest,
+          email: null,
+          phone: null,
+          customer_profile_notes: null,
+          tags: [],
+        };
+      } else {
+        const snapFirst = normaliseGuestNamePart(
+          (booking as { guest_first_name?: string | null }).guest_first_name,
+        );
+        const snapLast = normaliseGuestNamePart(
+          (booking as { guest_last_name?: string | null }).guest_last_name,
+        );
+        if (snapFirst || snapLast) {
+          guest = {
+            id: booking.guest_id,
+            first_name: snapFirst,
+            last_name: snapLast,
+            email: null,
+            phone: null,
+            visit_count: null,
+            last_visit_date: null,
+            tags: [],
+            customer_profile_notes: null,
+          };
+        }
+      }
+    }
     const events = eventsResult.data;
     const communications = communicationsResult;
     const tableAssignments = tableAssignmentsResult.data;
@@ -175,7 +218,7 @@ export async function GET(
     let combination_staff_notes: string | null = null;
     if (assignedTables.length >= 2) {
       const key = tableGroupKeyFromIds(assignedTables.map((t) => t.id));
-      const { data: customCombo } = await staff.db
+      const { data: customCombo } = await scopeDb
         .from('table_combinations')
         .select('internal_notes')
         .eq('venue_id', scopeVenueId)
@@ -184,7 +227,7 @@ export async function GET(
       if (customCombo?.internal_notes) {
         combination_staff_notes = customCombo.internal_notes as string;
       } else {
-        const { data: autoOv } = await staff.db
+        const { data: autoOv } = await scopeDb
           .from('combination_auto_overrides')
           .select('internal_notes')
           .eq('venue_id', scopeVenueId)
@@ -259,6 +302,12 @@ export async function PATCH(
     const isStaffAttendanceOnlyPatch =
       bodyKeys.length === 1 && bodyKeys[0] === 'staff_attendance_confirmed';
     if (isStaffAttendanceOnlyPatch) {
+      if (!isOwnVenue && !linkedGrantAllowsMutation(linkedGrant, false)) {
+        return NextResponse.json(
+          { error: 'This link does not allow editing the other venue’s bookings.' },
+          { status: 403 },
+        );
+      }
       const on = Boolean(body.staff_attendance_confirmed);
       const currentStatus = booking.status as string;
       const attPayload: Record<string, unknown> = {
@@ -311,8 +360,14 @@ export async function PATCH(
 
     const admin = getSupabaseAdminClient();
 
-    if (staff.role !== 'admin') {
-      if (isOwnVenue) {
+    if (!isOwnVenue) {
+      if (!linkedGrantAllowsMutation(linkedGrant, false)) {
+        return NextResponse.json(
+          { error: 'This link does not allow editing the other venue’s bookings.' },
+          { status: 403 },
+        );
+      }
+    } else if (staff.role !== 'admin') {
         const scopedCalendarId = await resolveBookingScopedCalendarId(
           admin,
           scopeVenueId,
@@ -337,12 +392,6 @@ export async function PATCH(
         if (!access.ok) {
           return NextResponse.json({ error: access.error }, { status: 403 });
         }
-      } else if (!linkedGrantAllowsMutation(linkedGrant, false)) {
-        return NextResponse.json(
-          { error: 'This link does not allow editing the other venue’s bookings.' },
-          { status: 403 },
-        );
-      }
     }
 
     /** Per-booking salon processing blocks only (no reschedule). */
@@ -1027,8 +1076,22 @@ export async function PATCH(
         }
       }
 
-      const updated = await staff.db.from('bookings').select('*').eq('id', id).single();
-      return NextResponse.json(updated.data);
+      const scheduleModifyRequested =
+        body.booking_date !== undefined ||
+        body.booking_time !== undefined ||
+        body.booking_end_time !== undefined ||
+        body.party_size !== undefined ||
+        body.duration_minutes !== undefined ||
+        body.appointment_service_id !== undefined ||
+        body.service_item_id !== undefined ||
+        body.processing_time_blocks !== undefined ||
+        body.practitioner_id !== undefined ||
+        (body as { service_variant_id?: unknown }).service_variant_id !== undefined;
+
+      if (!scheduleModifyRequested) {
+        const updated = await staff.db.from('bookings').select('*').eq('id', id).single();
+        return NextResponse.json(updated.data);
+      }
     }
 
     if (
@@ -1054,10 +1117,154 @@ export async function PATCH(
         practitioner_id: booking.practitioner_id as string | null | undefined,
         appointment_service_id: booking.appointment_service_id as string | null | undefined,
       });
+
+      if (inferredForModify === 'resource_booking') {
+        if (
+          body.party_size !== undefined ||
+          body.practitioner_id !== undefined ||
+          body.appointment_service_id !== undefined ||
+          body.service_item_id !== undefined ||
+          body.processing_time_blocks !== undefined ||
+          (body as { service_variant_id?: unknown }).service_variant_id !== undefined
+        ) {
+          return NextResponse.json({ error: 'Invalid fields for resource booking modification' }, { status: 400 });
+        }
+
+        const resourceId = booking.resource_id as string | null;
+        if (!resourceId) {
+          return NextResponse.json({ error: 'Booking is missing resource_id' }, { status: 400 });
+        }
+
+        const currentStatus = booking.status as string;
+        if (!['Pending', 'Booked', 'Confirmed', 'Seated'].includes(currentStatus)) {
+          return NextResponse.json({ error: 'This booking can no longer be rescheduled' }, { status: 400 });
+        }
+
+        const newDate = (body.booking_date as string) ?? (booking.booking_date as string);
+        const newTimeRaw =
+          (body.booking_time as string) ??
+          (typeof booking.booking_time === 'string' ? booking.booking_time.slice(0, 5) : '12:00');
+        const timeStr = newTimeRaw.length >= 5 ? newTimeRaw.slice(0, 5) : newTimeRaw;
+        const newTime = timeStr.length === 5 ? `${timeStr}:00` : newTimeRaw;
+
+        const existingEnd =
+          typeof (booking as { booking_end_time?: string | null }).booking_end_time === 'string'
+            ? String((booking as { booking_end_time?: string | null }).booking_end_time).slice(0, 5)
+            : null;
+
+        const validation = await validateResourceBookingModification({
+          admin,
+          venueId: scopeVenueId,
+          bookingId: id,
+          resourceId,
+          newDate,
+          timeStr,
+          durationMinutes: body.duration_minutes as number | null | undefined,
+          bookingEndTime:
+            (body.booking_end_time as string | null | undefined) ??
+            (body.duration_minutes === undefined ? existingEnd : null),
+        });
+
+        if (!validation.ok) {
+          const status = validation.reason.includes('no longer available') ? 409 : 400;
+          return NextResponse.json({ error: validation.reason }, { status });
+        }
+
+        const beforeTime =
+          typeof booking.booking_time === 'string' ? booking.booking_time.slice(0, 5) : '12:00';
+        const bookingStartChanged = newDate !== booking.booking_date || timeStr !== beforeTime;
+
+        const deferModificationGuestNotification =
+          (body as Record<string, unknown>).defer_modification_guest_notification === true ||
+          (body as Record<string, unknown>).defer_modification_notification === true;
+        const skipModificationGuestNotification =
+          (body as Record<string, unknown>).skip_booking_modification_guest_notification === true;
+
+        const [yr, mr, dr] = newDate.split('-').map(Number);
+        const [hr, minr] = timeStr.split(':').map(Number);
+        const estimatedEnd = new Date(Date.UTC(yr!, mr! - 1, dr!, hr!, minr!, 0));
+        estimatedEnd.setMinutes(estimatedEnd.getMinutes() + validation.durationMinutes);
+
+        const bookingUpdate: Record<string, unknown> = {
+          booking_date: newDate,
+          booking_time: newTime,
+          booking_end_time: `${validation.endHHmm}:00`,
+          estimated_end_time: estimatedEnd.toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+
+        const prevUpdatedAt = booking.updated_at as string;
+        const { data: updatedAfterModify, error: modifyUpdErr } = await staff.db
+          .from('bookings')
+          .update(bookingUpdate)
+          .eq('id', id)
+          .eq('updated_at', prevUpdatedAt)
+          .select('*')
+          .maybeSingle();
+
+        if (modifyUpdErr) {
+          console.error('Resource booking modify update failed:', modifyUpdErr);
+          return NextResponse.json({ error: 'Failed to update booking' }, { status: 500 });
+        }
+        if (!updatedAfterModify) {
+          return NextResponse.json(
+            { error: 'Booking was modified elsewhere. Refresh and try again.', code: 'stale_booking' },
+            { status: 412 },
+          );
+        }
+
+        const { logBookingModifiedEvent } = await import('@/lib/booking/log-booking-modified-event');
+        await logBookingModifiedEvent(admin, {
+          venue_id: scopeVenueId,
+          booking_id: id,
+          modification_actor: 'staff',
+          before: {
+            booking_date: booking.booking_date,
+            booking_time: beforeTime,
+            ...(existingEnd ? { booking_end_time: existingEnd } : {}),
+          },
+          after: {
+            booking_date: newDate,
+            booking_time: timeStr,
+            booking_end_time: validation.endHHmm,
+          },
+        });
+
+        if (
+          bookingStartChanged &&
+          !deferModificationGuestNotification &&
+          !skipModificationGuestNotification
+        ) {
+          after(async () => {
+            try {
+              const { executeBookingModificationGuestNotification } = await import(
+                '@/lib/booking/send-booking-modification-guest-notification'
+              );
+              await executeBookingModificationGuestNotification(admin, scopeVenueId, id);
+            } catch (commsErr) {
+              console.error('Resource booking modification notification failed:', commsErr);
+            }
+          });
+        }
+
+        if (bookingStartChanged) {
+          try {
+            await admin
+              .from('communication_logs')
+              .delete()
+              .eq('booking_id', id)
+              .in('message_type', [...COMMUNICATION_LOG_TYPES_RESET_ON_BOOKING_START_CHANGE]);
+          } catch (logResetErr) {
+            console.error('Communication log reset failed after resource modification:', logResetErr);
+          }
+        }
+
+        return NextResponse.json(updatedAfterModify);
+      }
+
       if (
         inferredForModify === 'event_ticket' ||
-        inferredForModify === 'class_session' ||
-        inferredForModify === 'resource_booking'
+        inferredForModify === 'class_session'
       ) {
         return NextResponse.json(
           {

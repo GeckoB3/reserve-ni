@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   linkedBookingBarDetailLabel,
   linkedColumnUsesNativeGrid,
+  linkedGrantActForOwnerVenue,
   resolveLinkedBookingColumnId,
   resolveLinkedGridPractitionerIdForPatch,
 } from './calendar';
@@ -38,6 +39,78 @@ describe('resolveLinkedBookingColumnId', () => {
   it('returns null when neither column key is set', () => {
     expect(resolveLinkedBookingColumnId({ practitioner_id: null, calendar_id: null })).toBeNull();
   });
+
+  it('maps resource bookings onto the host staff column', () => {
+    const columns = new Set(['host-col']);
+    const resourceParent = new Map([['room-a', 'host-col']]);
+    expect(
+      resolveLinkedBookingColumnId(
+        { practitioner_id: null, calendar_id: 'room-a', resource_id: 'room-a' },
+        columns,
+        resourceParent,
+      ),
+    ).toBe('host-col');
+  });
+
+  it('maps resource bookings when only calendar_id is the resource uuid', () => {
+    const columns = new Set(['host-col']);
+    const resourceParent = new Map([['room-a', 'host-col']]);
+    expect(
+      resolveLinkedBookingColumnId(
+        { practitioner_id: null, calendar_id: 'room-a', resource_id: null },
+        columns,
+        resourceParent,
+      ),
+    ).toBe('host-col');
+  });
+
+  it('maps resource bookings when only resource_id is set', () => {
+    const columns = new Set(['host-col']);
+    const resourceParent = new Map([['room-a', 'host-col']]);
+    expect(
+      resolveLinkedBookingColumnId(
+        { practitioner_id: null, calendar_id: null, resource_id: 'room-a' },
+        columns,
+        resourceParent,
+      ),
+    ).toBe('host-col');
+  });
+
+  it('leaves unassigned resources without a host column mapping', () => {
+    const columns = new Set(['host-col']);
+    const resourceParent = new Map([['room-a', 'host-col']]);
+    expect(
+      resolveLinkedBookingColumnId(
+        { practitioner_id: null, calendar_id: 'room-b', resource_id: 'room-b' },
+        columns,
+        resourceParent,
+      ),
+    ).toBe('room-b');
+  });
+
+  it('maps event ticket bookings onto the event calendar column', () => {
+    const columns = new Set(['events-col']);
+    expect(
+      resolveLinkedBookingColumnId(
+        { practitioner_id: null, calendar_id: null, experience_event_id: 'ev-1' },
+        columns,
+        undefined,
+        { eventCalendarId: 'events-col' },
+      ),
+    ).toBe('events-col');
+  });
+
+  it('maps class session bookings onto the instructor calendar column', () => {
+    const columns = new Set(['instructor-col']);
+    expect(
+      resolveLinkedBookingColumnId(
+        { practitioner_id: null, calendar_id: null, class_instance_id: 'ci-1' },
+        columns,
+        undefined,
+        { classCalendarId: 'instructor-col' },
+      ),
+    ).toBe('instructor-col');
+  });
 });
 
 describe('linkedColumnUsesNativeGrid', () => {
@@ -61,10 +134,20 @@ describe('linkedColumnUsesNativeGrid', () => {
 });
 
 describe('linkedBookingBarDetailLabel', () => {
-  it('shows service name for full_details links when available', () => {
+  it('shows guest name for full_details links when available', () => {
     expect(
       linkedBookingBarDetailLabel(
         { guestName: 'Alex', serviceName: 'Cut & blow dry' },
+        'full_details',
+        'Partner Salon',
+      ),
+    ).toBe('Alex');
+  });
+
+  it('falls back to service when full_details has no guest name', () => {
+    expect(
+      linkedBookingBarDetailLabel(
+        { guestName: null, serviceName: 'Cut & blow dry' },
         'full_details',
         'Partner Salon',
       ),
@@ -79,6 +162,21 @@ describe('linkedBookingBarDetailLabel', () => {
         'Partner Salon',
       ),
     ).toBe('Partner Salon — busy');
+  });
+});
+
+describe('linkedGrantActForOwnerVenue', () => {
+  it('returns the linked venue grant act for ExpandedBookingContent', () => {
+    expect(
+      linkedGrantActForOwnerVenue(
+        [{ venueId: 'owner-a', action: 'edit_existing' }],
+        'owner-a',
+      ),
+    ).toBe('edit_existing');
+  });
+
+  it('defaults to none when the owner venue is unknown', () => {
+    expect(linkedGrantActForOwnerVenue([], 'missing')).toBe('none');
   });
 });
 

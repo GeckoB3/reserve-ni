@@ -38,4 +38,5 @@ export interface BookingDetailExpandedContext {
       isAppointment: boolean;
     } | null>
   >;
+  linkedAct?: import('@/lib/linked-accounts/types').LinkActionLevel;
 }

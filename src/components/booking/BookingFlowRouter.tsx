@@ -115,7 +115,14 @@ export function BookingFlowRouter({
     case 'class_session':
       return <ClassBookingFlow venue={venue} cancellationPolicy={cancellationPolicy} />;
     case 'resource_booking':
-      return <ResourceBookingFlow venue={venue} cancellationPolicy={cancellationPolicy} />;
+      return (
+        <ResourceBookingFlow
+          venue={venue}
+          cancellationPolicy={cancellationPolicy}
+          embed={embed}
+          accentColour={accentColour}
+        />
+      );
     default:
       return (
         <BookingFlow

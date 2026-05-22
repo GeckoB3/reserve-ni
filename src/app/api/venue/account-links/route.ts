@@ -187,15 +187,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to send link request.' }, { status: 500 });
     }
 
-    // What the recipient venue will be able to do to the requester's data.
-    const recipientCanBullets = describeGrant(mine).map(
-      (s) => `${ctx.venue.name} will be able to ${s}`,
-    );
+    const permissionBullets = [
+      ...describeGrant(theirs).map((s) => `${ctx.venue.name} will be able to ${s}`),
+      ...describeGrant(mine).map((s) => `Your venue will be able to ${s}`),
+    ];
     await notifyLinkRequestReceived(
       ctx.admin,
       targetVenueId,
       ctx.venue.name,
-      recipientCanBullets,
+      permissionBullets,
     );
 
     const links = await loadLinkViewsForVenue(ctx.admin, ctx.venueId);

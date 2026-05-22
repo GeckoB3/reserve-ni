@@ -117,6 +117,8 @@ export interface GuestDetails {
   occasion?: string;
   /** Public booking flow: venue marketing consent from confirm step. */
   marketing_consent?: boolean;
+  /** Staff flow: guest picked from saved contacts autocomplete. */
+  returning_guest?: boolean;
 }
 
 export type BookingStep = 'date' | 'slot' | 'details' | 'payment' | 'confirmation';

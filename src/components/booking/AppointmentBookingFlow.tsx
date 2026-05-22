@@ -1687,7 +1687,9 @@ export function AppointmentBookingFlow({
               ...(staffBookingFlowDurationMs(staffFlowStartedAtRef.current) != null
                 ? { staff_booking_duration_ms: staffBookingFlowDurationMs(staffFlowStartedAtRef.current) }
                 : {}),
-              ...(staffRebookBootstrap?.guest ? { returning_guest: true } : {}),
+              ...(staffRebookBootstrap?.guest || details.returning_guest
+                ? { returning_guest: true }
+                : {}),
               ...(linkedOwnerVenueId ? { owner_venue_id: linkedOwnerVenueId } : {}),
             }),
           });

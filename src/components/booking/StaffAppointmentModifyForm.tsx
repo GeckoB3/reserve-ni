@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { StaffExpandedBookingModifySource } from '@/components/booking/StaffExpandedBookingModifyModal';
+import { StaffAppointmentModifyDateTimePicker } from '@/components/booking/StaffAppointmentModifyDateTimePicker';
 import { minutesToTime, timeToMinutes } from '@/lib/availability';
 import {
   MAX_APPOINTMENT_CORE_DURATION_MINUTES,
@@ -69,14 +70,25 @@ function buildPatchPayload(params: {
   return body;
 }
 
+function ownerVenueCatalogQuery(ownerVenueId: string | undefined): string {
+  if (!ownerVenueId) return '';
+  return `?owner_venue_id=${encodeURIComponent(ownerVenueId)}`;
+}
+
 export function StaffAppointmentModifyForm({
   bookingId,
   booking,
+  ownerVenueId,
+  catalogOwnerVenueId,
   onSaved,
   onClose,
 }: {
   bookingId: string;
   booking: StaffExpandedBookingModifySource;
+  /** Owner venue for availability calendar (always the booking's venue). */
+  ownerVenueId: string;
+  /** When modifying a linked-venue booking, load services/practitioners from the owner venue. */
+  catalogOwnerVenueId?: string;
   onSaved: () => void;
   onClose: () => void;
 }) {
@@ -151,11 +163,16 @@ export function StaffAppointmentModifyForm({
 
   useEffect(() => {
     let cancelled = false;
+    const ownerQ = ownerVenueCatalogQuery(catalogOwnerVenueId);
+    const prParams = new URLSearchParams({ roster: '1', active_only: '1' });
+    if (catalogOwnerVenueId) {
+      prParams.set('owner_venue_id', catalogOwnerVenueId);
+    }
     void (async () => {
       try {
         const [svcRes, prRes] = await Promise.all([
-          fetch('/api/venue/appointment-services'),
-          fetch('/api/venue/practitioners?roster=1&active_only=1'),
+          fetch(`/api/venue/appointment-services${ownerQ}`),
+          fetch(`/api/venue/practitioners?${prParams}`),
         ]);
         const svcJson = (await svcRes.json().catch(() => ({}))) as {
           services?: ServiceRow[];
@@ -186,12 +203,12 @@ export function StaffAppointmentModifyForm({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [catalogOwnerVenueId]);
 
   useEffect(() => {
     if (services.length === 0) return;
     if (!services.some((s) => s.id === serviceId)) {
-      setServiceWarning("This booking's service is no longer in your catalogue.");
+      setServiceWarning("This booking's service is no longer in the catalogue.");
     } else {
       setServiceWarning(null);
     }
@@ -222,6 +239,11 @@ export function StaffAppointmentModifyForm({
     if (!practitionerId || !serviceId) {
       setValidationState('invalid');
       setValidationMessage('Select a service and staff calendar.');
+      return;
+    }
+    if (!bookingTime) {
+      setValidationState('invalid');
+      setValidationMessage('Select a time.');
       return;
     }
     if (requiresVariant && !variantId) {
@@ -301,6 +323,7 @@ export function StaffAppointmentModifyForm({
     saving ||
     !hasChanges ||
     Boolean(serviceWarning) ||
+    !bookingTime ||
     validationState === 'loading' ||
     validationState === 'invalid' ||
     validationState === 'idle' ||
@@ -383,11 +406,7 @@ export function StaffAppointmentModifyForm({
         <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">{serviceWarning}</p>
       ) : null}
 
-      {validationState === 'loading' ? (
-        <p className="text-xs text-slate-500">Checking availability…</p>
-      ) : validationState === 'valid' && hasChanges ? (
-        <p className="text-xs font-medium text-emerald-700">Available for this staff and time.</p>
-      ) : validationState === 'invalid' && validationMessage ? (
+      {validationState === 'invalid' && validationMessage && !bookingTime ? (
         <p className="rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-xs text-red-800">{validationMessage}</p>
       ) : !hasChanges ? (
         <p className="text-xs text-slate-500">Adjust a field to check availability and enable save.</p>
@@ -454,27 +473,27 @@ export function StaffAppointmentModifyForm({
         </select>
       </label>
 
-      <label className="block text-xs font-semibold text-slate-700">
-        Date
-        <input
-          type="date"
-          value={bookingDate}
-          onChange={(e) => setBookingDate(e.target.value)}
-          className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-        />
-      </label>
+      <StaffAppointmentModifyDateTimePicker
+        ownerVenueId={ownerVenueId}
+        linkedOwnerVenueId={catalogOwnerVenueId}
+        bookingId={bookingId}
+        initialBookingDate={booking.booking_date}
+        initialBookingTime={booking.booking_time.slice(0, 5)}
+        practitionerId={practitionerId}
+        serviceId={serviceId}
+        variantId={requiresVariant ? variantId : null}
+        durationMinutes={durationMinutes}
+        bookingDate={bookingDate}
+        bookingTime={bookingTime}
+        onBookingDateChange={setBookingDate}
+        onBookingTimeChange={setBookingTime}
+        validationState={validationState}
+        validationMessage={validationMessage}
+        disabled={Boolean(catalogError) || Boolean(serviceWarning) || !practitionerId || !serviceId}
+      />
 
       <div className="grid gap-3 sm:grid-cols-2">
-        <label className="block text-xs font-semibold text-slate-700">
-          Start time
-          <input
-            type="time"
-            value={bookingTime}
-            onChange={(e) => setBookingTime(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-          />
-        </label>
-        <label className="block text-xs font-semibold text-slate-700">
+        <label className="block text-xs font-semibold text-slate-700 sm:col-span-2">
           Duration (minutes)
           <input
             type="number"

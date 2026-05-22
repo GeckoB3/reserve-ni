@@ -17,6 +17,8 @@ import { LinkedAccountAuditModal } from '@/components/linked-accounts/LinkedAcco
 import { VenueCollectivesPanel } from '@/components/linked-accounts/VenueCollectivesPanel';
 import {
   describeGrant,
+  grantsEqual,
+  isIncreaseOnly,
   isReductionOnly,
   normaliseGrant,
 } from '@/lib/linked-accounts/permissions';
@@ -27,6 +29,7 @@ import {
   type LinkGrant,
 } from '@/lib/linked-accounts/types';
 import type { EligibilityResult } from '@/lib/linked-accounts/eligibility';
+import { notifyLinkedAccountIncomingChanged } from '@/lib/linked-accounts/incoming-banner-events';
 
 interface ApiData {
   eligibility: EligibilityResult;
@@ -233,6 +236,7 @@ export function LinkedAccountsSection({ venueName }: { venueName: string }) {
                       throw new Error(j.error ?? 'Failed to update link.');
                     }
                     await load();
+                    notifyLinkedAccountIncomingChanged();
                   } catch (err) {
                     setActionError(
                       err instanceof Error ? err.message : 'Failed to update link.',
@@ -441,6 +445,7 @@ export function LinkedAccountsSection({ venueName }: { venueName: string }) {
           onDone={async () => {
             setReviewLink(null);
             await load();
+            notifyLinkedAccountIncomingChanged();
           }}
           onError={setActionError}
         />
@@ -626,10 +631,17 @@ function ActiveLinkRow({
         <button type="button" className={btnSecondary} onClick={onAudit}>
           View audit log
         </button>
-        {!suspended ? (
+        {!suspended && !link.pendingChange ? (
           <button type="button" className={btnSecondary} disabled={busy} onClick={onEdit}>
             Edit permissions
           </button>
+        ) : null}
+        {!suspended && link.pendingChange ? (
+          <p className="w-full text-xs text-slate-500">
+            {link.pendingChange.proposedByMe
+              ? 'Withdraw your pending permission change above before proposing a new one.'
+              : 'Respond to the pending permission change above before proposing a new one.'}
+          </p>
         ) : null}
         <button type="button" className={btnSecondary} disabled={busy} onClick={onReduce}>
           Reduce access now
@@ -933,13 +945,36 @@ function EditPermissionsModal({
   const [theirs, setTheirs] = useState<LinkGrant>(link.iCan);
   const [busy, setBusy] = useState(false);
 
+  const currentMine = normaliseGrant(link.theyCan);
+  const currentTheirs = normaliseGrant(link.iCan);
+  const nextMine = normaliseGrant(mine);
+  const nextTheirs = normaliseGrant(theirs);
+  const mineChanged = !grantsEqual(currentMine, nextMine);
+  const theirsChanged = !grantsEqual(currentTheirs, nextTheirs);
+  const onlyMineChanged = mineChanged && !theirsChanged;
+  const canApplyMineIncrease = onlyMineChanged && isIncreaseOnly(currentMine, nextMine);
+  const canApplyMineReduction = onlyMineChanged && isReductionOnly(currentMine, nextMine);
+  const needsNegotiation = theirsChanged || (mineChanged && !canApplyMineIncrease && !canApplyMineReduction);
+
+  const submitLabel = canApplyMineIncrease
+    ? 'Expand access now'
+    : canApplyMineReduction
+      ? 'Reduce access now'
+      : 'Propose change';
+
   return (
     <Modal
       open
       onClose={onClose}
       busy={busy}
       title={`Edit permissions with ${link.otherVenue.name}`}
-      description="Changes are proposed to the other venue and take effect once they accept. To reduce access immediately without consent, use “Reduce access now”."
+      description={
+        needsNegotiation
+          ? 'Changes that affect what you can do on their data, or both directions at once, are proposed to the other venue and take effect once they accept. Expanding or reducing only what you grant takes effect immediately.'
+          : canApplyMineIncrease
+            ? 'You are expanding access your venue grants. This takes effect immediately.'
+            : 'You are reducing access your venue grants. This takes effect immediately.'
+      }
     >
       <GrantPairEditor
         otherVenueName={link.otherVenue.name}
@@ -949,36 +984,62 @@ function EditPermissionsModal({
         onChangeTheirs={setTheirs}
         disabled={busy}
       />
+      {needsNegotiation && link.pendingChange ? (
+        <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          {link.pendingChange.proposedByMe
+            ? 'Withdraw your pending change first, or use the controls above to expand or reduce only what you grant.'
+            : 'Accept or decline the pending change above before proposing a new one.'}
+        </p>
+      ) : null}
       <div className="mt-4 flex justify-end gap-2">
         <button type="button" className={btnSecondary} disabled={busy} onClick={onClose}>
           Cancel
         </button>
         <button
           type="button"
-          className={btnPrimary}
+          className={canApplyMineReduction ? btnDanger : btnPrimary}
           disabled={
             busy ||
-            (normaliseGrant(mine).calendar === 'none' &&
-              normaliseGrant(theirs).calendar === 'none')
+            (!mineChanged && !theirsChanged) ||
+            (nextMine.calendar === 'none' && nextTheirs.calendar === 'none') ||
+            (needsNegotiation && !!link.pendingChange)
           }
           onClick={async () => {
             setBusy(true);
             try {
-              const res = await fetch(`/api/venue/account-links/${link.id}`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action: 'propose_change', grants: { mine, theirs } }),
-              });
-              const json = await res.json();
-              if (!res.ok) throw new Error(json.error ?? 'Failed to propose change.');
+              if (canApplyMineIncrease) {
+                const res = await fetch(`/api/venue/account-links/${link.id}/grant`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ grant: nextMine }),
+                });
+                const json = await res.json();
+                if (!res.ok) throw new Error(json.error ?? 'Failed to expand access.');
+              } else if (canApplyMineReduction) {
+                const res = await fetch(`/api/venue/account-links/${link.id}/reduce`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ grant: nextMine }),
+                });
+                const json = await res.json();
+                if (!res.ok) throw new Error(json.error ?? 'Failed to reduce access.');
+              } else {
+                const res = await fetch(`/api/venue/account-links/${link.id}`, {
+                  method: 'PATCH',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ action: 'propose_change', grants: { mine, theirs } }),
+                });
+                const json = await res.json();
+                if (!res.ok) throw new Error(json.error ?? 'Failed to propose change.');
+              }
               onDone();
             } catch (err) {
-              onError(err instanceof Error ? err.message : 'Failed to propose change.');
+              onError(err instanceof Error ? err.message : 'Failed to update permissions.');
               setBusy(false);
             }
           }}
         >
-          {busy ? 'Proposing…' : 'Propose change'}
+          {busy ? 'Saving…' : submitLabel}
         </button>
       </div>
     </Modal>
@@ -999,7 +1060,10 @@ function ReduceAccessModal({
   // theyCan = what my venue currently grants the other venue.
   const [grant, setGrant] = useState<LinkGrant>(link.theyCan);
   const [busy, setBusy] = useState(false);
-  const isReduction = isReductionOnly(normaliseGrant(link.theyCan), normaliseGrant(grant));
+  const current = normaliseGrant(link.theyCan);
+  const next = normaliseGrant(grant);
+  const isReduction = isReductionOnly(current, next);
+  const hasChanged = !grantsEqual(current, next);
 
   return (
     <Modal
@@ -1027,7 +1091,7 @@ function ReduceAccessModal({
         <button
           type="button"
           className={btnDanger}
-          disabled={busy || !isReduction}
+          disabled={busy || !isReduction || !hasChanged}
           onClick={async () => {
             setBusy(true);
             try {

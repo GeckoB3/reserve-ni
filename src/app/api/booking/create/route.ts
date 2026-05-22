@@ -42,7 +42,7 @@ import {
 import { cancellationDeadlineHoursBefore } from '@/lib/booking/cancellation-deadline';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { resolveCancellationNoticeHoursForCreate } from '@/lib/booking/resolve-cancellation-notice-hours';
-import { isGuestBookingDateAllowed, loadServiceEntityBookingWindow } from '@/lib/booking/entity-booking-window';
+import { isGuestBookingDateAllowed, entityBookingWindowFromRow, loadServiceEntityBookingWindow } from '@/lib/booking/entity-booking-window';
 import {
   hasNonTableBookingPayload,
   inferSecondaryBookingModelFromPayload,
@@ -1042,6 +1042,17 @@ async function handleNonTableBooking(
       ((parseInt(timeStr.slice(0, 2)) * 60) + parseInt(timeStr.slice(3, 5)))
     );
     const input = await fetchResourceInput({ supabase, venueId: venue_id, date: booking_date, resourceId: resource_id });
+    const resourceRow = input.resources.find((r) => r.id === resource_id);
+    if (
+      resourceRow &&
+      !isGuestBookingDateAllowed(
+        booking_date,
+        entityBookingWindowFromRow(resourceRow as unknown as Record<string, unknown>),
+        venueTzResource,
+      )
+    ) {
+      return NextResponse.json({ error: 'This date is not available for booking' }, { status: 400 });
+    }
     const result = computeResourceAvailability(input, durationMinutes);
     const res = result.find((r) => r.id === resource_id);
     const slotAvailable = res?.slots.some((s) => s.start_time === timeStr);

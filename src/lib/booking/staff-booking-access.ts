@@ -102,6 +102,7 @@ export async function loadStaffAccessibleBooking(
   };
 }
 
+
 export function linkedGrantAllowsMutation(
   grant: LinkGrant | null,
   isOwnVenue: boolean,
@@ -111,6 +112,14 @@ export function linkedGrantAllowsMutation(
 }
 
 export function linkedGrantAllowsCancel(
+  grant: LinkGrant | null,
+  isOwnVenue: boolean,
+): boolean {
+  if (isOwnVenue) return true;
+  return grant?.act === 'create_edit_cancel';
+}
+
+export function linkedGrantAllowsCreate(
   grant: LinkGrant | null,
   isOwnVenue: boolean,
 ): boolean {
@@ -169,4 +178,39 @@ export async function resolveLinkedStaffCreateScope(
       actorUserId,
     },
   };
+}
+
+/** Resolve target venue for staff catalog reads (own venue or linked owner with edit grant). */
+export async function resolveLinkedStaffCatalogScope(
+  admin: ReturnType<typeof getSupabaseAdminClient>,
+  staffVenueId: string,
+  ownerVenueId: string | undefined | null,
+): Promise<
+  | { ok: true; venueId: string }
+  | { ok: false; status: 400 | 403; error: string }
+> {
+  if (!ownerVenueId || ownerVenueId === staffVenueId) {
+    return { ok: true, venueId: staffVenueId };
+  }
+
+  const access = await resolveCallerGrantOverVenue(admin, staffVenueId, ownerVenueId);
+  if (!access) {
+    return { ok: false, status: 403, error: 'You do not have an active link with that venue.' };
+  }
+  if (!linkedGrantHasFullDetails(access.grant, false)) {
+    return {
+      ok: false,
+      status: 403,
+      error: 'This link does not include full booking details from the other venue.',
+    };
+  }
+  if (!linkedGrantAllowsMutation(access.grant, false)) {
+    return {
+      ok: false,
+      status: 403,
+      error: 'This link does not allow modifying bookings in the other venue.',
+    };
+  }
+
+  return { ok: true, venueId: ownerVenueId };
 }

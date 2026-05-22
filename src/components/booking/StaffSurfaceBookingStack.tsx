@@ -91,9 +91,20 @@ export interface StaffSurfaceBookingStackProps {
   initialStaffSurfaceTabId?: StaffBookingSurfaceTabId;
   linkedOwnerVenueId?: string;
   linkedVenueName?: string;
+  preselectedExperienceEventId?: string;
+  preselectedEventDate?: string;
+  preselectedEventTime?: string;
 }
 
-function staffSurfacePropsKey(bookingModel: BookingModel, enabledModels: BookingModel[]): string {
+function staffSurfacePropsKey(
+  bookingModel: BookingModel,
+  enabledModels: BookingModel[],
+  linkedOwnerVenueId?: string,
+  preselectedExperienceEventId?: string,
+): string {
+  if (linkedOwnerVenueId && preselectedExperienceEventId) {
+    return `linked-event:${linkedOwnerVenueId}:${preselectedExperienceEventId}`;
+  }
   return `${bookingModel}:${[...enabledModels].sort().join(',')}`;
 }
 
@@ -114,7 +125,12 @@ function resolveInitialStaffSurfaceTab(
  * Remounts when booking surfaces change so internal tab state resets without `useEffect`.
  */
 export function StaffSurfaceBookingStack(props: StaffSurfaceBookingStackProps) {
-  const k = staffSurfacePropsKey(props.bookingModel, props.enabledModels);
+  const k = staffSurfacePropsKey(
+    props.bookingModel,
+    props.enabledModels,
+    props.linkedOwnerVenueId,
+    props.preselectedExperienceEventId,
+  );
   return <StaffSurfaceBookingStackInner key={k} {...props} />;
 }
 
@@ -138,6 +154,9 @@ function StaffSurfaceBookingStackInner({
   initialStaffSurfaceTabId,
   linkedOwnerVenueId,
   linkedVenueName: _linkedVenueName,
+  preselectedExperienceEventId,
+  preselectedEventDate,
+  preselectedEventTime,
 }: StaffSurfaceBookingStackProps) {
   const isControlled =
     typeof controlledActiveTab !== 'undefined' && typeof onActiveTabChange === 'function';
@@ -167,6 +186,9 @@ function StaffSurfaceBookingStackInner({
     effectiveBookingModel,
     effectiveEnabledModels.join('|'),
     initialStaffSurfaceTabId ?? '',
+    preselectedExperienceEventId ?? '',
+    preselectedEventDate ?? '',
+    preselectedEventTime ?? '',
   ].join(':');
 
   const [tabScope, setTabScope] = useState(tabScopeKey);
@@ -183,6 +205,13 @@ function StaffSurfaceBookingStackInner({
 
   const activeTab = isControlled ? controlledActiveTab! : internalTab;
 
+  /** Calendar event prefill: always render the Event surface once it is exposed. */
+  const isLinkedEventPrefill = Boolean(preselectedExperienceEventId && linkedOwnerVenueId);
+  const displayActiveTab: StaffBookingSurfaceTabId =
+    preselectedExperienceEventId && surfaceTabs.some((t) => t.id === 'event_ticket')
+      ? 'event_ticket'
+      : activeTab;
+
   const setActiveTab = (id: StaffBookingSurfaceTabId) => {
     if (isControlled) {
       onActiveTabChange!(id);
@@ -190,6 +219,13 @@ function StaffSurfaceBookingStackInner({
       setInternalTab(id);
     }
   };
+
+  useEffect(() => {
+    if (isControlled || !preselectedExperienceEventId) return;
+    if (surfaceTabs.some((t) => t.id === 'event_ticket') && activeTab !== 'event_ticket') {
+      setInternalTab('event_ticket');
+    }
+  }, [isControlled, preselectedExperienceEventId, surfaceTabs, activeTab]);
 
   useEffect(() => {
     if (linkedOwnerVenueId) {
@@ -255,10 +291,40 @@ function StaffSurfaceBookingStackInner({
   const staffBookingSource = walkInDefaultSource ?? 'phone';
   const isAppointmentPlan = isUnifiedSchedulingVenue(effectiveBookingModel);
 
+  const renderEventBookingFlow = (v: VenuePublic): ReactNode => (
+    <EventBookingFlow
+      venue={v}
+      bookingAudience="staff"
+      staffBookingSource={staffBookingSource}
+      onBookingCreated={onCreated}
+      linkedOwnerVenueId={linkedOwnerVenueId}
+      preselectedExperienceEventId={preselectedExperienceEventId}
+      preselectedEventDate={preselectedEventDate}
+      preselectedEventTime={preselectedEventTime}
+    />
+  );
+
   const body = (): ReactNode => {
     if (venueError) {
       return <p className="text-sm text-red-600">{venueError}</p>;
     }
+
+    if (isLinkedEventPrefill) {
+      if (!resolvedVenue) {
+        return (
+          <div className="flex flex-col items-center justify-center gap-3 py-12">
+            <div className="h-8 w-8 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
+            <p className="text-sm text-slate-500">Loading linked venue…</p>
+          </div>
+        );
+      }
+      return renderEventBookingFlow({
+        ...resolvedVenue,
+        id: resolvedVenue.id || effectiveVenueId,
+        currency: effectiveCurrency,
+      });
+    }
+
     if (!resolvedVenue) {
       return (
         <div className="flex items-center justify-center py-12">
@@ -269,7 +335,7 @@ function StaffSurfaceBookingStackInner({
 
     const v = resolvedVenue;
 
-    switch (activeTab) {
+    switch (displayActiveTab) {
       case 'table_reservation':
         if (!surfaceTabs.some((t) => t.id === 'table_reservation')) return null;
         if (bookingIntent === 'walk-in') {
@@ -296,7 +362,7 @@ function StaffSurfaceBookingStackInner({
             initialTime={initialTime}
             onCreated={onCreated}
             onClose={onClose}
-            staffRebookBootstrap={activeTab === 'table_reservation' ? staffRebookBootstrap : null}
+            staffRebookBootstrap={displayActiveTab === 'table_reservation' ? staffRebookBootstrap : null}
           />
         );
       case 'unified_scheduling':
@@ -310,20 +376,13 @@ function StaffSurfaceBookingStackInner({
             initialDate={initialDate}
             initialTime={initialTime}
             preselectedPractitionerId={preselectedPractitionerId}
-            staffRebookBootstrap={activeTab === 'unified_scheduling' ? staffRebookBootstrap : null}
+            staffRebookBootstrap={displayActiveTab === 'unified_scheduling' ? staffRebookBootstrap : null}
             linkedOwnerVenueId={linkedOwnerVenueId}
           />
         );
       case 'event_ticket':
         if (!surfaceTabs.some((t) => t.id === 'event_ticket')) return null;
-        return (
-          <EventBookingFlow
-            venue={v}
-            bookingAudience="staff"
-            staffBookingSource={staffBookingSource}
-            onBookingCreated={onCreated}
-          />
-        );
+        return renderEventBookingFlow(v);
       case 'class_session':
         if (!surfaceTabs.some((t) => t.id === 'class_session')) return null;
         return (
@@ -332,6 +391,7 @@ function StaffSurfaceBookingStackInner({
             bookingAudience="staff"
             staffBookingSource={staffBookingSource}
             onBookingCreated={onCreated}
+            linkedOwnerVenueId={linkedOwnerVenueId}
           />
         );
       case 'resource_booking':
@@ -342,6 +402,7 @@ function StaffSurfaceBookingStackInner({
             bookingAudience="staff"
             staffBookingSource={staffBookingSource}
             onBookingCreated={onCreated}
+            staffRebookBootstrap={displayActiveTab === 'resource_booking' ? staffRebookBootstrap : null}
           />
         );
       default:
@@ -349,15 +410,19 @@ function StaffSurfaceBookingStackInner({
     }
   };
 
-  const contentWidthClass = staffSurfaceBookingWidthClass(surfaceTabs, activeTab, {
+  const contentWidthClass = staffSurfaceBookingWidthClass(surfaceTabs, displayActiveTab, {
     tableAdvancedMode: advancedMode,
   });
+
+  if (isLinkedEventPrefill) {
+    return <div className={`mx-auto w-full ${contentWidthClass}`}>{body()}</div>;
+  }
 
   return (
     <>
       <StaffBookingSurfaceTabsBar
         tabs={tabsForBar}
-        activeId={activeTab}
+        activeId={displayActiveTab}
         onChange={setActiveTab}
         ariaLabel={
           isAppointmentPlan
