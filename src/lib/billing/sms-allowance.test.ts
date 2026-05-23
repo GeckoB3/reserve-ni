@@ -20,8 +20,9 @@ describe('computeSmsMonthlyAllowance', () => {
     expect(computeSmsMonthlyAllowance('appointments', null)).toBe(SMS_INCLUDED_APPOINTMENTS);
     expect(SMS_INCLUDED_APPOINTMENTS).toBe(500);
   });
-  it('returns 800 for restaurant and founding', () => {
+  it('returns 500 for restaurant and founding', () => {
     expect(computeSmsMonthlyAllowance('restaurant', null)).toBe(SMS_INCLUDED_RESTAURANT);
     expect(computeSmsMonthlyAllowance('founding', null)).toBe(SMS_INCLUDED_RESTAURANT);
+    expect(SMS_INCLUDED_RESTAURANT).toBe(500);
   });
 });

@@ -86,7 +86,7 @@ const ACCOUNTS = [
     businessCategory: 'food_drink',
     terminology: { client: 'Guest', booking: 'Booking', staff: 'Staff' },
     calendarCount: null,
-    smsMonthlyAllowance: 800,
+    smsMonthlyAllowance: 500,
     appointmentsUnifiedFlow: false,
   },
 ];

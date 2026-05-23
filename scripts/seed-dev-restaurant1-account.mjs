@@ -113,7 +113,7 @@ async function main() {
     onboarding_step: 0,
     enabled_models: [],
     active_booking_models: ACTIVE_BOOKING_MODELS,
-    sms_monthly_allowance: 800,
+    sms_monthly_allowance: 500,
     stripe_subscription_id: DEV_SUB_ID,
     stripe_subscription_item_id: DEV_SUB_ITEM_ID,
     stripe_sms_subscription_item_id: DEV_SMS_ITEM_ID,

@@ -57,7 +57,7 @@ async function main() {
 
   const restaurantProduct = await stripe.products.create({
     name: 'ReserveNI Restaurant',
-    description: 'Restaurant plan - unlimited calendars, table management, 800 SMS/month included. £79/month.',
+    description: 'Restaurant plan - unlimited calendars, table management, 500 SMS/month included. £79/month.',
   });
 
   const restaurantPrice = await stripe.prices.create({

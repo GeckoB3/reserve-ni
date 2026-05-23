@@ -10,10 +10,10 @@ export const SMS_INCLUDED_APPOINTMENTS = 500;
 export const SMS_INCLUDED_PLUS = 250;
 
 /** Included SMS per month on the Restaurant plan (and Founding). */
-export const SMS_INCLUDED_RESTAURANT = 800;
+export const SMS_INCLUDED_RESTAURANT = 500;
 
 /**
- * Light: 100; Plus: 250; Pro (appointments): 500; Restaurant / Founding: 800.
+ * Light: 100; Plus: 250; Pro (appointments): 500; Restaurant / Founding: 500.
  * Must match `venues.sms_monthly_allowance` persisted by `updateVenueSmsMonthlyAllowance`.
  * Call after subscription tier changes.
  */
