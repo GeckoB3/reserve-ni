@@ -1,4 +1,5 @@
 import type Stripe from 'stripe';
+import { SIGNUP_TRIAL_DAYS } from '@/lib/signup-trial-copy';
 
 /**
  * Metered SMS overage price (Stripe Dashboard -> Products, backed by SMS usage meter).
@@ -24,7 +25,7 @@ export function getStripeAppointmentsPlusPriceId(): string | undefined {
   return id || undefined;
 }
 
-/** Appointments Pro (internal `pricing_tier` = `appointments`), £79/mo recurring. */
+/** Appointments Pro (internal `pricing_tier` = `appointments`), £99/mo recurring. */
 export function getStripeAppointmentsProPriceId(): string | undefined {
   const id = process.env.STRIPE_APPOINTMENTS_PRO_PRICE_ID?.trim();
   return id || undefined;
@@ -60,7 +61,7 @@ export function findMainPlanSubscriptionItem(sub: Stripe.Subscription): Stripe.S
   return sub.items.data[0];
 }
 
-/** Metered line item used for SMS overage meter events (6p or Light 8p). */
+/** Metered line item used for SMS overage meter events (6p). Legacy Light 8p items may still exist on old subscriptions. */
 export function findSmsMeteredSubscriptionItem(sub: Stripe.Subscription): Stripe.SubscriptionItem | undefined {
   const candidates = [
     getStripeSmsOveragePriceId(),
@@ -90,6 +91,19 @@ export function getPersistedSubscriptionItemIds(sub: Stripe.Subscription): Persi
  * Checkout line items: main plan + optional metered SMS price.
  * Metered prices are added without quantity (Stripe bills on reported meter events).
  */
+/**
+ * Subscription settings for new signup Checkout only. Do not use for resubscribe or plan upgrades.
+ *
+ * Stripe rejects `trial_settings.end_behavior.missing_payment_method: pause` when the subscription
+ * includes metered prices (SMS overage). Failed trial-end charges are handled in the subscription
+ * webhook via `pauseSubscriptionOnTrialEndPaymentFailure`.
+ */
+export function buildSignupCheckoutSubscriptionData(): Stripe.Checkout.SessionCreateParams.SubscriptionData {
+  return {
+    trial_period_days: SIGNUP_TRIAL_DAYS,
+  };
+}
+
 export function buildCheckoutLineItems(mainPriceId: string, mainQuantity: number): Stripe.Checkout.SessionCreateParams.LineItem[] {
   const sms = getStripeSmsOveragePriceId();
   const items: Stripe.Checkout.SessionCreateParams.LineItem[] = [
@@ -102,7 +116,7 @@ export function buildCheckoutLineItems(mainPriceId: string, mainQuantity: number
 }
 
 /**
- * Appointments Plus Checkout: £35/mo + optional metered SMS overage (6p).
+ * Appointments Plus Checkout: £49/mo + optional metered SMS overage (6p).
  */
 export function buildAppointmentsPlusCheckoutLineItems(mainQuantity: number): Stripe.Checkout.SessionCreateParams.LineItem[] {
   const main = getStripeAppointmentsPlusPriceId();
@@ -113,22 +127,14 @@ export function buildAppointmentsPlusCheckoutLineItems(mainQuantity: number): St
 }
 
 /**
- * Appointments Light Checkout: £10/mo + metered SMS at 8p.
- * Quantity only applies to the main recurring price.
+ * Appointments Light Checkout: £20/mo + optional metered SMS overage (6p).
  */
 export function buildLightPlanCheckoutLineItems(mainQuantity: number): Stripe.Checkout.SessionCreateParams.LineItem[] {
   const main = getStripeLightPlanPriceId();
-  const smsLight = getStripeSmsLightPriceId();
   if (!main?.trim()) {
     throw new Error('STRIPE_LIGHT_PRICE_ID is not configured');
   }
-  const items: Stripe.Checkout.SessionCreateParams.LineItem[] = [
-    { price: main.trim(), quantity: mainQuantity },
-  ];
-  if (smsLight?.trim()) {
-    items.push({ price: smsLight.trim() });
-  }
-  return items;
+  return buildCheckoutLineItems(main.trim(), mainQuantity);
 }
 
 /**

@@ -78,6 +78,11 @@ export function TableSetupStep({ onDone }: Props) {
         </p>
       </div>
 
+      <p className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs leading-relaxed text-amber-950 sm:hidden">
+        Tip: the visual floor plan works best on a tablet or desktop. On mobile, use the <strong>Tables</strong> tab to
+        add tables quickly, or open the floor plan in a new tab below.
+      </p>
+
       <FloorPlanEditorTabs
         isAdmin
         activeTab={floorTab}
@@ -91,27 +96,27 @@ export function TableSetupStep({ onDone }: Props) {
         diningAreaId={selectedAreaId}
       />
 
-      <div className="mt-8 flex items-center justify-between">
+      <div className="mt-8 flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
         <button
           type="button"
           onClick={() => void onDone()}
-          className="text-sm text-slate-500 hover:text-slate-700"
+          className="min-h-11 px-1 text-sm text-slate-500 hover:text-slate-700 sm:px-0"
         >
           Skip for now
         </button>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
           <a
             href="/dashboard/floor-plan"
             target="_blank"
             rel="noopener noreferrer"
-            className="text-sm font-medium text-brand-600 hover:text-brand-700"
+            className="flex min-h-11 items-center justify-center text-sm font-medium text-brand-600 hover:text-brand-700"
           >
             Open floor plan in new tab ↗
           </a>
           <button
             type="button"
             onClick={() => void onDone()}
-            className="rounded-lg bg-brand-600 px-6 py-2 text-sm font-medium text-white hover:bg-brand-700"
+            className="min-h-11 w-full rounded-lg bg-brand-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-brand-700 sm:w-auto"
           >
             Continue
           </button>

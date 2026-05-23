@@ -18,7 +18,7 @@ export function ServiceAreaPicker({ activeAreas, selectedAreaId, onSelectArea }:
             key={area.id}
             type="button"
             onClick={() => onSelectArea(area.id)}
-            className={`inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm transition-colors ${
+            className={`inline-flex min-h-10 items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors ${
               selectedAreaId === area.id
                 ? 'border-brand-600 bg-brand-50 text-brand-900'
                 : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100/80'

@@ -1,4 +1,6 @@
 import type { HelpCategory } from '../types';
+import { SMS_INCLUDED_APPOINTMENTS, SMS_INCLUDED_LIGHT, SMS_INCLUDED_PLUS } from '@/lib/billing/sms-allowance';
+import { SMS_OVERAGE_GBP_PER_MESSAGE } from '@/lib/pricing-constants';
 
 export const troubleshootingCategory: HelpCategory = {
   slug: 'troubleshooting',
@@ -53,7 +55,7 @@ Until Connect reaches the **active** state shown in app, assume guests cannot co
 
 ## Appointments Light and SMS meter (not Connect)
 
-**Appointments Light** shows a banner under **Settings → Communications** when there is **no** Stripe subscription on file: SMS is metered at **8p** per segment and you must add a card under **Settings → Plan** before SMS sends. That is separate from Connect, but teams often confuse the two when troubleshooting “nothing sends”.
+**Appointments Light** shows a banner under **Settings → Communications** when there is **no** Stripe subscription on file: you must add a card under **Settings → Plan** before SMS sends. Light includes **${SMS_INCLUDED_LIGHT}** segments per month, then **£0.06** overage per segment. That is separate from Connect, but teams often confuse the two when troubleshooting “nothing sends”.
 
 ## Guest payment failures
 
@@ -113,11 +115,11 @@ SMS needs a normalised **mobile** number. Missing or invalid numbers simply skip
 
 ## 3. Appointments Light and billing
 
-On **Appointments Light**, if Stripe shows **no** subscription yet, Communications displays a banner: SMS is **metered at 8p per segment** and you must add a card under **Settings → Plan** before outbound SMS is allowed.
+On **Appointments Light**, if Stripe shows **no** subscription yet, Communications displays a banner: you must add a card under **Settings → Plan** before outbound SMS is allowed. Once billing is active, Light includes **${SMS_INCLUDED_LIGHT}** SMS segments per month with **£0.06** overage beyond that.
 
 ## 4. Included bundles and overage
 
-**Plus** and **Pro** (and Restaurant tiers) use included monthly segments with metered **overage** billed per segment at the rate shown on **Settings → Plan** (currently **£0.06** per segment beyond the bundle on those tiers, **£0.08** per segment on Light metered SMS). **Complimentary** venues follow the plan cap copy in app (no paid overage, sends stop at the allowance).
+**Light**, **Plus**, and **Pro** (and Restaurant tiers) use included monthly segments with metered **overage** billed per segment at **£0.06** beyond the bundle unless you are on complimentary access (then sends stop at the allowance).
 
 ## 5. Read the booking timeline
 
@@ -144,11 +146,11 @@ Outbound SMS needs a valid mobile on the guest record. Email may still deliver w
 
 ## Appointments Light card requirement
 
-On **Appointments Light**, if Stripe has **no** subscription yet, the blue banner at the top of Communications explains that every SMS is **metered at 8p** and you must add a card under **Settings → Plan** before SMS sends. This is independent of Stripe Connect for guests.
+On **Appointments Light**, if Stripe has **no** subscription yet, the blue banner at the top of Communications explains that you must add a card under **Settings → Plan** before SMS sends. Once active, Light includes **${SMS_INCLUDED_LIGHT}** segments per month with **£0.06** overage beyond that. This is independent of Stripe Connect for guests.
 
-## Plus and Pro allowances
+## Light, Plus, and Pro allowances
 
-**Plus** includes **300** SMS segments per month; **Appointments Pro** includes **800**, with **£0.06** per extra segment unless you are on complimentary access (then sends stop at the cap). The **Plan** tab shows used versus included and a progress bar.
+**Light** includes **${SMS_INCLUDED_LIGHT}** SMS segments per month; **Plus** includes **${SMS_INCLUDED_PLUS}**; **Appointments Pro** includes **${SMS_INCLUDED_APPOINTMENTS}**, with **£0.06** per extra segment unless you are on complimentary access (then sends stop at the cap). The **Plan** tab shows used versus included and a progress bar.
 
 ## Light with a subscription
 

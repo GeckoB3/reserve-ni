@@ -331,7 +331,13 @@ export function AppointmentServicesView({
   }
 
   function openCreate() {
-    setForm({ ...DEFAULT_APPOINTMENT_SERVICE_FORM_VALUES, staffMay: { ...DEFAULT_STAFF_MAY_CUSTOMIZE }, variants: [] });
+    const defaultCalendarIds = calendarsForServiceForm.map((p) => p.id);
+    setForm({
+      ...DEFAULT_APPOINTMENT_SERVICE_FORM_VALUES,
+      staffMay: { ...DEFAULT_STAFF_MAY_CUSTOMIZE },
+      variants: [],
+      practitioner_ids: defaultCalendarIds,
+    });
     setEditingId(null);
     setError(null);
     setShowAddCalendarModal(false);

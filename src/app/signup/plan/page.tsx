@@ -17,6 +17,7 @@ import {
 import { SMS_INCLUDED_APPOINTMENTS, SMS_INCLUDED_PLUS, SMS_INCLUDED_RESTAURANT } from '@/lib/billing/sms-allowance';
 import { STANDARD_PAYMENT_PROVIDER_FEES_NOTICE } from '@/lib/payment-provider-fees-notice';
 import { SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE } from '@/lib/subscription-cancellation-copy';
+import { SIGNUP_TRIAL_SHORT_LABEL } from '@/lib/signup-trial-copy';
 import { LegalAcceptanceCheckbox } from '@/components/signup/LegalAcceptanceCheckbox';
 
 type PlanType = 'appointments' | 'plus' | 'light' | 'restaurant' | 'founding';
@@ -213,6 +214,7 @@ export default function PlanPage() {
             <span className="text-2xl font-extrabold text-slate-900">&pound;{RESTAURANT_PRICE}</span>
             <span className="text-sm text-slate-500">/month</span>
           </div>
+          <p className="mt-1 text-sm font-semibold text-brand-600">{SIGNUP_TRIAL_SHORT_LABEL}</p>
           <p className="mt-2 text-xs text-slate-500">Single venue only.</p>
           <ul className="mt-4 space-y-2 text-sm text-slate-600">
             <FeatureItem text="Table management with timeline grid and floor plan" />
@@ -262,6 +264,7 @@ export default function PlanPage() {
             <span className="text-2xl font-extrabold text-slate-900">&pound;{APPOINTMENTS_PLUS_PRICE}</span>
             <span className="text-sm text-slate-500">/month</span>
           </div>
+          <p className="mt-1 text-sm font-semibold text-brand-600">{SIGNUP_TRIAL_SHORT_LABEL}</p>
           <p className="mt-2 text-xs text-slate-500">Single venue only.</p>
           <ul className="mt-4 space-y-2 text-sm text-slate-600">
             <FeatureItem text="Up to 5 bookable calendars and 5 team members" />
@@ -310,6 +313,7 @@ export default function PlanPage() {
             <span className="text-2xl font-extrabold text-slate-900">&pound;{APPOINTMENTS_PRO_PRICE}</span>
             <span className="text-sm text-slate-500">/month</span>
           </div>
+          <p className="mt-1 text-sm font-semibold text-brand-600">{SIGNUP_TRIAL_SHORT_LABEL}</p>
           <p className="mt-2 text-xs text-slate-500">Single venue only. For teams of any size.</p>
           <ul className="mt-4 space-y-2 text-sm text-slate-600">
             <FeatureItem text="Unlimited calendars and team members" />

@@ -79,9 +79,9 @@ export function WorkingHoursControl({
           !disabled &&
           DAY_KEYS.some((dk) => dk !== dayKey && (value[dk]?.length ?? 0) > 0);
         return (
-          <div key={dayKey} className="rounded-xl border border-slate-200 bg-white px-4 py-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <label className="flex cursor-pointer items-center gap-3">
+          <div key={dayKey} className="rounded-xl border border-slate-200 bg-white px-3 py-3 sm:px-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+              <label className="flex min-h-10 cursor-pointer items-center gap-3">
                 <input
                   type="checkbox"
                   checked={isWorking}
@@ -94,25 +94,29 @@ export function WorkingHoursControl({
                 </span>
               </label>
               {isWorking && !disabled && (
-                <div className="flex flex-wrap items-center gap-2">
+                <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
                   {canCopyElsewhere && (
                     <button
                       type="button"
                       onClick={() => copyThisDayToOtherWorkingDays(dayKey)}
-                      className="rounded border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                      className="min-h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100 sm:w-auto"
                       title="Apply this day’s hours to every other day that is ticked as working"
                     >
                       Copy to other open days
                     </button>
                   )}
-                  <button type="button" onClick={() => addRange(dayKey)} className="text-xs text-blue-600 hover:underline">
+                  <button
+                    type="button"
+                    onClick={() => addRange(dayKey)}
+                    className="min-h-10 text-left text-xs text-blue-600 hover:underline sm:min-h-0"
+                  >
                     + Add split
                   </button>
                 </div>
               )}
             </div>
             {isWorking && (
-              <div className="mt-2 space-y-2 pl-7">
+              <div className="mt-3 space-y-2 border-t border-slate-100 pt-3 sm:pl-7 sm:pt-2 sm:border-t-0">
                 {ranges.map((r, ri) => (
                   <div key={ri} className="flex flex-wrap items-center gap-2">
                     <input
@@ -120,7 +124,7 @@ export function WorkingHoursControl({
                       value={r.start}
                       onChange={(e) => updateRange(dayKey, ri, 'start', e.target.value)}
                       disabled={disabled}
-                      className="rounded-lg border border-slate-300 px-2 py-1 text-sm disabled:bg-slate-50"
+                      className="min-h-10 w-full min-w-0 flex-1 rounded-lg border border-slate-300 px-2 py-2 text-sm disabled:bg-slate-50 sm:w-auto sm:min-w-[7rem] sm:flex-none sm:py-1"
                     />
                     <span className="text-sm text-slate-400">to</span>
                     <input
@@ -128,13 +132,13 @@ export function WorkingHoursControl({
                       value={r.end}
                       onChange={(e) => updateRange(dayKey, ri, 'end', e.target.value)}
                       disabled={disabled}
-                      className="rounded-lg border border-slate-300 px-2 py-1 text-sm disabled:bg-slate-50"
+                      className="min-h-10 w-full min-w-0 flex-1 rounded-lg border border-slate-300 px-2 py-2 text-sm disabled:bg-slate-50 sm:w-auto sm:min-w-[7rem] sm:flex-none sm:py-1"
                     />
                     {ranges.length > 1 && !disabled && (
                       <button
                         type="button"
                         onClick={() => removeRange(dayKey, ri)}
-                        className="text-xs text-red-500 hover:underline"
+                        className="min-h-10 text-xs text-red-500 hover:underline"
                       >
                         Remove
                       </button>

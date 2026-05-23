@@ -42,6 +42,87 @@ interface OpeningHoursControlProps {
   disabled?: boolean;
 }
 
+function TimePeriodRow({
+  p1,
+  p2,
+  onUpdateP1,
+  onUpdateP2,
+  onAddSecond,
+  onRemoveSecond,
+  disabled,
+}: {
+  p1: { open: string; close: string };
+  p2?: { open: string; close: string };
+  onUpdateP1: (field: 'open' | 'close', value: string) => void;
+  onUpdateP2: (field: 'open' | 'close', value: string) => void;
+  onAddSecond: () => void;
+  onRemoveSecond: () => void;
+  disabled: boolean;
+}) {
+  const timeInputClass =
+    'min-h-10 w-full min-w-0 flex-1 rounded border border-slate-300 px-2 py-2 text-sm sm:w-auto sm:min-w-[7rem] sm:flex-none sm:py-1';
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          type="time"
+          value={p1.open}
+          onChange={(e) => onUpdateP1('open', e.target.value)}
+          disabled={disabled}
+          className={timeInputClass}
+        />
+        <span className="text-slate-500">–</span>
+        <input
+          type="time"
+          value={p1.close}
+          onChange={(e) => onUpdateP1('close', e.target.value)}
+          disabled={disabled}
+          className={timeInputClass}
+        />
+      </div>
+      {!p2 ? (
+        <button
+          type="button"
+          onClick={onAddSecond}
+          disabled={disabled}
+          className="min-h-10 text-sm text-blue-600 hover:underline disabled:opacity-50"
+        >
+          + Add second period
+        </button>
+      ) : (
+        <>
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              type="time"
+              value={p2.open}
+              onChange={(e) => onUpdateP2('open', e.target.value)}
+              disabled={disabled}
+              className={timeInputClass}
+            />
+            <span className="text-slate-500">–</span>
+            <input
+              type="time"
+              value={p2.close}
+              onChange={(e) => onUpdateP2('close', e.target.value)}
+              disabled={disabled}
+              className={timeInputClass}
+            />
+          </div>
+          <button
+            type="button"
+            onClick={onRemoveSecond}
+            disabled={disabled}
+            className="min-h-10 text-sm text-red-600 hover:underline disabled:opacity-50"
+          >
+            Remove second period
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
 /**
  * Controlled venue opening hours (up to two periods per day). Same behaviour as Settings → Business Hours.
  */
@@ -67,7 +148,7 @@ export function OpeningHoursControl({ value, onChange, disabled = false }: Openi
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3 sm:space-y-4">
       {DAYS.map(({ key, label }) => {
         const config = value[key] ?? getDayConfig(null, key);
         const closed = 'closed' in config && config.closed;
@@ -80,12 +161,12 @@ export function OpeningHoursControl({ value, onChange, disabled = false }: Openi
           DAYS.some(({ key: k }) => k !== key && isOpeningDayOpen(value, k));
 
         return (
-          <div key={key} className="rounded border border-slate-200 p-4">
-            <div className="flex flex-wrap items-center gap-4">
-              <span className="w-24 font-medium text-slate-800">{label}</span>
-              {!disabled ? (
-                <>
-                  <label className="flex items-center gap-2">
+          <div key={key} className="rounded-xl border border-slate-200 p-3 sm:p-4">
+            <div className="flex flex-col gap-3">
+              <div className="flex items-center justify-between gap-3">
+                <span className="font-medium text-slate-800">{label}</span>
+                {!disabled ? (
+                  <label className="flex min-h-10 cursor-pointer items-center gap-2">
                     <input
                       type="checkbox"
                       checked={!closed}
@@ -93,82 +174,45 @@ export function OpeningHoursControl({ value, onChange, disabled = false }: Openi
                         if (e.target.checked) setDay(key, { periods: [{ open: '09:00', close: '17:00' }] });
                         else setDay(key, { closed: true });
                       }}
-                      className="rounded"
+                      className="h-4 w-4 rounded"
                     />
                     <span className="text-sm">Open</span>
                   </label>
-                  {!closed && (
-                    <>
-                      {canCopyElsewhere && (
-                        <button
-                          type="button"
-                          onClick={() => copyThisDayToOtherOpenDays(key)}
-                          className="rounded border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100"
-                          title="Apply this day’s hours to every other day that is set to Open"
-                        >
-                          Copy to other open days
-                        </button>
-                      )}
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="time"
-                          value={p1.open}
-                          onChange={(e) =>
-                            setDay(key, { periods: [{ ...p1, open: e.target.value }, p2].filter(Boolean) as { open: string; close: string }[] })
-                          }
-                          className="rounded border border-slate-300 px-2 py-1 text-sm"
-                        />
-                        <span className="text-slate-500">–</span>
-                        <input
-                          type="time"
-                          value={p1.close}
-                          onChange={(e) =>
-                            setDay(key, { periods: [{ ...p1, close: e.target.value }, p2].filter(Boolean) as { open: string; close: string }[] })
-                          }
-                          className="rounded border border-slate-300 px-2 py-1 text-sm"
-                        />
-                      </div>
-                      {!p2 ? (
-                        <button
-                          type="button"
-                          onClick={() => setDay(key, { periods: [p1, { open: '17:00', close: '22:00' }] })}
-                          className="text-sm text-blue-600 hover:underline"
-                        >
-                          + Add second period
-                        </button>
-                      ) : (
-                        <>
-                          <div className="flex items-center gap-2">
-                            <input
-                              type="time"
-                              value={p2.open}
-                              onChange={(e) => setDay(key, { periods: [p1, { ...p2, open: e.target.value }] })}
-                              className="rounded border border-slate-300 px-2 py-1 text-sm"
-                            />
-                            <span className="text-slate-500">–</span>
-                            <input
-                              type="time"
-                              value={p2.close}
-                              onChange={(e) => setDay(key, { periods: [p1, { ...p2, close: e.target.value }] })}
-                              className="rounded border border-slate-300 px-2 py-1 text-sm"
-                            />
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => setDay(key, { periods: [p1] })}
-                            className="text-sm text-red-600 hover:underline"
-                          >
-                            Remove second
-                          </button>
-                        </>
-                      )}
-                    </>
+                ) : (
+                  <span className="text-sm text-slate-600">
+                    {closed ? 'Closed' : `${p1.open}–${p1.close}${p2 ? `, ${p2.open}–${p2.close}` : ''}`}
+                  </span>
+                )}
+              </div>
+
+              {!closed && !disabled && (
+                <div className="space-y-3 border-t border-slate-100 pt-3">
+                  {canCopyElsewhere && (
+                    <button
+                      type="button"
+                      onClick={() => copyThisDayToOtherOpenDays(key)}
+                      className="min-h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100 sm:w-auto"
+                      title="Apply this day’s hours to every other day that is set to Open"
+                    >
+                      Copy to other open days
+                    </button>
                   )}
-                </>
-              ) : (
-                <span className="text-sm text-slate-600">
-                  {closed ? 'Closed' : `${p1.open}–${p1.close}${p2 ? `, ${p2.open}–${p2.close}` : ''}`}
-                </span>
+                  <TimePeriodRow
+                    p1={p1}
+                    p2={p2}
+                    disabled={disabled}
+                    onUpdateP1={(field, nextVal) =>
+                      setDay(key, {
+                        periods: [{ ...p1, [field]: nextVal }, p2].filter(Boolean) as { open: string; close: string }[],
+                      })
+                    }
+                    onUpdateP2={(field, nextVal) =>
+                      setDay(key, { periods: [p1, { ...p2!, [field]: nextVal }] })
+                    }
+                    onAddSecond={() => setDay(key, { periods: [p1, { open: '17:00', close: '22:00' }] })}
+                    onRemoveSecond={() => setDay(key, { periods: [p1] })}
+                  />
+                </div>
               )}
             </div>
           </div>

@@ -1,6 +1,7 @@
 'use client';
 
 import { useId, type ReactNode } from 'react';
+import { SMS_INCLUDED_APPOINTMENTS, SMS_INCLUDED_LIGHT, SMS_INCLUDED_PLUS } from '@/lib/billing/sms-allowance';
 
 const brand = '#3d5662';
 const brandLight = '#e8f0f2';
@@ -41,7 +42,7 @@ function TierComparisonSvg() {
         1 calendar · 1 login
       </text>
       <text x="120" y="98" textAnchor="middle" fill={slate} fontSize="11">
-        SMS pay-as-you-go
+        {SMS_INCLUDED_LIGHT} SMS / month included
       </text>
       <rect x="248" y="12" width="224" height="176" rx="12" fill="white" stroke={brand} strokeWidth="2" />
       <text x="360" y="44" textAnchor="middle" fill={slateDark} fontSize="15" fontWeight="700">
@@ -54,7 +55,7 @@ function TierComparisonSvg() {
         Up to 5 team logins
       </text>
       <text x="360" y="118" textAnchor="middle" fill={slate} fontSize="11">
-        300 SMS / month included
+        {SMS_INCLUDED_PLUS} SMS / month included
       </text>
       <rect x="488" y="12" width="224" height="176" rx="12" fill="white" stroke="#94a3b8" />
       <text x="600" y="44" textAnchor="middle" fill={slateDark} fontSize="15" fontWeight="700">
@@ -67,7 +68,7 @@ function TierComparisonSvg() {
         Unlimited team logins
       </text>
       <text x="600" y="118" textAnchor="middle" fill={slate} fontSize="11">
-        800 SMS / month included
+        {SMS_INCLUDED_APPOINTMENTS} SMS / month included
       </text>
     </svg>
   );

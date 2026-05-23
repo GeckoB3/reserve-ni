@@ -2314,17 +2314,17 @@ export default function OnboardingPage() {
     : wideOnboardingStep
       ? 'max-w-3xl'
       : 'max-w-xl';
-  const onboardingCardPaddingClass = extraWideOnboardingStep ? 'p-4 sm:p-6' : 'p-6 sm:p-8';
+  const onboardingCardPaddingClass = extraWideOnboardingStep ? 'p-4 sm:p-6' : 'p-4 sm:p-8';
 
   return (
-    <div className={`w-full ${onboardingWidthClass}`}>
+    <div className={`w-full min-w-0 ${onboardingWidthClass}`}>
       {/* Progress */}
-      <div className="mb-8">
-        <div className="mb-2 flex justify-between text-xs font-medium text-slate-400">
-          <span>
+      <div className="mb-6 sm:mb-8">
+        <div className="mb-2 flex flex-col gap-1 text-xs font-medium text-slate-400 sm:flex-row sm:items-center sm:justify-between">
+          <span className="min-w-0 break-words">
             Step {step + 1} of {totalSteps} · {modelSteps[step]?.label}
           </span>
-          <span>{Math.round(((step + 1) / totalSteps) * 100)}%</span>
+          <span className="shrink-0">{Math.round(((step + 1) / totalSteps) * 100)}%</span>
         </div>
         <div className="h-2 rounded-full bg-slate-200">
           <div
@@ -2340,7 +2340,7 @@ export default function OnboardingPage() {
         )}
       </div>
 
-      <div className={`rounded-2xl border border-slate-200 bg-white shadow-sm ${onboardingCardPaddingClass}`}>
+      <div className={`min-w-0 overflow-x-hidden rounded-2xl border border-slate-200 bg-white shadow-sm ${onboardingCardPaddingClass}`}>
         {error && (
           <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             {error}
@@ -4502,7 +4502,7 @@ export default function OnboardingPage() {
                 setRevisitedStepIndex(step - 1);
                 setStep(step - 1);
               }}
-              className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
+              className="min-h-11 w-full rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50 sm:w-auto"
             >
               Back
             </button>
@@ -4511,7 +4511,7 @@ export default function OnboardingPage() {
 
         {/* Navigation: hidden for restaurant self-managed steps (they render their own CTAs) */}
         {!RESTAURANT_SELF_MANAGED_STEPS.has(currentStepKey) && (
-          <div className="mt-8 flex justify-between">
+          <div className="mt-8 flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
             {step > 0 && !saving ? (
               <button
                 type="button"
@@ -4519,19 +4519,19 @@ export default function OnboardingPage() {
                   setRevisitedStepIndex(step - 1);
                   setStep(step - 1);
                 }}
-                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
+                className="min-h-11 w-full rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50 sm:w-auto"
               >
                 Back
               </button>
             ) : (
-              <div />
+              <div className="hidden sm:block" />
             )}
             {currentStepKey === 'preview' ? (
               <button
                 type="button"
                 onClick={handleGoLive}
                 disabled={saving}
-                className="rounded-lg bg-brand-600 px-6 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+                className="min-h-11 w-full rounded-lg bg-brand-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50 sm:w-auto"
               >
                 {saving ? 'Finishing...' : 'Go to Dashboard'}
               </button>
@@ -4545,7 +4545,7 @@ export default function OnboardingPage() {
                     isUnifiedSchedulingVenue(venue.booking_model) &&
                     !servicesSyncReady)
                 }
-                className="rounded-lg bg-brand-600 px-6 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+                className="min-h-11 w-full rounded-lg bg-brand-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50 sm:w-auto"
               >
                 {saving ? 'Saving...' : 'Continue'}
               </button>

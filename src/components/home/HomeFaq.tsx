@@ -6,13 +6,13 @@ import {
   APPOINTMENTS_PLUS_PRICE,
   APPOINTMENTS_PRO_PRICE,
   RESTAURANT_PRICE,
-  SMS_LIGHT_GBP_PER_MESSAGE,
   SMS_OVERAGE_GBP_PER_MESSAGE,
 } from '@/lib/pricing-constants';
-import { SMS_INCLUDED_APPOINTMENTS, SMS_INCLUDED_PLUS, SMS_INCLUDED_RESTAURANT } from '@/lib/billing/sms-allowance';
+import { SMS_INCLUDED_APPOINTMENTS, SMS_INCLUDED_LIGHT, SMS_INCLUDED_PLUS, SMS_INCLUDED_RESTAURANT } from '@/lib/billing/sms-allowance';
 import { RESERVENI_MARKETING_PAYMENTS_AND_NO_HOLD } from '@/lib/booking-funds-copy';
 import { STANDARD_PAYMENT_PROVIDER_FEES_NOTICE } from '@/lib/payment-provider-fees-notice';
 import { SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE } from '@/lib/subscription-cancellation-copy';
+import { SIGNUP_TRIAL_SHORT_LABEL, signupTrialSmsDuringTrialNotice } from '@/lib/signup-trial-copy';
 
 type FaqItem = { question: string; answer: string };
 
@@ -43,11 +43,11 @@ function buildFaqSections(): { heading: string; items: FaqItem[] }[] {
       items: [
         {
           question: 'What does ReserveNI cost?',
-          answer: `Appointments Light is £${APPOINTMENTS_LIGHT_PRICE} per month (card at signup) for one bookable calendar and one venue login, with appointments, classes, events, and resource booking plus email reminders. SMS is pay-as-you-go at ${Math.round(SMS_LIGHT_GBP_PER_MESSAGE * 100)}p per message with none included. Appointments Plus is £${APPOINTMENTS_PLUS_PRICE} per month for up to 5 calendars and 5 users, with ${SMS_INCLUDED_PLUS} SMS included then ${Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100)}p each. Appointments Pro is £${APPOINTMENTS_PRO_PRICE} per month for unlimited calendars and team members, with ${SMS_INCLUDED_APPOINTMENTS} SMS included then ${Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100)}p each. The Restaurant plan is £${RESTAURANT_PRICE} per month with table management, floor plan tools, and ${SMS_INCLUDED_RESTAURANT} SMS per month included. There are no setup fees, no contracts, and no per-booking commissions. ${STANDARD_PAYMENT_PROVIDER_FEES_NOTICE} ${SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE}`,
+          answer: `New customers get a ${SIGNUP_TRIAL_SHORT_LABEL.toLowerCase()} on any paid plan (card required at checkout; first subscription charge after 14 days). ${signupTrialSmsDuringTrialNotice()} Appointments Light is £${APPOINTMENTS_LIGHT_PRICE} per month for one bookable calendar and one venue login, with appointments, classes, events, and resource booking plus email reminders. SMS includes ${SMS_INCLUDED_LIGHT} messages per month, then ${Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100)}p each. Appointments Plus is £${APPOINTMENTS_PLUS_PRICE} per month for up to 5 calendars and 5 users, with ${SMS_INCLUDED_PLUS} SMS included then ${Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100)}p each. Appointments Pro is £${APPOINTMENTS_PRO_PRICE} per month for unlimited calendars and team members, with ${SMS_INCLUDED_APPOINTMENTS} SMS included then ${Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100)}p each. The Restaurant plan is £${RESTAURANT_PRICE} per month with table management, floor plan tools, and ${SMS_INCLUDED_RESTAURANT} SMS per month included. There are no setup fees, no contracts, and no per-booking commissions. ${STANDARD_PAYMENT_PROVIDER_FEES_NOTICE} ${SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE}`,
         },
         {
           question: 'Are there any hidden fees or commissions?',
-          answer: `No. Your monthly subscription covers the platform. We never take a commission on your bookings, and we never charge your customers a booking fee. ${STANDARD_PAYMENT_PROVIDER_FEES_NOTICE} On Appointments Light there is no SMS bundle: each message is billed at ${Math.round(SMS_LIGHT_GBP_PER_MESSAGE * 100)}p. On Appointments Plus, Pro, and Restaurant you get a monthly SMS allowance; additional messages are ${Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100)}p each, clearly shown in your dashboard.`,
+          answer: `No. Your monthly subscription covers the platform. We never take a commission on your bookings, and we never charge your customers a booking fee. ${STANDARD_PAYMENT_PROVIDER_FEES_NOTICE} Appointments Light, Plus, Pro, and Restaurant each include a monthly SMS allowance; additional messages are ${Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100)}p each, clearly shown in your dashboard.`,
         },
         {
           question: 'How does ReserveNI compare to competitors on price?',
@@ -72,7 +72,7 @@ function buildFaqSections(): { heading: string; items: FaqItem[] }[] {
         {
           question: 'Does ReserveNI send booking reminders to my clients?',
           answer:
-            'Yes. Automated email reminders are included on every plan. On Appointments Plus, Pro, and Restaurant you also get SMS reminders within your monthly allowance (overage priced per message). Appointments Light includes email reminders; SMS is pay-as-you-go when you send messages. Reminders include a one-tap confirm or cancel link, which can help reduce no-shows by making it easier for clients to confirm or cancel.',
+            'Yes. Automated email reminders are included on every plan. Appointments Light, Plus, Pro, and Restaurant also include SMS reminders within your monthly allowance (overage priced per message). Reminders include a one-tap confirm or cancel link, which can help reduce no-shows by making it easier for clients to confirm or cancel.',
         },
         {
           question: 'Can I collect deposits to protect against no-shows?',

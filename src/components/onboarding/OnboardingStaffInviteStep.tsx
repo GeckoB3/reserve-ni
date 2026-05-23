@@ -24,10 +24,10 @@ export function OnboardingStaffInviteStep({ invites, setInvites, existingStaffCo
 
   return (
     <div>
-      <div className="mb-1 flex items-center justify-between gap-2">
+      <div className="mb-1 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <h2 className="text-lg font-bold text-slate-900">Invite your team</h2>
         {hasFiniteLimit && (
-          <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-600">
+          <span className="w-fit rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-600">
             {usedSlots} / {staffLimit} users
           </span>
         )}
@@ -82,7 +82,7 @@ export function OnboardingStaffInviteStep({ invites, setInvites, existingStaffCo
                 <button
                   type="button"
                   onClick={() => setInvites(invites.filter((_, rowIndex) => rowIndex !== index))}
-                  className="text-xs font-medium text-slate-400 hover:text-red-600"
+                  className="min-h-10 px-2 text-xs font-medium text-slate-400 hover:text-red-600"
                 >
                   Remove
                 </button>
@@ -141,7 +141,7 @@ export function OnboardingStaffInviteStep({ invites, setInvites, existingStaffCo
         <button
           type="button"
           onClick={() => setInvites([...invites, { email: '', role: 'staff' }])}
-          className="mt-4 w-full rounded-xl border-2 border-dashed border-slate-200 py-3 text-sm font-medium text-slate-500 transition-colors hover:border-brand-300 hover:text-brand-600"
+          className="mt-4 min-h-11 w-full rounded-xl border-2 border-dashed border-slate-200 py-3 text-sm font-medium text-slate-500 transition-colors hover:border-brand-300 hover:text-brand-600"
         >
           + Add another user
         </button>
