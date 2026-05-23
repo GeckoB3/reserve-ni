@@ -105,11 +105,11 @@ export function DashboardOrientationStep({ onDone, tableManagementEnabled }: Pro
         ))}
       </div>
 
-      <div className="mt-8 flex justify-end">
+      <div className="mt-8 flex sm:justify-end">
         <button
           type="button"
           onClick={onDone}
-          className="rounded-lg bg-brand-600 px-6 py-2 text-sm font-medium text-white hover:bg-brand-700"
+          className="min-h-11 w-full rounded-lg bg-brand-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-brand-700 sm:w-auto"
         >
           Continue
         </button>

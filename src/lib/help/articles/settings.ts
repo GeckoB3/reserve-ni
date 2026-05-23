@@ -1,4 +1,6 @@
 import type { HelpCategory } from '../types';
+import { SMS_INCLUDED_APPOINTMENTS, SMS_INCLUDED_LIGHT, SMS_INCLUDED_PLUS } from '@/lib/billing/sms-allowance';
+import { SMS_OVERAGE_GBP_PER_MESSAGE } from '@/lib/pricing-constants';
 
 export const settingsCategory: HelpCategory = {
   slug: 'settings',
@@ -329,7 +331,7 @@ Open **Settings → Plan**.
 - Named **tier** (Appointments Light / Plus / Pro, Restaurant, Founding Partner, or complimentary copy when \`billing_access_source\` marks free access).
 - **Subscription status** pills such as active, trialing, past due, cancelling, or cancelled, derived from \`plan_status\` and Stripe.
 - **Next billing** or **Access until** copy when a cancel is mid period.
-- **SMS usage**: segment counts. **Light** lists pay as you go segments with the Light meter rate (currently £0.08 per segment in product constants). Bundled tiers show used vs included, plus metered overage text (currently £0.06 per segment beyond the bundle when billing is not free access).
+- **SMS usage**: segment counts. **Light**, **Plus**, and **Pro** show used vs included (${SMS_INCLUDED_LIGHT} / ${SMS_INCLUDED_PLUS} / ${SMS_INCLUDED_APPOINTMENTS} at the time of writing), plus metered overage text (currently £${SMS_OVERAGE_GBP_PER_MESSAGE.toFixed(2)} per segment beyond the bundle when billing is not free access).
 - **Calendar usage** for tiers that cap calendars (Light 1, Plus 5, otherwise unlimited in UI).
 
 ## Actions
@@ -361,8 +363,7 @@ Open **Settings → Plan**. Everything here is about your **ReserveNI subscripti
 - **Tier pill** and **status pill** (active, trialing, past due, cancelling, cancelled).
 - **Current plan** and **Next billing** cards, including estimated next invoice text when Stripe sends a billing quote.
 - **SMS usage**:
-  - **Light**: shows segments used this period, notes pay as you go billing at **£0.08** per segment (see \`SMS_LIGHT_GBP_PER_MESSAGE\`), and may note that the usage window follows the Stripe billing period when that mode applies.
-  - **Plus** and **Pro**: show used vs included counts (300 and 800 segments respectively at the time of writing), a progress bar, and overage text at **£0.06** per segment (\`SMS_OVERAGE_GBP_PER_MESSAGE\`) unless you are on complimentary access (then sends stop at the cap).
+  - **Light**, **Plus**, and **Pro**: show used vs included counts (${SMS_INCLUDED_LIGHT} / ${SMS_INCLUDED_PLUS} / ${SMS_INCLUDED_APPOINTMENTS} segments respectively at the time of writing), a progress bar, and overage text at **£0.06** per segment (\`SMS_OVERAGE_GBP_PER_MESSAGE\`) unless you are on complimentary access (then sends stop at the cap).
 - **Calendar usage**: counts active bookable columns vs tier caps (**1** on Light, **5** on Plus, **Unlimited** on Pro).
 
 ## Actions you may see

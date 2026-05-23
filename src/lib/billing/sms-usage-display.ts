@@ -1,9 +1,9 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { computeSmsMonthlyAllowance } from '@/lib/billing/sms-allowance';
-import { SMS_LIGHT_GBP_PER_MESSAGE, SMS_OVERAGE_GBP_PER_MESSAGE } from '@/lib/pricing-constants';
+import { SMS_OVERAGE_GBP_PER_MESSAGE } from '@/lib/pricing-constants';
 import { getSmsMessagesSentThisMonthForVenue, resolveSmsBillingPeriod } from '@/lib/sms-usage';
 
-export type SmsUsageBillingMode = 'light_metered' | 'bundle_allowance';
+export type SmsUsageBillingMode = 'bundle_allowance';
 
 export interface SmsUsageDisplay {
   messages_sent: number;
@@ -11,9 +11,9 @@ export interface SmsUsageDisplay {
   remaining: number;
   overage_count: number;
   overage_amount_pence: number;
-  /** Light: every SMS segment is metered; other tiers: segments beyond included allowance. */
+  /** Included allowance with metered overage beyond the bundle. */
   billing_mode: SmsUsageBillingMode;
-  /** GBP per billable SMS segment for this venue (0.08 Light, 0.06 overage on other plans). */
+  /** GBP per billable SMS segment beyond the included allowance. */
   billable_unit_gbp: number;
 }
 
@@ -65,24 +65,6 @@ export async function getSmsUsageDisplayForVenue(
     u?.messages_sent ?? 0,
     await getSmsMessagesSentThisMonthForVenue(venueId, row),
   );
-  const tierLower = (row.pricing_tier ?? '').toLowerCase();
-  if (tierLower === 'light') {
-    const unit = typeof u?.overage_rate_pence === 'number' ? u.overage_rate_pence / 100 : SMS_LIGHT_GBP_PER_MESSAGE;
-    const overagePenceLight =
-      typeof u?.overage_amount_pence === 'number'
-        ? u.overage_amount_pence
-        : sent * Math.round(unit * 100);
-    return {
-      messages_sent: sent,
-      messages_included: 0,
-      remaining: 0,
-      overage_count: sent,
-      overage_amount_pence: overagePenceLight,
-      billing_mode: 'light_metered',
-      billable_unit_gbp: unit,
-    };
-  }
-
   const remaining = Math.max(0, included - sent);
   const overageCount = Math.max(0, sent - included);
   const unit = typeof u?.overage_rate_pence === 'number' ? u.overage_rate_pence / 100 : SMS_OVERAGE_GBP_PER_MESSAGE;

@@ -80,21 +80,21 @@ export function ServicesStep({ onDone }: Props) {
         <button
           type="button"
           onClick={() => void onDone()}
-          className="text-sm text-slate-500 hover:text-slate-700"
+          className="min-h-11 px-1 text-sm text-slate-500 hover:text-slate-700 sm:px-0"
         >
           Skip for now
         </button>
         <button
           type="button"
           onClick={() => void onDone()}
-          className="rounded-lg bg-brand-600 px-6 py-2 text-sm font-medium text-white hover:bg-brand-700"
+          className="min-h-11 w-full rounded-lg bg-brand-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-brand-700 sm:w-auto"
         >
           Continue
         </button>
       </div>
 
       {toast && (
-        <div className="fixed bottom-6 right-6 z-50 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-medium text-white shadow-lg">
+        <div className="fixed bottom-4 left-4 right-4 z-50 rounded-xl bg-slate-900 px-4 py-2.5 text-center text-sm font-medium text-white shadow-lg sm:left-auto sm:right-6 sm:max-w-sm sm:text-left">
           {toast}
         </div>
       )}

@@ -10,12 +10,16 @@ import {
   APPOINTMENTS_PLUS_PRICE,
   APPOINTMENTS_PRO_PRICE,
   RESTAURANT_PRICE,
-  SMS_LIGHT_GBP_PER_MESSAGE,
   SMS_OVERAGE_GBP_PER_MESSAGE,
 } from '@/lib/pricing-constants';
-import { SMS_INCLUDED_APPOINTMENTS, SMS_INCLUDED_PLUS, SMS_INCLUDED_RESTAURANT } from '@/lib/billing/sms-allowance';
+import { SMS_INCLUDED_APPOINTMENTS, SMS_INCLUDED_LIGHT, SMS_INCLUDED_PLUS, SMS_INCLUDED_RESTAURANT } from '@/lib/billing/sms-allowance';
 import { STANDARD_PAYMENT_PROVIDER_FEES_NOTICE } from '@/lib/payment-provider-fees-notice';
 import { SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE } from '@/lib/subscription-cancellation-copy';
+import {
+  SIGNUP_TRIAL_CARD_NOTICE,
+  SIGNUP_TRIAL_DAYS,
+  signupTrialSmsDuringTrialNotice,
+} from '@/lib/signup-trial-copy';
 import { signupPlanToFamily, SIGNUP_PLAN_CONFLICT_MESSAGE } from '@/lib/signup-plan-family';
 import { fetchPendingSignupSelection, syncPendingToSessionStorage } from '@/lib/signup-pending-client';
 import { isSignupPaymentReady } from '@/lib/signup-pending-selection';
@@ -175,7 +179,6 @@ export default function PaymentPage() {
   }
 
   const overagePence = Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100);
-  const lightSmsPence = Math.round(SMS_LIGHT_GBP_PER_MESSAGE * 100);
   const isRestaurant = plan === 'restaurant';
   const isFounding = plan === 'founding';
   const isLight = plan === 'light';
@@ -183,9 +186,11 @@ export default function PaymentPage() {
   const smsIncluded =
     isRestaurant || isFounding
       ? SMS_INCLUDED_RESTAURANT
-      : isPlus
-        ? SMS_INCLUDED_PLUS
-        : SMS_INCLUDED_APPOINTMENTS;
+      : isLight
+        ? SMS_INCLUDED_LIGHT
+        : isPlus
+          ? SMS_INCLUDED_PLUS
+          : SMS_INCLUDED_APPOINTMENTS;
   const planLabel = isFounding
     ? 'Founding Partner'
     : isRestaurant
@@ -253,20 +258,23 @@ export default function PaymentPage() {
             </div>
           ) : isLight ? (
             <div className="rounded-lg border border-brand-100 bg-brand-50/60 px-3 py-2 text-xs text-brand-900">
-              <p className="font-medium">Appointments Light: &pound;{APPOINTMENTS_LIGHT_PRICE}/month from signup.</p>
+              <p className="font-medium">
+                Appointments Light: {SIGNUP_TRIAL_DAYS}-day free trial, then &pound;{APPOINTMENTS_LIGHT_PRICE}/month.
+              </p>
               <p className="mt-1.5 leading-relaxed">
                 One bookable calendar and one venue login. Appointments, classes, events, and bookable resources.
                 You choose which models to start with in onboarding; edit anytime in Settings. Email reminders are
                 included.
               </p>
               <p className="mt-1.5 leading-relaxed">
-                0 SMS included; metered SMS at {lightSmsPence}p per message (billed through Stripe with your subscription).
+                {SMS_INCLUDED_LIGHT} SMS per month included during your trial and after, then {overagePence}p each
+                (billed through Stripe with your subscription).
               </p>
             </div>
           ) : (
             <div className="rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-2 text-xs text-slate-600">
               <p className="font-medium text-slate-800">
-                ReserveNI {planLabel}: &pound;{totalPrice}/month
+                ReserveNI {planLabel}: {SIGNUP_TRIAL_DAYS}-day free trial, then &pound;{totalPrice}/month
               </p>
               <p className="mt-1 leading-relaxed">
                 {isRestaurant
@@ -279,18 +287,28 @@ export default function PaymentPage() {
           )}
 
           <div className="border-t border-slate-100 pt-4">
-            <div className="flex justify-between">
-              <span className="text-base font-semibold text-slate-900">
-                {isFounding ? 'Total' : 'Monthly total'}
-              </span>
-              <span className="text-base font-bold text-slate-900">
-                {isFounding ? (
-                  <span className="text-emerald-600">Free for 6 months</span>
-                ) : (
-                  <>&pound;{totalPrice}/mo</>
-                )}
-              </span>
-            </div>
+            {isFounding ? (
+              <div className="flex justify-between">
+                <span className="text-base font-semibold text-slate-900">Total</span>
+                <span className="text-base font-bold text-emerald-600">Free for 6 months</span>
+              </div>
+            ) : (
+              <>
+                <div className="flex justify-between text-sm text-slate-600">
+                  <span>Due today</span>
+                  <span className="font-medium text-slate-900">&pound;0</span>
+                </div>
+                <div className="mt-2 flex justify-between">
+                  <span className="text-base font-semibold text-slate-900">
+                    After {SIGNUP_TRIAL_DAYS}-day trial
+                  </span>
+                  <span className="text-base font-bold text-slate-900">&pound;{totalPrice}/mo</span>
+                </div>
+                <p className="mt-3 text-xs leading-relaxed text-slate-500">
+                  {SIGNUP_TRIAL_CARD_NOTICE} {signupTrialSmsDuringTrialNotice()}
+                </p>
+              </>
+            )}
           </div>
         </div>
 

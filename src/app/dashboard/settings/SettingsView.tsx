@@ -25,7 +25,7 @@ import { RequireAccountLoginSection } from './sections/RequireAccountLoginSectio
 import { StaffPersonalSettingsSection } from './sections/StaffPersonalSettingsSection';
 import { LinkedAccountsSection } from './sections/LinkedAccountsSection';
 import { isAppointmentsProductVenue } from '@/lib/booking/unified-scheduling';
-import { computeSmsMonthlyAllowance } from '@/lib/billing/sms-allowance';
+import { computeSmsMonthlyAllowance, SMS_INCLUDED_APPOINTMENTS, SMS_INCLUDED_LIGHT, SMS_INCLUDED_PLUS } from '@/lib/billing/sms-allowance';
 import { isSuperuserFreeBillingAccess } from '@/lib/billing/billing-access-source';
 import { isVenueSubscriptionExpiredCancelled } from '@/lib/billing/subscription-entitlement';
 import {
@@ -34,7 +34,6 @@ import {
   APPOINTMENTS_PRO_PRICE,
   planDisplayName,
   RESTAURANT_PRICE,
-  SMS_LIGHT_GBP_PER_MESSAGE,
   SMS_OVERAGE_GBP_PER_MESSAGE,
 } from '@/lib/pricing-constants';
 import { SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE } from '@/lib/subscription-cancellation-copy';
@@ -187,19 +186,19 @@ const APPOINTMENTS_PLAN_DETAILS: Record<
     price: APPOINTMENTS_LIGHT_PRICE,
     calendars: '1 bookable calendar',
     team: '1 team login',
-    sms: `0 included SMS; pay-as-you-go SMS at £${SMS_LIGHT_GBP_PER_MESSAGE.toFixed(2)} each`,
+    sms: `${SMS_INCLUDED_LIGHT} included SMS per month`,
   },
   plus: {
     price: APPOINTMENTS_PLUS_PRICE,
     calendars: 'Up to 5 bookable calendars',
     team: 'Up to 5 team logins',
-    sms: '300 included SMS per month',
+    sms: `${SMS_INCLUDED_PLUS} included SMS per month`,
   },
   appointments: {
     price: APPOINTMENTS_PRO_PRICE,
     calendars: 'Unlimited bookable calendars',
     team: 'Unlimited team logins',
-    sms: '800 included SMS per month',
+    sms: `${SMS_INCLUDED_APPOINTMENTS} included SMS per month`,
   },
 };
 
@@ -364,7 +363,7 @@ function PlanSection({
   const smsUsed = venue.sms_messages_sent_this_month ?? 0;
   const smsIncludedMonthly = computeSmsMonthlyAllowance(tier, null);
   const smsUsagePercent =
-    !isLight && smsIncludedMonthly > 0
+    smsIncludedMonthly > 0
       ? Math.max(0, Math.min(100, Math.round((smsUsed / smsIncludedMonthly) * 100)))
       : null;
   const calendarLimit = planCalendarLimit(tier);
@@ -808,11 +807,11 @@ function PlanSection({
             <p className="text-xs text-slate-600">
               Estimated amount due on that date:{' '}
               <span className="font-medium text-slate-800">{billingQuote.next_charge.formatted}</span>
-              {isLight ? ' · SMS usage may be billed in addition.' : ' · Metered SMS overage may be added.'}
+              {' · Metered SMS overage may be added.'}
             </p>
           ) : (
             <p className="text-xs text-slate-600">
-              {planPrice} base charge{isLight ? '; SMS usage billed separately.' : '; metered overage may be added.'}
+              {planPrice} base charge; metered overage may be added.
             </p>
           )}
           {!isFreeAccess && periodStartLabel ? (
@@ -830,32 +829,21 @@ function PlanSection({
         <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
           <p className="text-xs uppercase tracking-wide text-slate-500">SMS usage</p>
           <p className="mt-1 text-sm font-semibold text-slate-900">
-            {smsUsed}
-            {isLight ? ' segments used' : ` / ${smsIncludedMonthly} segments included`}
+            {smsUsed} / {smsIncludedMonthly} segments included
           </p>
-          {isLight ? (
-            <p className="mt-2 text-xs text-slate-600">
-              {isFreeAccess
-                ? 'Free access: outbound SMS is blocked once you reach your plan allowance (0 included on Light).'
-                : `Light is pay-as-you-go at £${SMS_LIGHT_GBP_PER_MESSAGE.toFixed(2)} per SMS segment.`}
-            </p>
-          ) : (
-            <>
-              <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-slate-100">
-                <div
-                  className="h-full rounded-full bg-brand-500"
-                  style={{ width: `${smsUsagePercent ?? 0}%` }}
-                  aria-hidden
-                />
-              </div>
-              <p className="mt-2 text-xs text-slate-600">
-                {smsUsagePercent ?? 0}% of included allowance used.
-                {isFreeAccess
-                  ? ' Free access: no paid overage — sends stop at the cap.'
-                  : ` Overage is £${SMS_OVERAGE_GBP_PER_MESSAGE.toFixed(2)} per SMS segment.`}
-              </p>
-            </>
-          )}
+          <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-slate-100">
+            <div
+              className="h-full rounded-full bg-brand-500"
+              style={{ width: `${smsUsagePercent ?? 0}%` }}
+              aria-hidden
+            />
+          </div>
+          <p className="mt-2 text-xs text-slate-600">
+            {smsUsagePercent ?? 0}% of included allowance used.
+            {isFreeAccess
+              ? ' Free access: no paid overage — sends stop at the cap.'
+              : ` Overage is £${SMS_OVERAGE_GBP_PER_MESSAGE.toFixed(2)} per SMS segment.`}
+          </p>
           {smsCountUsesStripePeriod ? (
             <p className="mt-1 text-xs text-slate-500">Usage window follows your Stripe billing period.</p>
           ) : null}
@@ -931,7 +919,6 @@ function PlanSection({
           <p className="font-medium">Changed your mind?</p>
           <p className="mt-1 text-amber-800">
             Restart the subscription before the billing period ends to keep your current plan active without interruption.
-            {isLight ? <> On Appointments Light, SMS remains pay-as-you-go until then.</> : null}
           </p>
           <button
             type="button"

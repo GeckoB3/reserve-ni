@@ -5,7 +5,7 @@ import { stripe } from '@/lib/stripe';
 import {
   getPersistedSubscriptionItemIds,
   getStripeLightPlanPriceId,
-  getStripeSmsLightPriceId,
+  getStripeSmsOveragePriceId,
 } from '@/lib/stripe/subscription-line-items';
 import {
   subscriptionCancelAtPeriodEnd,
@@ -100,8 +100,8 @@ export async function POST() {
     }
 
     const lightPrice = getStripeLightPlanPriceId();
-    const smsLightPrice = getStripeSmsLightPriceId();
-    if (!lightPrice?.trim() || !smsLightPrice?.trim()) {
+    const smsOveragePrice = getStripeSmsOveragePriceId();
+    if (!lightPrice?.trim() || !smsOveragePrice?.trim()) {
       console.error('[downgrade-to-light] Light Stripe prices not configured');
       return NextResponse.json({ error: 'Billing is not configured' }, { status: 500 });
     }
@@ -136,7 +136,7 @@ export async function POST() {
 
     const sub = await stripe.subscriptions.create({
       customer: customerId,
-      items: [{ price: lightPrice.trim() }, { price: smsLightPrice.trim() }],
+      items: [{ price: lightPrice.trim() }, { price: smsOveragePrice.trim() }],
       metadata: { venue_id: staffVenueId, source: 'downgrade_from_appointments' },
       ...(inheritedPaymentMethodId ? { default_payment_method: inheritedPaymentMethodId } : {}),
       payment_settings: {
@@ -167,7 +167,7 @@ export async function POST() {
 
     return NextResponse.json({
       ok: true,
-      message: `You are now on Appointments Light (£${APPOINTMENTS_LIGHT_PRICE}/month + pay-as-you-go SMS). Your calendar and team limits match this plan.`,
+      message: `You are now on Appointments Light (£${APPOINTMENTS_LIGHT_PRICE}/month with included SMS; overage billed per segment). Your calendar and team limits match this plan.`,
     });
   } catch (err) {
     console.error('[downgrade-to-light] Error:', err);

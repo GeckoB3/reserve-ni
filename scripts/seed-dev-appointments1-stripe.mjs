@@ -31,7 +31,7 @@ const BOOKING_MODEL = 'unified_scheduling';
 const BUSINESS_CATEGORY = 'other';
 const TERMINOLOGY = { client: 'Client', booking: 'Booking', staff: 'Staff' };
 const ACTIVE_BOOKING_MODELS = ['unified_scheduling'];
-const SMS_MONTHLY_ALLOWANCE = 300;
+const SMS_MONTHLY_ALLOWANCE = 500;
 
 async function getOrCreateAuthUser(admin, email, password) {
   const { data: created, error: createErr } = await admin.auth.admin.createUser({

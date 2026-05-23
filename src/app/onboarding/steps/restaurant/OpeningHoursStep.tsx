@@ -122,12 +122,12 @@ export function OpeningHoursStep({ onDone }: Props) {
 
       <OpeningHoursControl value={hours} onChange={setHours} disabled={saving} />
 
-      <div className="mt-8 flex items-center justify-between">
+      <div className="mt-8 flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
         <button
           type="button"
           onClick={() => void onDone()}
           disabled={saving}
-          className="text-sm text-slate-500 hover:text-slate-700"
+          className="min-h-11 px-1 text-sm text-slate-500 hover:text-slate-700 disabled:opacity-50 sm:px-0"
         >
           Skip for now
         </button>
@@ -135,7 +135,7 @@ export function OpeningHoursStep({ onDone }: Props) {
           type="button"
           onClick={() => void handleSave()}
           disabled={saving}
-          className="rounded-lg bg-brand-600 px-6 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+          className="min-h-11 w-full rounded-lg bg-brand-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50 sm:w-auto"
         >
           {saving ? 'Saving…' : 'Save & continue'}
         </button>

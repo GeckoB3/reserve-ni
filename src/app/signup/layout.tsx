@@ -15,14 +15,14 @@ export default async function SignupLayout({ children }: { children: React.React
   return (
     <div className="flex min-h-screen flex-col bg-slate-50">
       <nav className="border-b border-slate-100 bg-white/80 backdrop-blur-md">
-        <div className="mx-auto flex max-w-4xl items-center justify-between px-6 py-4">
+        <div className="mx-auto flex max-w-4xl items-center justify-between px-4 py-3 sm:px-6 sm:py-4">
           <Link href="/" className="flex-shrink-0">
             <img src="/Logo.png" alt="ReserveNI" className="h-9 w-auto" />
           </Link>
           <SignupNavAuth />
         </div>
       </nav>
-      <main className="flex flex-1 flex-col items-center px-4 py-12 sm:py-16">
+      <main className="flex flex-1 flex-col items-center px-4 pb-10 pt-8 sm:py-16">
         <Suspense fallback={null}>
           <SignupPlanConflictBanner />
         </Suspense>

@@ -13,11 +13,11 @@
  *
  * Requires .env.local:
  *   NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SECRET_KEY, STRIPE_SECRET_KEY
- *   STRIPE_LIGHT_PRICE_ID, STRIPE_SMS_LIGHT_PRICE_ID (Light)
+ *   STRIPE_LIGHT_PRICE_ID (Light)
  *   STRIPE_APPOINTMENTS_PLUS_PRICE_ID (Plus)
  *   STRIPE_APPOINTMENTS_PRO_PRICE_ID (Pro)
  *   STRIPE_RESTAURANT_PRICE_ID (Restaurant)
- * Optional: STRIPE_SMS_OVERAGE_PRICE_ID (metered SMS on Plus/Pro/Restaurant)
+ *   STRIPE_SMS_OVERAGE_PRICE_ID (metered SMS on Light/Plus/Pro/Restaurant)
  *
  * Usage:
  *   node scripts/seed-dev-four-plan-onboarding-staging.mjs
@@ -47,7 +47,7 @@ const ACCOUNTS = [
     businessCategory: 'other',
     terminology: { client: 'Client', booking: 'Booking', staff: 'Staff' },
     calendarCount: 1,
-    smsMonthlyAllowance: 0,
+    smsMonthlyAllowance: 100,
     appointmentsUnifiedFlow: true,
   },
   {
@@ -60,7 +60,7 @@ const ACCOUNTS = [
     businessCategory: 'other',
     terminology: { client: 'Client', booking: 'Booking', staff: 'Staff' },
     calendarCount: null,
-    smsMonthlyAllowance: 300,
+    smsMonthlyAllowance: 250,
     appointmentsUnifiedFlow: true,
   },
   {
@@ -73,7 +73,7 @@ const ACCOUNTS = [
     businessCategory: 'other',
     terminology: { client: 'Client', booking: 'Booking', staff: 'Staff' },
     calendarCount: null,
-    smsMonthlyAllowance: 800,
+    smsMonthlyAllowance: 500,
     appointmentsUnifiedFlow: true,
   },
   {
@@ -95,9 +95,12 @@ function planStripePriceIds(pricingTier) {
   const t = pricingTier.toLowerCase();
   if (t === 'light') {
     const main = process.env.STRIPE_LIGHT_PRICE_ID?.trim();
-    const sms = process.env.STRIPE_SMS_LIGHT_PRICE_ID?.trim();
     if (!main) throw new Error('STRIPE_LIGHT_PRICE_ID is not set');
-    return { mainPriceId: main, smsPriceId: sms || '', planMetadata: 'light' };
+    return {
+      mainPriceId: main,
+      smsPriceId: process.env.STRIPE_SMS_OVERAGE_PRICE_ID?.trim() || '',
+      planMetadata: 'light',
+    };
   }
   if (t === 'plus') {
     const main = process.env.STRIPE_APPOINTMENTS_PLUS_PRICE_ID?.trim();

@@ -3,16 +3,20 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { LegalAcceptanceCheckbox } from '@/components/signup/LegalAcceptanceCheckbox';
-import {
-  APPOINTMENTS_LIGHT_PRICE,
-  SMS_LIGHT_GBP_PER_MESSAGE,
-} from '@/lib/pricing-constants';
+import { APPOINTMENTS_LIGHT_PRICE, SMS_OVERAGE_GBP_PER_MESSAGE } from '@/lib/pricing-constants';
+import { SMS_INCLUDED_LIGHT } from '@/lib/billing/sms-allowance';
 import { STANDARD_PAYMENT_PROVIDER_FEES_NOTICE } from '@/lib/payment-provider-fees-notice';
 import { SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE } from '@/lib/subscription-cancellation-copy';
+import {
+  SIGNUP_TRIAL_CARD_NOTICE,
+  SIGNUP_TRIAL_PAYMENT_FAILURE_NOTICE,
+  signupTrialThenPrice,
+  signupTrialSmsDuringTrialNotice,
+} from '@/lib/signup-trial-copy';
 
 export default function AppointmentsLightIntroPage() {
   const router = useRouter();
-  const smsPence = Math.round(SMS_LIGHT_GBP_PER_MESSAGE * 100);
+  const overagePence = Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100);
   const [termsAccepted, setTermsAccepted] = useState(false);
 
   useEffect(() => {
@@ -30,7 +34,7 @@ export default function AppointmentsLightIntroPage() {
       <div className="mb-8 text-center">
         <h1 className="text-2xl font-bold text-slate-900">Appointments Light</h1>
         <p className="mt-2 text-sm text-slate-500">
-          &pound;{APPOINTMENTS_LIGHT_PRICE}/month from day one, with card at checkout. Built for sole traders who need one
+          {signupTrialThenPrice(APPOINTMENTS_LIGHT_PRICE)} with card at checkout. Built for sole traders who need one
           bookable calendar and a clear client booking page.
         </p>
       </div>
@@ -42,11 +46,14 @@ export default function AppointmentsLightIntroPage() {
           <SummaryItem text="An online booking page your clients can use at any time" />
           <SummaryItem text="Appointments, classes, events, and resource booking in one place" />
           <SummaryItem text="Automated email reminders included" />
-          <SummaryItem text={`0 SMS included; pay-as-you-go at ${smsPence}p per SMS via Stripe`} />
+          <SummaryItem text={`${SMS_INCLUDED_LIGHT} SMS per month included, then ${overagePence}p each`} />
           <SummaryItem text="Client records with visit history" />
           <SummaryItem text="Email support" />
         </ul>
         <p className="mt-5 text-xs text-slate-500">
+          {SIGNUP_TRIAL_CARD_NOTICE} {signupTrialSmsDuringTrialNotice()} {SIGNUP_TRIAL_PAYMENT_FAILURE_NOTICE}
+        </p>
+        <p className="mt-3 text-xs text-slate-500">
           After checkout you will choose which booking models to use for your venue, then onboarding will guide you
           through setup. You can change models later in Settings.
         </p>

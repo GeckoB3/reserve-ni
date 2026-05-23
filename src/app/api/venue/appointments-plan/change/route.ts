@@ -10,7 +10,6 @@ import {
   getStripeAppointmentsPlusPriceId,
   getStripeAppointmentsProPriceId,
   getStripeLightPlanPriceId,
-  getStripeSmsLightPriceId,
   getStripeSmsOveragePriceId,
 } from '@/lib/stripe/subscription-line-items';
 import {
@@ -54,8 +53,8 @@ function mainPriceForTier(targetTier: AppointmentsTier): string {
   return priceId.trim();
 }
 
-function smsPriceForTier(targetTier: AppointmentsTier): string | null {
-  const priceId = targetTier === 'light' ? getStripeSmsLightPriceId() : getStripeSmsOveragePriceId();
+function smsPriceForTier(_targetTier: AppointmentsTier): string | null {
+  const priceId = getStripeSmsOveragePriceId();
   return priceId?.trim() || null;
 }
 

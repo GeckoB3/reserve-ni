@@ -6,6 +6,7 @@ import { stripe } from '@/lib/stripe';
 import {
   buildCheckoutLineItems,
   buildLightPlanCheckoutLineItems,
+  buildSignupCheckoutSubscriptionData,
 } from '@/lib/stripe/subscription-line-items';
 import { getBusinessConfig } from '@/lib/business-config';
 import { FOUNDING_PARTNER_CAP } from '@/lib/pricing-constants';
@@ -136,7 +137,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ redirect_url: '/onboarding' });
     }
 
-    // Appointments Light: card-required subscription checkout (£10 + 8p SMS metered)
+    // Appointments Light: card-required subscription checkout (£20/mo + 6p SMS overage meter)
     if (plan === 'light') {
       if (config.model === 'table_reservation') {
         return NextResponse.json(
@@ -217,6 +218,7 @@ export async function POST(request: Request) {
       allow_promotion_codes: true,
       payment_method_collection: 'always',
       line_items: lineItems,
+      subscription_data: buildSignupCheckoutSubscriptionData(),
       metadata: {
         supabase_user_id: user.id,
         user_id: user.id,

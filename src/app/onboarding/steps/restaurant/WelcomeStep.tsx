@@ -87,7 +87,7 @@ export function WelcomeStep({ onContinue }: Props) {
       <button
         type="button"
         onClick={onContinue}
-        className="rounded-lg bg-brand-600 px-6 py-2 text-sm font-medium text-white hover:bg-brand-700"
+        className="min-h-11 w-full rounded-lg bg-brand-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-brand-700 sm:w-auto"
       >
         Continue
       </button>

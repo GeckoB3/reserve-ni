@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import ContactForm from "@/components/ContactForm";
+import { SMS_INCLUDED_LIGHT } from "@/lib/billing/sms-allowance";
+import { SMS_OVERAGE_GBP_PER_MESSAGE } from "@/lib/pricing-constants";
 import {
   RESERVENI_DEPOSIT_FLOWS_MARKETING_FOLLOW_ON,
   RESERVENI_MARKETING_PAYMENTS_AND_NO_HOLD,
@@ -222,7 +224,7 @@ const faqs = [
   },
   {
     q: "How do SMS costs work?",
-    a: "Appointments Light has no included SMS and messages are pay as you go at 8p each. Appointments Plus and Pro include a monthly SMS allowance, then additional messages are 6p each.",
+    a: `Appointments Light includes ${SMS_INCLUDED_LIGHT} SMS per month, then additional messages are ${Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100)}p each. Appointments Plus and Pro include larger monthly SMS allowances, then additional messages are ${Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100)}p each.`,
   },
   {
     q: "How long does setup take?",

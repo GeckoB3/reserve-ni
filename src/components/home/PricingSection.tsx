@@ -7,12 +7,12 @@ import {
   APPOINTMENTS_PLUS_PRICE,
   APPOINTMENTS_PRO_PRICE,
   RESTAURANT_PRICE,
-  SMS_LIGHT_GBP_PER_MESSAGE,
   SMS_OVERAGE_GBP_PER_MESSAGE,
 } from '@/lib/pricing-constants';
-import { SMS_INCLUDED_APPOINTMENTS, SMS_INCLUDED_PLUS, SMS_INCLUDED_RESTAURANT } from '@/lib/billing/sms-allowance';
+import { SMS_INCLUDED_APPOINTMENTS, SMS_INCLUDED_LIGHT, SMS_INCLUDED_PLUS, SMS_INCLUDED_RESTAURANT } from '@/lib/billing/sms-allowance';
 import { STANDARD_PAYMENT_PROVIDER_FEES_NOTICE } from '@/lib/payment-provider-fees-notice';
 import { SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE } from '@/lib/subscription-cancellation-copy';
+import { SIGNUP_TRIAL_FOOTER_NOTICE, SIGNUP_TRIAL_SHORT_LABEL } from '@/lib/signup-trial-copy';
 
 type Segment = 'appointments' | 'restaurant';
 
@@ -60,13 +60,14 @@ export function PricingSection() {
                 <span className="text-4xl font-extrabold text-slate-900">&pound;{APPOINTMENTS_LIGHT_PRICE}</span>
                 <span className="text-sm text-slate-500">/month</span>
               </div>
-              <p className="mt-2 text-sm font-medium leading-snug text-slate-700">Card required at signup. For sole traders getting started.</p>
+              <p className="mt-1 text-sm font-semibold text-brand-600">{SIGNUP_TRIAL_SHORT_LABEL}</p>
+              <p className="mt-2 text-sm font-medium leading-snug text-slate-700">For sole traders getting started.</p>
               <ul className="mt-6 flex-1 space-y-3 text-sm text-slate-600">
                 <PricingFeature text="One calendar for you and your business" />
                 <PricingFeature text="Online booking page your clients can use 24/7" />
                 <PricingFeature text="Appointments, classes, events, and resource booking" />
                 <PricingFeature text="Automated email reminders included" />
-                <PricingFeature text={`0 SMS included; pay-as-you-go at ${Math.round(SMS_LIGHT_GBP_PER_MESSAGE * 100)}p per SMS`} />
+                <PricingFeature text={`${SMS_INCLUDED_LIGHT} SMS per month included, then ${Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100)}p each`} />
                 <PricingFeature text="Client records with visit history" />
                 <PricingFeature text="Email support" />
               </ul>
@@ -82,8 +83,9 @@ export function PricingSection() {
                 <span className="text-4xl font-extrabold text-slate-900">&pound;{APPOINTMENTS_PLUS_PRICE}</span>
                 <span className="text-sm text-slate-500">/month</span>
               </div>
+              <p className="mt-1 text-sm font-semibold text-brand-600">{SIGNUP_TRIAL_SHORT_LABEL}</p>
               <p className="mt-2 text-sm font-medium leading-snug text-slate-700">For growing teams (up to 5 calendars and 5 users).</p>
-              <p className="mt-1 text-xs text-slate-500">Single venue only.</p>
+              <p className="mt-1 text-xs text-slate-500">Single venue.</p>
               <ul className="mt-6 flex-1 space-y-3 text-sm text-slate-600">
                 <PricingFeature text="Up to 5 bookable calendars and 5 team members" />
                 <PricingFeature text="Everything in Light, plus:" />
@@ -103,8 +105,9 @@ export function PricingSection() {
                 <span className="text-4xl font-extrabold text-slate-900">&pound;{APPOINTMENTS_PRO_PRICE}</span>
                 <span className="text-sm text-slate-500">/month</span>
               </div>
+              <p className="mt-1 text-sm font-semibold text-brand-600">{SIGNUP_TRIAL_SHORT_LABEL}</p>
               <p className="mt-2 text-sm font-medium leading-snug text-slate-700">For teams of any size.</p>
-              <p className="mt-1 text-xs text-slate-500">Single venue only.</p>
+              <p className="mt-1 text-xs text-slate-500">Single venue.</p>
               <ul className="mt-6 flex-1 space-y-3 text-sm text-slate-600">
                 <PricingFeature text="Unlimited calendars and team members" />
                 <PricingFeature text="Everything in Light, plus:" />
@@ -125,6 +128,7 @@ export function PricingSection() {
                 <span className="text-4xl font-extrabold text-slate-900">&pound;{RESTAURANT_PRICE}</span>
                 <span className="text-sm text-slate-500">/month</span>
               </div>
+              <p className="mt-1 text-sm font-semibold text-brand-600">{SIGNUP_TRIAL_SHORT_LABEL}</p>
               <p className="mt-2 text-sm font-medium leading-snug text-slate-700">
                 For restaurants, cafes, pubs, and hotel dining.
               </p>
@@ -146,7 +150,8 @@ export function PricingSection() {
         )}
 
         <p className="mx-auto mt-10 max-w-2xl text-center text-sm text-slate-500">
-          No per-booking fees. No commission. {STANDARD_PAYMENT_PROVIDER_FEES_NOTICE} {SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE}
+          {SIGNUP_TRIAL_FOOTER_NOTICE} No per-booking fees. No commission. {STANDARD_PAYMENT_PROVIDER_FEES_NOTICE}{' '}
+          {SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE}
         </p>
 
         <div className="mx-auto mt-10 max-w-4xl overflow-hidden rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-white shadow-sm">

@@ -1,9 +1,9 @@
 import type { HelpCategory } from '../types';
+import { SMS_INCLUDED_APPOINTMENTS, SMS_INCLUDED_LIGHT, SMS_INCLUDED_PLUS } from '@/lib/billing/sms-allowance';
 import {
   APPOINTMENTS_LIGHT_PRICE,
   APPOINTMENTS_PLUS_PRICE,
   APPOINTMENTS_PRO_PRICE,
-  SMS_LIGHT_GBP_PER_MESSAGE,
   SMS_OVERAGE_GBP_PER_MESSAGE,
 } from '@/lib/pricing-constants';
 
@@ -37,8 +37,8 @@ You run **unified scheduling**: one place to manage **bookable calendars** (ofte
 | **Monthly price (guide)** | From £${APPOINTMENTS_LIGHT_PRICE}/month | £${APPOINTMENTS_PLUS_PRICE}/month | £${APPOINTMENTS_PRO_PRICE}/month |
 | **Bookable calendars** | 1 | Up to 5 | Unlimited |
 | **Team logins** | 1 | Up to 5 | Unlimited |
-| **SMS bundle** | None included; each SMS is pay-as-you-go (currently about **${Math.round(SMS_LIGHT_GBP_PER_MESSAGE * 100)}p** each) | **300** included per month | **800** included per month |
-| **After your SMS bundle** (Plus / Pro) | — | Overage billed at about **${Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100)}p** per message | Same overage rate |
+| **SMS bundle** | **${SMS_INCLUDED_LIGHT}** included per month | **${SMS_INCLUDED_PLUS}** included per month | **${SMS_INCLUDED_APPOINTMENTS}** included per month |
+| **After your SMS bundle** | Overage billed at about **${Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100)}p** per message | Same overage rate | Same overage rate |
 
 Exact prices and SMS wording appear in **Settings → Plan**. If **Add calendar** or **invite staff** disappears, you have reached your tier cap—either deactivate something you no longer need or upgrade.
 
@@ -616,7 +616,7 @@ Toggle **email** and **SMS** per message when the controls allow it—some regul
 
 ## SMS allowances
 
-**Plus** and **Pro** include monthly SMS bundles (300 / 800). **Light** has **no** included SMS—each message is pay-as-you-go and you may need a saved card before SMS can send. Watch any red **banner** inside Communications or Plan for billing prompts.
+**Light**, **Plus**, and **Pro** include monthly SMS bundles (${SMS_INCLUDED_LIGHT} / ${SMS_INCLUDED_PLUS} / ${SMS_INCLUDED_APPOINTMENTS}). You may need a saved card before SMS can send if billing is not active yet. Watch any red **banner** inside Communications or Plan for billing prompts.
 
 ## Previews
 

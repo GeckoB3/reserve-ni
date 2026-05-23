@@ -166,7 +166,7 @@ export default function SignupBookingModelsPage() {
               key={model}
               type="button"
               onClick={() => toggleModel(model)}
-              className={`rounded-2xl border px-5 py-5 text-left transition-all ${
+              className={`min-h-[4.5rem] rounded-2xl border px-5 py-5 text-left transition-all ${
                 checked
                   ? 'border-brand-500 bg-brand-50 ring-1 ring-brand-500'
                   : 'border-slate-200 bg-white hover:border-slate-300'
@@ -214,15 +214,15 @@ export default function SignupBookingModelsPage() {
         </div>
       )}
 
-      <div className="mt-8 flex items-center justify-between gap-4">
-        <p className="text-sm text-slate-500">
+      <div className="mt-8 flex flex-col-reverse gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-center text-sm text-slate-500 sm:text-left">
           {selected.length} booking model{selected.length === 1 ? '' : 's'} selected
         </p>
         <button
           type="button"
           onClick={handleContinue}
           disabled={saving}
-          className="rounded-xl bg-brand-600 px-8 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 disabled:opacity-50"
+          className="min-h-11 w-full rounded-xl bg-brand-600 px-8 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 disabled:opacity-50 sm:w-auto"
         >
           {saving ? 'Saving...' : 'Continue to onboarding'}
         </button>

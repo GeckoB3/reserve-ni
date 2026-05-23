@@ -16,6 +16,7 @@ import {
 } from '@/lib/stripe/subscription-line-items';
 import { updateVenueSmsMonthlyAllowance } from '@/lib/billing/sms-allowance';
 import { handleLightPaymentMethodUpdateFromSetup } from '@/lib/stripe/light-past-due-payment-webhook';
+import { pauseSubscriptionOnTrialEndPaymentFailure, getStripeInvoiceSubscriptionId } from '@/lib/stripe/trial-end-payment';
 import { communicationPoliciesEmailOnlyAppointmentsLane } from '@/lib/communications/policies';
 import { defaultNotificationSettingsForLightPlan } from '@/lib/notifications/notification-settings';
 import { isAppointmentPlanTier } from '@/lib/tier-enforcement';
@@ -112,9 +113,22 @@ export async function POST(request: NextRequest) {
         if (invoice.customer) {
           const customerId =
             typeof invoice.customer === 'string' ? invoice.customer : invoice.customer.id;
+
+          let planStatus: 'active' | 'trialing' | 'past_due' | 'cancelled' | 'cancelling' = 'past_due';
+          try {
+            const paused = await pauseSubscriptionOnTrialEndPaymentFailure(invoice);
+            const subId = getStripeInvoiceSubscriptionId(invoice);
+            if (paused && subId) {
+              const sub = await stripe.subscriptions.retrieve(subId);
+              planStatus = mapStripeSubscriptionToPlanStatus(sub);
+            }
+          } catch (e) {
+            console.warn('[Subscription webhook] Trial-end pause handling failed:', e);
+          }
+
           await supabase
             .from('venues')
-            .update({ plan_status: 'past_due' })
+            .update({ plan_status: planStatus })
             .eq('stripe_customer_id', customerId);
         }
         break;
@@ -269,7 +283,7 @@ async function handleCheckoutCompleted(
   let smsSubscriptionItemId: string | null = null;
   let periodEndIso: string | null = null;
   let periodStartIso: string | null = null;
-  let cancelAtPeriodEnd = false;
+  let signupPlanStatus: 'active' | 'trialing' | 'cancelling' = 'active';
   if (subscriptionId) {
     try {
       const sub = await stripe.subscriptions.retrieve(subscriptionId);
@@ -278,7 +292,10 @@ async function handleCheckoutCompleted(
       smsSubscriptionItemId = ids.smsSubscriptionItemId;
       periodEndIso = subscriptionPeriodEndIso(sub) ?? subscriptionCancelAtIso(sub);
       periodStartIso = subscriptionPeriodStartIso(sub);
-      cancelAtPeriodEnd = subscriptionCancelAtPeriodEnd(sub);
+      const mapped = mapStripeSubscriptionToPlanStatus(sub);
+      if (mapped === 'trialing' || mapped === 'cancelling') {
+        signupPlanStatus = mapped;
+      }
     } catch {
       console.warn('[Subscription webhook] Could not retrieve subscription item');
     }
@@ -300,7 +317,7 @@ async function handleCheckoutCompleted(
       business_category: config.category,
       terminology: config.terms,
       pricing_tier: plan,
-      plan_status: cancelAtPeriodEnd ? 'cancelling' : 'active',
+      plan_status: signupPlanStatus,
       stripe_customer_id: customerId,
       stripe_subscription_id: subscriptionId,
       stripe_subscription_item_id: mainSubscriptionItemId,
