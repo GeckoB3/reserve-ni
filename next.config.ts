@@ -1,6 +1,11 @@
+import path from "node:path";
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Pin workspace root so Turbopack resolves `next` from repo root (not `src/app`).
+  turbopack: {
+    root: path.join(__dirname),
+  },
   reactCompiler: true,
   env: {
     NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
