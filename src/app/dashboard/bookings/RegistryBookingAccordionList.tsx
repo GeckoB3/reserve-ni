@@ -26,7 +26,7 @@ import {
   applyBookingRowOverlayFields,
   overlayFromPatchPayload,
 } from '@/lib/booking/booking-row-overlay';
-import { bookingStatusVisualForKey } from '@/lib/table-management/booking-status-visual';
+import { bookingStatusVisualForRow } from '@/lib/table-management/booking-status-visual';
 import { BookingStatusPill } from '@/components/ui/dashboard/BookingStatusPill';
 import { Pill, type PillVariant } from '@/components/ui/dashboard/Pill';
 import type { GuestMessageChannel, GuestMessageSendResult } from '@/lib/booking/guest-message-channel';
@@ -117,7 +117,7 @@ function registryToExpandedBookingRow(b: RegistryAppointment): BookingRow {
 }
 
 function statusBorderClass(b: RegistryAppointment): string {
-  return bookingStatusVisualForKey(b.status).listBorderLeft;
+  return bookingStatusVisualForRow(b).listBorderLeft;
 }
 
 function bookingTypePillVariant(model: BookingModel): PillVariant {

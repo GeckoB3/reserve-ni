@@ -3188,9 +3188,9 @@ export function AppointmentBookingFlow({
           </p>
 
           {/* Date selector for group */}
-          <div className="mb-4">
+          <div className="mb-4 min-w-0">
             <label className="mb-1 block text-xs font-medium text-slate-500 uppercase tracking-wider">Booking date</label>
-            <input type="date" value={date} min={todayStr()} onChange={(e) => setDate(e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm shadow-sm focus:border-brand-400 focus:ring-2 focus:ring-brand-100 focus:outline-none" />
+            <input type="date" value={date} min={todayStr()} onChange={(e) => setDate(e.target.value)} className="w-full min-w-0 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm shadow-sm focus:border-brand-400 focus:ring-2 focus:ring-brand-100 focus:outline-none" />
           </div>
 
           {/* People list */}

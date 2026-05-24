@@ -32,7 +32,7 @@ interface Props {
 }
 
 const INPUT_CLASS =
-  'w-full min-h-10 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-brand-500 focus:ring-1 focus:ring-brand-500';
+  'w-full min-h-10 min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-brand-500 focus:ring-1 focus:ring-brand-500';
 
 function formatCurrency(pence: number, currency: string): string {
   return new Intl.NumberFormat('en-GB', {
@@ -239,9 +239,9 @@ export function ResourceSlotBookingForm({
               </Button>
             </div>
           ) : resource ? (
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div>
+            <form onSubmit={handleSubmit} className="min-w-0 max-w-full space-y-4">
+              <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="min-w-0">
                   <label htmlFor="resource-booking-date" className="mb-1 block text-xs font-medium text-slate-700">
                     Date
                   </label>
@@ -254,7 +254,7 @@ export function ResourceSlotBookingForm({
                     className={INPUT_CLASS}
                   />
                 </div>
-                <div>
+                <div className="min-w-0">
                   <label htmlFor="resource-booking-time" className="mb-1 block text-xs font-medium text-slate-700">
                     Start time
                   </label>

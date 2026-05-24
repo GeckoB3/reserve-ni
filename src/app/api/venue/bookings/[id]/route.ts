@@ -905,10 +905,17 @@ export async function PATCH(
       return NextResponse.json(updated.data);
     }
 
-    /** Appointment bookings: staff marks client as arrived / waiting (optional; cleared when status → Seated). */
+    /** Staff marks client as arrived / waiting (appointments and CDE rosters). */
     if (body.client_arrived !== undefined) {
-      if (!booking.practitioner_id && !booking.calendar_id) {
-        return NextResponse.json({ error: 'Arrived is only available for appointment bookings' }, { status: 400 });
+      const canMarkArrived =
+        Boolean(booking.practitioner_id || booking.calendar_id) ||
+        Boolean(
+          (booking as { experience_event_id?: string | null }).experience_event_id ||
+            (booking as { class_instance_id?: string | null }).class_instance_id ||
+            (booking as { resource_id?: string | null }).resource_id,
+        );
+      if (!canMarkArrived) {
+        return NextResponse.json({ error: 'Arrived is not available for this booking type' }, { status: 400 });
       }
       const st = booking.status as string;
       if (!['Pending', 'Booked', 'Confirmed'].includes(st)) {

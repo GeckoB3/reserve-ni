@@ -71,6 +71,14 @@ export function retainBookingRowOverlay(
   if (isAttendanceConfirmed(booking) && !isAttendanceConfirmed(intended)) {
     return overlay;
   }
+  const overlayArrived = overlay.client_arrived_at;
+  if (
+    typeof overlayArrived === 'string' &&
+    overlayArrived.length > 0 &&
+    !booking.client_arrived_at
+  ) {
+    return overlay;
+  }
   return pruneBookingRowOverlay(overlay, booking);
 }
 
@@ -116,15 +124,20 @@ export function overlayFromPatchPayloadForBody(
   return overlay;
 }
 
+/** Optimistic `client_arrived_at` for calendar/list overlays (mirrors venue PATCH route). */
+export function overlayFromClientArrivedPatch(arrived: boolean): BookingRowOverlay {
+  return {
+    client_arrived_at: arrived ? new Date().toISOString() : null,
+  };
+}
+
 /** Optimistic overlay from PATCH body before the server responds (mirrors venue PATCH route). */
 export function overlayFromPatchBody(
   body: Record<string, unknown>,
   row: BookingRowOverlayFields,
 ): BookingRowOverlay {
   if (body.client_arrived !== undefined) {
-    return {
-      client_arrived_at: body.client_arrived ? new Date().toISOString() : null,
-    };
+    return overlayFromClientArrivedPatch(Boolean(body.client_arrived));
   }
   if (body.staff_attendance_confirmed !== undefined) {
     const on = Boolean(body.staff_attendance_confirmed);

@@ -284,7 +284,7 @@ export function AppointmentWaitlistJoin({
       ) : null}
       {status === 'error' ? <p className="text-xs text-red-600">{message}</p> : null}
 
-      <div>
+      <div className="min-w-0">
         <WaitlistFieldLabel htmlFor={fieldIds.service} compact>
           Service
         </WaitlistFieldLabel>
@@ -320,7 +320,7 @@ export function AppointmentWaitlistJoin({
           type="date"
           value={date}
           onChange={(e) => setDate(e.target.value)}
-          className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+          className="w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm"
         />
       </div>
 
@@ -347,7 +347,7 @@ export function AppointmentWaitlistJoin({
         </p>
       </div>
 
-      <div className="grid gap-2 sm:grid-cols-2">
+      <div className="grid min-w-0 gap-2 sm:grid-cols-2">
         <div>
           <WaitlistFieldLabel htmlFor={fieldIds.firstName} required compact>
             First name
@@ -428,7 +428,7 @@ export function AppointmentWaitlistJoin({
           <span className="font-medium text-slate-800">Between specific times</span>
         </label>
         {preferredWindow === 'time_range' ? (
-          <div className="grid gap-2 sm:grid-cols-2 pl-1">
+          <div className="grid min-w-0 gap-2 pl-1 sm:grid-cols-2">
             <div>
               <WaitlistFieldLabel htmlFor={fieldIds.rangeStart} required compact>
                 From
@@ -439,7 +439,7 @@ export function AppointmentWaitlistJoin({
                 required
                 value={rangeStart}
                 onChange={(e) => setRangeStart(e.target.value)}
-                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                className="w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm"
               />
             </div>
             <div>
@@ -452,7 +452,7 @@ export function AppointmentWaitlistJoin({
                 required
                 value={rangeEnd}
                 onChange={(e) => setRangeEnd(e.target.value)}
-                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                className="w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm"
               />
             </div>
           </div>

@@ -2317,7 +2317,7 @@ export default function OnboardingPage() {
   const onboardingCardPaddingClass = extraWideOnboardingStep ? 'p-4 sm:p-6' : 'p-4 sm:p-8';
 
   return (
-    <div className={`w-full min-w-0 ${onboardingWidthClass}`}>
+    <div className={`w-full min-w-0 max-w-full ${onboardingWidthClass}`}>
       {/* Progress */}
       <div className="mb-6 sm:mb-8">
         <div className="mb-2 flex flex-col gap-1 text-xs font-medium text-slate-400 sm:flex-row sm:items-center sm:justify-between">
@@ -2340,7 +2340,9 @@ export default function OnboardingPage() {
         )}
       </div>
 
-      <div className={`min-w-0 overflow-x-hidden rounded-2xl border border-slate-200 bg-white shadow-sm ${onboardingCardPaddingClass}`}>
+      <div
+        className={`min-w-0 max-w-full overflow-x-hidden break-words rounded-2xl border border-slate-200 bg-white shadow-sm [&_button]:max-w-full [&_input]:max-w-full [&_input]:min-w-0 [&_select]:max-w-full [&_select]:min-w-0 [&_textarea]:max-w-full [&_textarea]:min-w-0 ${onboardingCardPaddingClass}`}
+      >
         {error && (
           <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             {error}
@@ -2694,7 +2696,7 @@ export default function OnboardingPage() {
               {practitioners.map((p, i) => (
                 <div
                   key={i}
-                  className="rounded-xl border border-slate-200 p-4 transition-shadow hover:shadow-sm"
+                  className="min-w-0 max-w-full rounded-xl border border-slate-200 p-4 transition-shadow hover:shadow-sm"
                 >
                   <div className="mb-3 flex items-start justify-between gap-2">
                     <span className="text-xs font-medium uppercase tracking-wide text-slate-400">
@@ -2728,8 +2730,8 @@ export default function OnboardingPage() {
                       />
                     </div>
                   ) : (
-                    <div className="flex flex-col gap-3 sm:flex-row sm:gap-3">
-                      <div className="flex-1">
+                    <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:gap-3">
+                      <div className="min-w-0 flex-1">
                         <label className="mb-1 block text-xs font-medium text-slate-600">
                           Name <span className="text-red-500">*</span>
                         </label>
@@ -2745,7 +2747,7 @@ export default function OnboardingPage() {
                           className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
                         />
                       </div>
-                      <div className="flex-1">
+                      <div className="min-w-0 flex-1">
                         <label className="mb-1 block text-xs font-medium text-slate-600">
                           Email <span className="font-normal text-slate-400">(optional)</span>
                         </label>
@@ -2932,8 +2934,8 @@ export default function OnboardingPage() {
             )}
             <div className="space-y-10">
               {rosterList.map((cal) => (
-                <div key={cal.id}>
-                  <h3 className="mb-3 text-sm font-semibold text-slate-800">
+                <div key={cal.id} className="min-w-0 max-w-full">
+                  <h3 className="mb-3 break-words text-sm font-semibold text-slate-800">
                     {cal.name}: working hours
                   </h3>
                   <WorkingHoursControl

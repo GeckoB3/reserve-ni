@@ -33,7 +33,7 @@ export async function GET(
     const { data: rows, error } = await admin
       .from('bookings')
       .select(
-        'id,status,party_size,deposit_amount_pence,deposit_status,booking_date,booking_time,checked_in_at,guest:guests(first_name,last_name,email,phone),ticket_lines:booking_ticket_lines(label,quantity,unit_price_pence)',
+        'id,status,party_size,deposit_amount_pence,deposit_status,booking_date,booking_time,client_arrived_at,guest:guests(first_name,last_name,email,phone),ticket_lines:booking_ticket_lines(label,quantity,unit_price_pence)',
       )
       .eq('venue_id', staff.venue_id)
       .eq('experience_event_id', eventId)
@@ -71,7 +71,7 @@ export async function GET(
         deposit_status: r.deposit_status,
         booking_date: r.booking_date,
         booking_time: r.booking_time,
-        checked_in_at: r.checked_in_at,
+        client_arrived_at: r.client_arrived_at,
         guest_name: formatGuestDisplayName(g?.first_name, g?.last_name),
         guest_email: g?.email ?? null,
         guest_phone: g?.phone ?? null,

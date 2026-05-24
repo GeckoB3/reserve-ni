@@ -101,7 +101,7 @@ export async function GET(request: NextRequest) {
     const { data: bookingRows, error: bookErr } = await staff.db
       .from('bookings')
       .select(
-        'id, booking_date, booking_time, booking_end_time, estimated_end_time, status, party_size, guest_id, experience_event_id, class_instance_id, resource_id, calendar_id',
+        'id, booking_date, booking_time, booking_end_time, estimated_end_time, status, party_size, guest_id, client_arrived_at, experience_event_id, class_instance_id, resource_id, calendar_id',
       )
       .eq('venue_id', venueId)
       .or('experience_event_id.not.is.null,class_instance_id.not.is.null,resource_id.not.is.null')
@@ -209,14 +209,15 @@ export async function GET(request: NextRequest) {
 
     const bookedClassIds = new Set<string>();
     const classEnrolledByInstance = new Map<string, number>();
-    const eventStats = new Map<string, { bookingCount: number; partyTotal: number }>();
+    const eventStats = new Map<string, { bookingCount: number; partyTotal: number; arrivedCount: number }>();
     for (const r of rows) {
       const bmStat = inferBookingRowModel(r as Parameters<typeof inferBookingRowModel>[0]);
       if (bmStat === 'event_ticket' && r.experience_event_id && r.status !== 'Cancelled') {
         const eid = r.experience_event_id as string;
-        const cur = eventStats.get(eid) ?? { bookingCount: 0, partyTotal: 0 };
+        const cur = eventStats.get(eid) ?? { bookingCount: 0, partyTotal: 0, arrivedCount: 0 };
         cur.bookingCount += 1;
         cur.partyTotal += Number(r.party_size ?? 1);
+        if (r.client_arrived_at) cur.arrivedCount += 1;
         eventStats.set(eid, cur);
       }
     }
@@ -370,10 +371,11 @@ export async function GET(request: NextRequest) {
           const st = eventStats.get(e.id);
           const bookingCount = st?.bookingCount ?? 0;
           const partyTotal = st?.partyTotal ?? 0;
+          const arrivedCount = st?.arrivedCount ?? 0;
           const subtitle =
             bookingCount === 0
               ? 'No bookings yet'
-              : `${bookingCount} booking${bookingCount === 1 ? '' : 's'} · ${partyTotal} guest${partyTotal === 1 ? '' : 's'}`;
+              : `${bookingCount} booking${bookingCount === 1 ? '' : 's'} · ${partyTotal} guest${partyTotal === 1 ? '' : 's'} · ${arrivedCount} arrived`;
 
           blocks.push({
             id: `ev-${e.id}`,
@@ -389,6 +391,7 @@ export async function GET(request: NextRequest) {
             event_capacity: e.capacity ?? null,
             event_booking_count: bookingCount,
             event_party_total: partyTotal,
+            event_arrived_count: arrivedCount,
           });
         }
       }

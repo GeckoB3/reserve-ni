@@ -54,7 +54,7 @@ export default async function OnboardingLayout({ children }: { children: React.R
   }
 
   return (
-    <div className="flex min-h-screen flex-col bg-slate-50">
+    <div className="flex min-h-screen min-w-0 flex-col overflow-x-hidden bg-slate-50">
       <nav className="border-b border-slate-100 bg-white/80 backdrop-blur-md">
         <div className="mx-auto grid max-w-4xl grid-cols-3 items-center px-4 py-3 sm:px-6 sm:py-4">
           <div aria-hidden className="min-w-0" />
@@ -68,7 +68,7 @@ export default async function OnboardingLayout({ children }: { children: React.R
           </div>
         </div>
       </nav>
-      <main className="flex flex-1 items-start justify-center px-4 pb-10 pt-8 sm:py-16">
+      <main className="flex w-full min-w-0 flex-1 items-start justify-center overflow-x-hidden px-3 pb-10 pt-8 sm:px-4 sm:py-16">
         {children}
       </main>
     </div>

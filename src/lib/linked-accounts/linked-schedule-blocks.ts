@@ -14,6 +14,7 @@ type RawBookingRow = {
   class_instance_id?: string | null;
   status?: string | null;
   party_size?: number | null;
+  client_arrived_at?: string | null;
 };
 
 /**
@@ -31,7 +32,7 @@ export async function buildLinkedVenueScheduleBlocks(
 ): Promise<ScheduleBlockDTO[]> {
   const blocks: ScheduleBlockDTO[] = [];
 
-  const eventStats = new Map<string, { bookingCount: number; partyTotal: number }>();
+  const eventStats = new Map<string, { bookingCount: number; partyTotal: number; arrivedCount: number }>();
   const classEnrolledByInstance = new Map<string, number>();
   const bookedClassIds = new Set<string>();
 
@@ -39,9 +40,10 @@ export async function buildLinkedVenueScheduleBlocks(
     if (r.status === 'Cancelled') continue;
     if (r.experience_event_id) {
       const eid = r.experience_event_id;
-      const cur = eventStats.get(eid) ?? { bookingCount: 0, partyTotal: 0 };
+      const cur = eventStats.get(eid) ?? { bookingCount: 0, partyTotal: 0, arrivedCount: 0 };
       cur.bookingCount += 1;
       cur.partyTotal += Number(r.party_size ?? 1);
+      if (r.client_arrived_at) cur.arrivedCount += 1;
       eventStats.set(eid, cur);
     }
     if (r.class_instance_id) {
@@ -77,10 +79,11 @@ export async function buildLinkedVenueScheduleBlocks(
     const st = eventStats.get(e.id);
     const bookingCount = st?.bookingCount ?? 0;
     const partyTotal = st?.partyTotal ?? 0;
+    const arrivedCount = st?.arrivedCount ?? 0;
     const subtitle =
       bookingCount === 0
         ? 'No bookings yet'
-        : `${bookingCount} booking${bookingCount === 1 ? '' : 's'} · ${partyTotal} guest${partyTotal === 1 ? '' : 's'}`;
+        : `${bookingCount} booking${bookingCount === 1 ? '' : 's'} · ${partyTotal} guest${partyTotal === 1 ? '' : 's'} · ${arrivedCount} arrived`;
 
     blocks.push({
       id: `ev-${e.id}`,
@@ -96,6 +99,7 @@ export async function buildLinkedVenueScheduleBlocks(
       event_capacity: e.capacity ?? null,
       event_booking_count: bookingCount,
       event_party_total: partyTotal,
+      event_arrived_count: arrivedCount,
     });
   }
 
