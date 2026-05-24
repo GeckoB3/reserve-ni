@@ -173,9 +173,9 @@ export function ServiceAvailabilityCalendar({
   }
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+    <div className="min-w-0 max-w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
       {/* Header */}
-      <div className="flex items-center justify-between gap-2 border-b border-slate-100 bg-slate-50/80 px-3 py-2.5">
+      <div className="flex min-w-0 items-center justify-between gap-2 border-b border-slate-100 bg-slate-50/80 px-3 py-2.5">
         <button
           type="button"
           onClick={goPrev}
@@ -211,16 +211,16 @@ export function ServiceAvailabilityCalendar({
         </div>
       </div>
 
-      <div className="p-3">
+      <div className="min-w-0 p-3">
         {/* Weekday headers */}
-        <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+        <div className="grid min-w-0 grid-cols-7 gap-1 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">
           {WEEKDAYS.map((w) => (
             <div key={w} className="py-1.5">{w}</div>
           ))}
         </div>
 
         {/* Day cells */}
-        <div className="mt-1 grid grid-cols-7 gap-1.5">
+        <div className="mt-1 grid min-w-0 grid-cols-7 gap-1">
           {cells.map((d, idx) => {
             if (d === null) {
               return <div key={`e-${idx}`} className="min-h-[3.75rem]" aria-hidden />;
@@ -233,7 +233,7 @@ export function ServiceAvailabilityCalendar({
             const open = (info?.ranges.length ?? 0) > 0;
 
             const base =
-              'flex min-h-[3.75rem] flex-col items-stretch justify-between rounded-xl border px-1.5 py-1 text-left transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-brand-400 focus:ring-offset-1 focus:ring-offset-white';
+              'flex min-w-0 min-h-[3.75rem] flex-col items-stretch justify-between rounded-xl border px-1 py-1 text-left transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-brand-400 focus:ring-offset-1 focus:ring-offset-white sm:px-1.5';
 
             let style = '';
             if (isSelected) {
@@ -264,7 +264,7 @@ export function ServiceAvailabilityCalendar({
                 aria-pressed={isSelected}
               >
                 <span className="text-[13px] font-semibold leading-none">{d}</span>
-                <span className="text-[10px] leading-tight tabular-nums">
+                <span className="min-w-0 truncate text-[9px] leading-tight tabular-nums sm:text-[10px]">
                   {open && firstRange ? (
                     <>
                       {compactRange(firstRange)}
@@ -333,8 +333,8 @@ function SelectedDayPanel({
         open ? 'border-emerald-200 bg-emerald-50/60' : 'border-slate-200 bg-slate-50/70'
       }`}
     >
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-sm font-semibold text-slate-900">{heading}</p>
+      <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <p className="min-w-0 break-words text-sm font-semibold text-slate-900">{heading}</p>
         <span
           className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
             open

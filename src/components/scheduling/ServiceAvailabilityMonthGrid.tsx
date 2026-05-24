@@ -80,8 +80,8 @@ export function ServiceAvailabilityMonthGrid({
   const title = `${MONTH_NAMES[month - 1]} ${year}`;
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-slate-200/90 bg-gradient-to-b from-white via-white to-slate-50/40 shadow-sm">
-      <div className="flex items-center justify-between gap-2 border-b border-slate-100 bg-slate-50/80 px-3 py-2.5">
+    <div className="min-w-0 max-w-full overflow-hidden rounded-2xl border border-slate-200/90 bg-gradient-to-b from-white via-white to-slate-50/40 shadow-sm">
+      <div className="flex min-w-0 items-center justify-between gap-2 border-b border-slate-100 bg-slate-50/80 px-3 py-2.5">
         <button
           type="button"
           onClick={onPrevMonth}
@@ -110,8 +110,8 @@ export function ServiceAvailabilityMonthGrid({
         </button>
       </div>
 
-      <div className="p-3">
-        <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+      <div className="min-w-0 p-3">
+        <div className="grid min-w-0 grid-cols-7 gap-1 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">
           {WEEKDAYS.map((w) => (
             <div key={w} className="py-1.5">
               {w}
@@ -119,7 +119,7 @@ export function ServiceAvailabilityMonthGrid({
           ))}
         </div>
 
-        <div className="mt-1 grid grid-cols-7 gap-1.5">
+        <div className="mt-1 grid min-w-0 grid-cols-7 gap-1">
           {cells.map((d, idx) => {
             if (d === null) {
               return <div key={`e-${idx}`} className="aspect-square min-h-[2.25rem]" aria-hidden />;
@@ -129,7 +129,7 @@ export function ServiceAvailabilityMonthGrid({
             const effectiveToday = state === 'today' || ymd === todayYmd;
 
             let cell =
-              'flex aspect-square min-h-[2.25rem] items-center justify-center rounded-xl text-sm font-semibold transition-all duration-150 ';
+              'flex min-w-0 aspect-square min-h-[2.25rem] items-center justify-center rounded-xl text-sm font-semibold transition-all duration-150 ';
             if (disabled) {
               cell += 'cursor-not-allowed text-slate-300 ';
             } else if (onDayClick) {

@@ -143,6 +143,8 @@ export function EventInstanceDetailSheet({
   const endStr = eventRow?.end_time ? String(eventRow.end_time).slice(0, 5) : block.end_time.slice(0, 5);
   const cap = eventRow?.capacity ?? block.event_capacity;
   const bookedDisplay = bookedGuests ?? block.event_party_total ?? 0;
+  const arrivedCount = block.event_arrived_count ?? 0;
+  const bookingCount = block.event_booking_count ?? 0;
 
   const linkedReadOnly = linked != null && linked.linkedAct === 'none';
   const spotsRemaining =
@@ -215,6 +217,15 @@ export function EventInstanceDetailSheet({
               ) : (
                 ' guests booked'
               )}
+              {bookingCount > 0 ? (
+                <>
+                  {' '}
+                  ·{' '}
+                  <span className="font-semibold text-amber-900">{arrivedCount}</span>
+                  {' '}
+                  / {bookingCount} arrived
+                </>
+              ) : null}
             </span>
             {!linked ? (
               <div className="flex flex-wrap items-center gap-3">

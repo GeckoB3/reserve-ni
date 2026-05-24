@@ -40,4 +40,6 @@ export interface ScheduleBlockDTO {
   event_booking_count?: number | null;
   /** Sum of party_size for those bookings. */
   event_party_total?: number | null;
+  /** Non-cancelled bookings with `client_arrived_at` set. */
+  event_arrived_count?: number | null;
 }

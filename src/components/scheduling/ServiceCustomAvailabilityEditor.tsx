@@ -131,7 +131,7 @@ export function ServiceCustomAvailabilityEditor({
   }
 
   return (
-    <div className="space-y-4">
+    <div className="min-w-0 max-w-full space-y-4">
       {controlsEnable && (
         <EnableToggle
           active={active}
@@ -463,15 +463,15 @@ function TimeWindowsEditor({
   }
 
   return (
-    <div className="space-y-2">
+    <div className="min-w-0 max-w-full space-y-2">
       {ranges.map((r, i) => (
-        <div key={i} className="flex flex-wrap items-center gap-2">
+        <div key={i} className="flex min-w-0 flex-wrap items-center gap-2">
           <input
             type="time"
             value={r.start}
             onChange={(e) => updateRange(i, 'start', e.target.value)}
             disabled={disabled}
-            className="rounded-lg border border-slate-300 px-2 py-1.5 text-sm text-slate-800 disabled:bg-slate-50"
+            className="min-w-0 flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-sm text-slate-800 disabled:bg-slate-50 sm:flex-none"
           />
           <span className="text-xs text-slate-400">to</span>
           <input
@@ -479,7 +479,7 @@ function TimeWindowsEditor({
             value={r.end}
             onChange={(e) => updateRange(i, 'end', e.target.value)}
             disabled={disabled}
-            className="rounded-lg border border-slate-300 px-2 py-1.5 text-sm text-slate-800 disabled:bg-slate-50"
+            className="min-w-0 flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-sm text-slate-800 disabled:bg-slate-50 sm:flex-none"
           />
           {ranges.length > 1 && !disabled && (
             <button
@@ -582,7 +582,7 @@ function SpecificDatesRuleEditor({
   }
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(240px,300px)] lg:items-start">
+    <div className="grid min-w-0 max-w-full gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(240px,300px)] lg:items-start">
       <ServiceAvailabilityMonthGrid
         year={monthNav.year}
         month={monthNav.month}
@@ -704,7 +704,7 @@ function DateRangeRuleEditor({
   }
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_260px] lg:items-start">
+    <div className="grid min-w-0 max-w-full gap-4 lg:grid-cols-[minmax(0,1fr)_260px] lg:items-start">
       <ServiceAvailabilityMonthGrid
         year={monthNav.year}
         month={monthNav.month}
@@ -721,8 +721,8 @@ function DateRangeRuleEditor({
             : 'Next tap starts a new range.'
         }
       />
-      <div className="space-y-3">
-        <div className="grid grid-cols-2 gap-2">
+      <div className="min-w-0 max-w-full space-y-3">
+        <div className="grid grid-cols-1 gap-2 min-[420px]:grid-cols-2">
           <div>
             <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-500">
               From
@@ -738,7 +738,7 @@ function DateRangeRuleEditor({
                   end_date: e.target.value > rule.end_date ? e.target.value : rule.end_date,
                 })
               }
-              className="w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm shadow-sm disabled:bg-slate-50"
+              className="w-full min-w-0 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm shadow-sm disabled:bg-slate-50"
             />
           </div>
           <div>
@@ -756,7 +756,7 @@ function DateRangeRuleEditor({
                   start_date: e.target.value < rule.start_date ? e.target.value : rule.start_date,
                 })
               }
-              className="w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm shadow-sm disabled:bg-slate-50"
+              className="w-full min-w-0 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm shadow-sm disabled:bg-slate-50"
             />
           </div>
         </div>

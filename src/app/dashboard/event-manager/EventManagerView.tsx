@@ -1,7 +1,15 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type MouseEvent } from 'react';
+import { BookingDetailPanel } from '@/app/dashboard/bookings/BookingDetailPanel';
+import { bookingDetailPanelSnapshotFromListRow } from '@/lib/booking/booking-detail-from-row';
+import {
+  EXP_BOOKING_AMBER_ATTN,
+  EXP_BOOKING_SOFT,
+  EXP_BOOKING_SPIN_AM,
+  EXP_BOOKING_SPIN_NA,
+} from '@/app/dashboard/bookings/expanded-booking-toolbar-classes';
 import { StripePaymentWarning } from '@/components/dashboard/StripePaymentWarning';
 import { useToast } from '@/components/ui/Toast';
 import { normalizeTimeToHhMm, validateStartEndTimes } from '@/lib/experience-events/experience-event-validation';
@@ -56,7 +64,7 @@ interface AttendeeRow {
   deposit_status: string | null;
   booking_date: string;
   booking_time: string;
-  checked_in_at: string | null;
+  client_arrived_at: string | null;
   guest_name: string | null;
   guest_email: string | null;
   guest_phone: string | null;
@@ -110,6 +118,75 @@ function parseCustomDatesFromText(text: string): string[] {
     if (/^\d{4}-\d{2}-\d{2}$/.test(p)) set.add(p);
   }
   return [...set].sort();
+}
+
+function attendeeBookingDetailSnapshot(attendee: AttendeeRow, event: ExperienceEvent) {
+  return bookingDetailPanelSnapshotFromListRow({
+    id: attendee.booking_id,
+    booking_date: attendee.booking_date || event.event_date,
+    booking_time: attendee.booking_time || event.start_time,
+    booking_end_time: event.end_time,
+    party_size: attendee.party_size,
+    status: attendee.status,
+    guest_name: attendee.guest_name ?? undefined,
+    guest_email: attendee.guest_email,
+    guest_phone: attendee.guest_phone,
+    deposit_status: attendee.deposit_status ?? undefined,
+    service_name: event.name,
+    booking_model: 'event_ticket',
+    experience_event_id: event.id,
+    inferred_booking_model: 'event_ticket',
+  });
+}
+
+function canShowAttendeeArrivedActions(status: string): boolean {
+  return status === 'Pending' || status === 'Booked' || status === 'Confirmed';
+}
+
+function EventAttendeeArrivedActions({
+  attendee,
+  busy,
+  fullWidth,
+  onToggle,
+}: {
+  attendee: AttendeeRow;
+  busy: boolean;
+  fullWidth?: boolean;
+  onToggle: (arrived: boolean) => void;
+}) {
+  if (!canShowAttendeeArrivedActions(attendee.status)) return null;
+  const arrived = Boolean(attendee.client_arrived_at);
+  const wrapClass = fullWidth ? 'mt-3 flex w-full justify-stretch' : 'flex justify-end';
+
+  if (!arrived) {
+    return (
+      <div className={wrapClass} onClick={(e) => e.stopPropagation()}>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => onToggle(true)}
+          className={`${EXP_BOOKING_AMBER_ATTN} ${fullWidth ? 'w-full' : ''}`}
+        >
+          {busy ? <span className={EXP_BOOKING_SPIN_AM} aria-hidden /> : null}
+          Arrived
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className={wrapClass} onClick={(e) => e.stopPropagation()}>
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => onToggle(false)}
+        className={`${EXP_BOOKING_SOFT} ${fullWidth ? 'w-full' : ''}`}
+      >
+        {busy ? <span className={EXP_BOOKING_SPIN_NA} aria-hidden /> : null}
+        Clear
+      </button>
+    </div>
+  );
 }
 
 function attendeeStatusVariant(status: string): PillVariant {
@@ -167,13 +244,15 @@ export function EventManagerView({
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [checkInBusy, setCheckInBusy] = useState<Record<string, boolean>>({});
+  const [arrivedBusy, setArrivedBusy] = useState<Record<string, boolean>>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<ExperienceEvent | null>(null);
   const [attendees, setAttendees] = useState<AttendeeRow[]>([]);
   const [detailLoading, setDetailLoading] = useState(false);
   const [cancelLoading, setCancelLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
+  const [detailBookingId, setDetailBookingId] = useState<string | null>(null);
+  const [detailBookingAnchor, setDetailBookingAnchor] = useState<{ x: number; y: number } | null>(null);
 
   // Event CRUD state
   const [showEventForm, setShowEventForm] = useState(false);
@@ -187,6 +266,23 @@ export function EventManagerView({
   const [teamCalendars, setTeamCalendars] = useState<Array<{ id: string; name: string; calendar_type?: string }>>(
     [],
   );
+  useEffect(() => {
+    setDetailBookingId(null);
+    setDetailBookingAnchor(null);
+  }, [selectedId]);
+
+  const detailBookingSnapshot = useMemo(() => {
+    if (!detailBookingId || !detail) return null;
+    const attendee = attendees.find((a) => a.booking_id === detailBookingId);
+    if (!attendee) return null;
+    return attendeeBookingDetailSnapshot(attendee, detail);
+  }, [detailBookingId, detail, attendees]);
+
+  const openAttendeeBookingDetail = useCallback((attendee: AttendeeRow, e: MouseEvent) => {
+    setDetailBookingId(attendee.booking_id);
+    setDetailBookingAnchor({ x: e.clientX, y: e.clientY });
+  }, []);
+
   useEffect(() => {
     if (!showEventForm) return;
     let cancelled = false;
@@ -667,23 +763,23 @@ export function EventManagerView({
   const upcoming = visibleEvents.filter((e) => e.event_date >= today);
   const past = visibleEvents.filter((e) => e.event_date < today);
 
-  const handleToggleCheckIn = async (bookingId: string, checkedIn: boolean) => {
-    setCheckInBusy((s) => ({ ...s, [bookingId]: true }));
+  const handleToggleArrived = async (bookingId: string, arrived: boolean) => {
+    setArrivedBusy((s) => ({ ...s, [bookingId]: true }));
     try {
-      const res = await fetch(`/api/venue/bookings/${bookingId}/check-in`, {
-        method: 'POST',
+      const res = await fetch(`/api/venue/bookings/${bookingId}`, {
+        method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ checked_in: checkedIn }),
+        body: JSON.stringify({ client_arrived: arrived }),
       });
       const data = (await res.json().catch(() => ({}))) as { error?: string };
       if (!res.ok) {
-        addToast(data.error ?? 'Check-in update failed', 'error');
+        addToast(data.error ?? 'Arrived update failed', 'error');
         return;
       }
-      if (selectedId) await loadDetail(selectedId);
-      addToast(checkedIn ? 'Guest checked in.' : 'Check-in cleared.', 'success');
+      if (selectedId) await loadDetail(selectedId, { silent: true });
+      addToast(arrived ? 'Marked as arrived.' : 'Arrived cleared.', 'success');
     } finally {
-      setCheckInBusy((s) => ({ ...s, [bookingId]: false }));
+      setArrivedBusy((s) => ({ ...s, [bookingId]: false }));
     }
   };
 
@@ -697,7 +793,7 @@ export function EventManagerView({
       'Status',
       'Deposit_pence',
       'Ticket_lines',
-      'Checked_in_utc',
+      'Arrived_utc',
     ].join(',');
     const lines = attendees.map((a) =>
       [
@@ -710,7 +806,7 @@ export function EventManagerView({
         escapeCsvCell(
           (a.ticket_lines ?? []).map((l) => `${l.label} x${l.quantity}`).join('; '),
         ),
-        escapeCsvCell(a.checked_in_at ? new Date(a.checked_in_at).toISOString() : ''),
+        escapeCsvCell(a.client_arrived_at ? new Date(a.client_arrived_at).toISOString() : ''),
       ].join(','),
     );
     downloadCsvFile(
@@ -882,8 +978,8 @@ export function EventManagerView({
                 </p>
               </div>
             )}
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="sm:col-span-2">
+            <div className="grid min-w-0 gap-4 sm:grid-cols-2 [&_input]:min-w-0 [&_input]:max-w-full [&_select]:min-w-0 [&_select]:max-w-full [&_textarea]:min-w-0 [&_textarea]:max-w-full">
+              <div className="min-w-0 sm:col-span-2">
                 <label className="mb-1 block text-xs font-medium text-slate-600">Event name *</label>
                 <input
                   type="text"
@@ -895,7 +991,7 @@ export function EventManagerView({
               </div>
               {editingEventId || eventForm.scheduleMode !== 'custom' ? (
                 <>
-                  <div>
+                  <div className="min-w-0">
                     <label className="mb-1 block text-xs font-medium text-slate-600">
                       {eventForm.scheduleMode === 'weekly' && !editingEventId ? 'First occurrence *' : 'Date *'}
                     </label>
@@ -907,7 +1003,7 @@ export function EventManagerView({
                     />
                   </div>
                   {!editingEventId && eventForm.scheduleMode === 'weekly' && (
-                    <div>
+                    <div className="min-w-0">
                       <label className="mb-1 block text-xs font-medium text-slate-600">Repeat until *</label>
                       <input
                         type="date"
@@ -919,7 +1015,7 @@ export function EventManagerView({
                   )}
                 </>
               ) : (
-                <div className="sm:col-span-2">
+                <div className="min-w-0 sm:col-span-2">
                   <label className="mb-1 block text-xs font-medium text-slate-600">Dates * (YYYY-MM-DD)</label>
                   <textarea
                     rows={4}
@@ -930,7 +1026,7 @@ export function EventManagerView({
                   />
                 </div>
               )}
-              <div>
+              <div className="min-w-0">
                 <label className="mb-1 block text-xs font-medium text-slate-600">Capacity *</label>
                 <NumericInput
                   min={1}
@@ -939,7 +1035,7 @@ export function EventManagerView({
                   className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
                 />
               </div>
-              <div>
+              <div className="min-w-0">
                 <label className="mb-1 block text-xs font-medium text-slate-600">Start time *</label>
                 <input
                   type="time"
@@ -948,7 +1044,7 @@ export function EventManagerView({
                   className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
                 />
               </div>
-              <div>
+              <div className="min-w-0">
                 <label className="mb-1 block text-xs font-medium text-slate-600">End time *</label>
                 <input
                   type="time"
@@ -957,9 +1053,9 @@ export function EventManagerView({
                   className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
                 />
               </div>
-              <div className="sm:col-span-2 rounded-lg border border-slate-200 bg-slate-50/80 p-3">
+              <div className="min-w-0 sm:col-span-2 rounded-lg border border-slate-200 bg-slate-50/80 p-3">
                 <p className="mb-2 text-xs font-medium text-slate-700">Guest booking rules</p>
-                <div className="grid gap-3 sm:grid-cols-2">
+                <div className="grid min-w-0 gap-3 sm:grid-cols-2">
                   <div>
                     <label className="mb-1 block text-xs font-medium text-slate-600">Max advance (days)</label>
                     <NumericInput
@@ -1020,7 +1116,7 @@ export function EventManagerView({
                   </div>
                 </div>
               </div>
-              <div className="sm:col-span-2 space-y-3 rounded-lg border border-slate-100 bg-slate-50/80 p-3">
+              <div className="min-w-0 sm:col-span-2 space-y-3 rounded-lg border border-slate-100 bg-slate-50/80 p-3">
                 <p className="text-xs font-medium text-slate-700">Calendar column</p>
                 <p className="text-xs text-slate-500">
                   Show this event on a team calendar column in the dashboard. The time must not overlap other
@@ -1079,7 +1175,7 @@ export function EventManagerView({
                   </div>
                 )}
               </div>
-              <div className="sm:col-span-2">
+              <div className="min-w-0 sm:col-span-2">
                 <label className="mb-1 block text-xs font-medium text-slate-600">
                   Description <span className="font-normal text-slate-400">optional</span>
                 </label>
@@ -1091,7 +1187,7 @@ export function EventManagerView({
                   className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
                 />
               </div>
-              <div className="sm:col-span-2">
+              <div className="min-w-0 sm:col-span-2">
                 <label className="mb-1 block text-xs font-medium text-slate-600">
                   Image URL <span className="font-normal text-slate-400">optional</span>
                 </label>
@@ -1123,7 +1219,7 @@ export function EventManagerView({
               <h3 className="mb-2 text-sm font-medium text-slate-700">Ticket types</h3>
               <div className="space-y-2">
                 {eventForm.ticket_types.map((tt, i) => (
-                  <div key={i} className="flex flex-wrap items-end gap-2 rounded-lg border border-slate-100 bg-slate-50/60 px-3 py-2">
+                  <div key={i} className="flex min-w-0 max-w-full flex-wrap items-end gap-2 rounded-lg border border-slate-100 bg-slate-50/60 px-3 py-2">
                     <div className="min-w-0 flex-1 sm:min-w-[140px]">
                       <label className="mb-1 block text-xs font-medium text-slate-500 sm:text-sm">Ticket name</label>
                       <input
@@ -1221,7 +1317,7 @@ export function EventManagerView({
                 </label>
               </div>
               {eventForm.payment_requirement === 'deposit' && (
-                <div className="mt-3 max-w-xs">
+                <div className="mt-3 max-w-full sm:max-w-xs">
                   <label className="mb-1 block text-xs font-medium text-slate-600">Deposit amount ({sym}) *</label>
                   <input
                     type="text"
@@ -1246,7 +1342,7 @@ export function EventManagerView({
             </div>
 
             {eventError && <p className="text-sm text-red-600">{eventError}</p>}
-            <div className="flex gap-2">
+            <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
               <button
                 type="button"
                 onClick={() => void handleSaveEvent()}
@@ -1478,7 +1574,12 @@ export function EventManagerView({
 
               <SectionCard.Body className="space-y-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">Attendees</p>
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">Attendees</p>
+                    {attendees.length > 0 ? (
+                      <p className="mt-0.5 text-xs text-slate-500">Click a booking to view full details</p>
+                    ) : null}
+                  </div>
                   {attendees.length > 0 ? (
                     <button
                       type="button"
@@ -1500,7 +1601,19 @@ export function EventManagerView({
                     items={attendees}
                     keyExtractor={(a) => a.booking_id}
                     renderDesktopRow={(a) => (
-                      <div className="grid grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)_minmax(0,1fr)_auto_auto_auto_auto_auto] items-start gap-3 px-2 py-3 text-sm">
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        onClick={(e) => openAttendeeBookingDetail(a, e)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            setDetailBookingId(a.booking_id);
+                            setDetailBookingAnchor(null);
+                          }
+                        }}
+                        className="grid cursor-pointer grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)_minmax(0,1fr)_auto_auto_auto_auto] items-start gap-3 rounded-lg px-2 py-3 text-sm outline-none hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-brand-500/40"
+                      >
                         <div className="min-w-0 font-medium text-slate-900">{a.guest_name ?? '—'}</div>
                         <div className="min-w-0 text-slate-600">
                           <div className="max-w-[200px] truncate text-xs">{a.guest_email ?? '—'}</div>
@@ -1518,34 +1631,29 @@ export function EventManagerView({
                           </Pill>
                         </div>
                         <div className="text-xs text-slate-600">
-                          {a.deposit_amount_pence != null ? formatPrice(a.deposit_amount_pence) : '—'}
-                          {a.deposit_status ? (
-                            <span className="ml-1 text-[11px] text-slate-500">({a.deposit_status})</span>
-                          ) : null}
+                          {a.client_arrived_at ? new Date(a.client_arrived_at).toLocaleString('en-GB') : '—'}
                         </div>
-                        <div className="text-xs text-slate-600">
-                          {a.checked_in_at ? new Date(a.checked_in_at).toLocaleString('en-GB') : '—'}
-                        </div>
-                        <div className="flex justify-end">
-                          {a.status !== 'Cancelled' ? (
-                            <button
-                              type="button"
-                              disabled={checkInBusy[a.booking_id]}
-                              onClick={() => void handleToggleCheckIn(a.booking_id, !a.checked_in_at)}
-                              className="rounded-lg border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-50"
-                            >
-                              {checkInBusy[a.booking_id]
-                                ? '…'
-                                : a.checked_in_at
-                                  ? 'Clear check-in'
-                                  : 'Check in'}
-                            </button>
-                          ) : null}
-                        </div>
+                        <EventAttendeeArrivedActions
+                          attendee={a}
+                          busy={Boolean(arrivedBusy[a.booking_id])}
+                          onToggle={(arrived) => void handleToggleArrived(a.booking_id, arrived)}
+                        />
                       </div>
                     )}
                     renderMobileCard={(a) => (
-                      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm shadow-slate-900/5">
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        onClick={(e) => openAttendeeBookingDetail(a, e)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            setDetailBookingId(a.booking_id);
+                            setDetailBookingAnchor(null);
+                          }
+                        }}
+                        className="cursor-pointer rounded-2xl border border-slate-200 bg-white p-4 shadow-sm shadow-slate-900/5 outline-none hover:bg-slate-50/80 focus-visible:ring-2 focus-visible:ring-brand-500/40"
+                      >
                         <div className="flex items-start justify-between gap-2">
                           <div>
                             <p className="font-semibold text-slate-900">{a.guest_name ?? '—'}</p>
@@ -1564,28 +1672,15 @@ export function EventManagerView({
                           · Qty {a.party_size}
                         </p>
                         <p className="mt-1 text-xs text-slate-600">
-                          Deposit:{' '}
-                          {a.deposit_amount_pence != null ? formatPrice(a.deposit_amount_pence) : '—'}
-                          {a.deposit_status ? ` (${a.deposit_status})` : ''}
+                          Arrived:{' '}
+                          {a.client_arrived_at ? new Date(a.client_arrived_at).toLocaleString('en-GB') : '—'}
                         </p>
-                        <p className="mt-1 text-xs text-slate-600">
-                          Checked in:{' '}
-                          {a.checked_in_at ? new Date(a.checked_in_at).toLocaleString('en-GB') : '—'}
-                        </p>
-                        {a.status !== 'Cancelled' ? (
-                          <button
-                            type="button"
-                            disabled={checkInBusy[a.booking_id]}
-                            onClick={() => void handleToggleCheckIn(a.booking_id, !a.checked_in_at)}
-                            className="mt-3 w-full rounded-xl border border-slate-200 py-2 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-50"
-                          >
-                            {checkInBusy[a.booking_id]
-                              ? '…'
-                              : a.checked_in_at
-                                ? 'Clear check-in'
-                                : 'Check in'}
-                          </button>
-                        ) : null}
+                        <EventAttendeeArrivedActions
+                          attendee={a}
+                          busy={Boolean(arrivedBusy[a.booking_id])}
+                          fullWidth
+                          onToggle={(arrived) => void handleToggleArrived(a.booking_id, arrived)}
+                        />
                       </div>
                     )}
                   />
@@ -1595,6 +1690,26 @@ export function EventManagerView({
           )}
         </SectionCard>
       )}
+
+      {detailBookingId ? (
+        <BookingDetailPanel
+          key={detailBookingId}
+          bookingId={detailBookingId}
+          venueId={venueId}
+          venueCurrency={currency}
+          initialSnapshot={detailBookingSnapshot}
+          isAppointment
+          presentation="popover"
+          anchor={detailBookingAnchor}
+          onClose={() => {
+            setDetailBookingId(null);
+            setDetailBookingAnchor(null);
+          }}
+          onUpdated={() => {
+            if (selectedId) void loadDetail(selectedId, { silent: true });
+          }}
+        />
+      ) : null}
 
       {eventToDelete && (
         <div

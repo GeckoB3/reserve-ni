@@ -198,18 +198,18 @@ export function ManageBookingView({ bookingId, token, hmac }: { bookingId: strin
   const keepButtonLabel = isCde ? 'Keep booking' : isAppointment ? 'Keep appointment' : 'Keep booking';
 
   return (
-    <div className="w-full max-w-lg">
+    <div className="w-full min-w-0 max-w-lg">
       <div className="mb-6">
         <img src="/Logo.png" alt="ReserveNI" className="h-8 w-auto" />
       </div>
 
-      <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+      <div className="min-w-0 max-w-full rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
         <div className="bg-gradient-to-r from-brand-600 to-brand-700 px-6 py-5">
           <h2 className="text-lg font-semibold text-white">{details.venue_name}</h2>
           {details.venue_address && <p className="mt-0.5 text-sm text-brand-100">{details.venue_address}</p>}
         </div>
 
-        <div className="p-6 space-y-4">
+        <div className="min-w-0 space-y-4 p-4 sm:p-6">
           {modifySuccess && (
             <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 font-medium">
               {isAppointment ? 'Your appointment has been updated.' : 'Your booking has been updated.'}
@@ -222,7 +222,7 @@ export function ManageBookingView({ bookingId, token, hmac }: { bookingId: strin
                 <p className="text-xs font-medium text-slate-500">{bookingModelShortLabel(bookingModel)} booking</p>
                 {cdeSummary && <p className="mt-1 text-sm font-semibold text-slate-800 leading-snug">{cdeSummary}</p>}
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid min-w-0 grid-cols-1 gap-3 min-[420px]:grid-cols-2">
                 <DetailTile label="Date" value={dateStr} />
                 <DetailTile label="Time" value={details.booking_time.slice(0, 5)} />
                 <DetailTile label="Guests" value={`${details.party_size}`} />
@@ -230,7 +230,7 @@ export function ManageBookingView({ bookingId, token, hmac }: { bookingId: strin
               </div>
             </div>
           ) : isAppointment ? (
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
               <DetailTile label="Service" value={details.appointment_service_name ?? '-'} />
               <DetailTile label="Staff" value={details.practitioner_name ?? '-'} />
               <DetailTile label="Date" value={dateStr} />
@@ -239,7 +239,7 @@ export function ManageBookingView({ bookingId, token, hmac }: { bookingId: strin
               <DetailTile label="Status" value={details.status} />
             </div>
           ) : (
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid min-w-0 grid-cols-1 gap-3 min-[420px]:grid-cols-2">
               <DetailTile label="Date" value={dateStr} />
               <DetailTile label="Time" value={details.booking_time.slice(0, 5)} />
               <DetailTile label="Guests" value={`${details.party_size}`} />

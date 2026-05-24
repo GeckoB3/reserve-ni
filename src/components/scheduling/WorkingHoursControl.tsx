@@ -70,7 +70,7 @@ export function WorkingHoursControl({
   }
 
   return (
-    <div className="space-y-3">
+    <div className="min-w-0 max-w-full space-y-3">
       {DAY_KEYS.map((dayKey, i) => {
         const ranges = value[dayKey] ?? [];
         const isWorking = ranges.length > 0;
@@ -79,8 +79,8 @@ export function WorkingHoursControl({
           !disabled &&
           DAY_KEYS.some((dk) => dk !== dayKey && (value[dk]?.length ?? 0) > 0);
         return (
-          <div key={dayKey} className="rounded-xl border border-slate-200 bg-white px-3 py-3 sm:px-4">
-            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+          <div key={dayKey} className="min-w-0 max-w-full rounded-xl border border-slate-200 bg-white px-3 py-3 sm:px-4">
+            <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
               <label className="flex min-h-10 cursor-pointer items-center gap-3">
                 <input
                   type="checkbox"
@@ -94,7 +94,7 @@ export function WorkingHoursControl({
                 </span>
               </label>
               {isWorking && !disabled && (
-                <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+                <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
                   {canCopyElsewhere && (
                     <button
                       type="button"
@@ -118,7 +118,7 @@ export function WorkingHoursControl({
             {isWorking && (
               <div className="mt-3 space-y-2 border-t border-slate-100 pt-3 sm:pl-7 sm:pt-2 sm:border-t-0">
                 {ranges.map((r, ri) => (
-                  <div key={ri} className="flex flex-wrap items-center gap-2">
+                  <div key={ri} className="flex min-w-0 flex-wrap items-center gap-2">
                     <input
                       type="time"
                       value={r.start}

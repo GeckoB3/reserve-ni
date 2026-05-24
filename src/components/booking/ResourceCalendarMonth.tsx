@@ -29,8 +29,8 @@ export function todayYmdLocal(): string {
 }
 
 const NAV_BTN_BASE =
-  'min-h-10 min-w-10 rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2';
-const NAV_BTN_PUBLIC = 'ap-calendar-nav rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors';
+  'min-h-10 min-w-10 shrink-0 rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2';
+const NAV_BTN_PUBLIC = 'ap-calendar-nav shrink-0 rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors';
 
 export function ResourceCalendarMonth({
   year,
@@ -69,20 +69,20 @@ export function ResourceCalendarMonth({
 
   return (
     <div
-      className="relative rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4"
+      className="relative min-w-0 max-w-full rounded-xl border border-slate-200 bg-white p-2.5 shadow-sm sm:p-4"
       aria-busy={loading}
     >
-      <div className="mb-3 flex items-center justify-between gap-2">
+      <div className="mb-3 flex min-w-0 items-center justify-between gap-2">
         <button type="button" onClick={onPrevMonth} className={navClass} aria-label="Previous month">
           ←
         </button>
-        <div className="text-center text-sm font-semibold tracking-tight text-slate-900">{title}</div>
+        <div className="min-w-0 truncate text-center text-sm font-semibold tracking-tight text-slate-900">{title}</div>
         <button type="button" onClick={onNextMonth} className={navClass} aria-label="Next month">
           →
         </button>
       </div>
 
-      <div className="grid grid-cols-7 gap-1 text-center text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+      <div className="grid min-w-0 grid-cols-7 gap-1 text-center text-[11px] font-semibold uppercase tracking-wide text-slate-500">
         {WEEKDAYS.map((w) => (
           <div key={w} className="py-1">
             {w}
@@ -92,11 +92,11 @@ export function ResourceCalendarMonth({
 
       <div className="relative mt-1">
         <div
-          className={`grid grid-cols-7 gap-1 auto-rows-[minmax(2.75rem,auto)] transition-opacity ${loading ? 'pointer-events-none opacity-40' : ''}`}
+          className={`grid min-w-0 grid-cols-7 gap-1 auto-rows-[minmax(2.5rem,auto)] transition-opacity ${loading ? 'pointer-events-none opacity-40' : ''}`}
         >
           {cells.map((d, idx) => {
             if (d === null) {
-              return <div key={`e-${idx}`} className="min-h-[2.75rem]" aria-hidden />;
+              return <div key={`e-${idx}`} className="min-h-[2.5rem]" aria-hidden />;
             }
             const ymd = `${year}-${pad2(month)}-${pad2(d)}`;
             const isPast = ymd < minSelectableDate;
@@ -105,7 +105,7 @@ export function ResourceCalendarMonth({
             const disabled = isPast || !hasAvail;
 
             let cellClass =
-              'flex min-h-[2.75rem] items-center justify-center rounded-lg text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-1 ';
+              'flex min-h-[2.5rem] min-w-0 items-center justify-center rounded-lg text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-1 sm:min-h-[2.75rem] ';
             if (disabled) {
               cellClass += isPast
                 ? 'cursor-not-allowed text-slate-300 '

@@ -63,8 +63,8 @@ function TimePeriodRow({
     'min-h-10 w-full min-w-0 flex-1 rounded border border-slate-300 px-2 py-2 text-sm sm:w-auto sm:min-w-[7rem] sm:flex-none sm:py-1';
 
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
+    <div className="min-w-0 max-w-full space-y-3">
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
         <input
           type="time"
           value={p1.open}
@@ -92,7 +92,7 @@ function TimePeriodRow({
         </button>
       ) : (
         <>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
             <input
               type="time"
               value={p2.open}
@@ -148,7 +148,7 @@ export function OpeningHoursControl({ value, onChange, disabled = false }: Openi
   }
 
   return (
-    <div className="space-y-3 sm:space-y-4">
+    <div className="min-w-0 max-w-full space-y-3 sm:space-y-4">
       {DAYS.map(({ key, label }) => {
         const config = value[key] ?? getDayConfig(null, key);
         const closed = 'closed' in config && config.closed;
@@ -161,9 +161,9 @@ export function OpeningHoursControl({ value, onChange, disabled = false }: Openi
           DAYS.some(({ key: k }) => k !== key && isOpeningDayOpen(value, k));
 
         return (
-          <div key={key} className="rounded-xl border border-slate-200 p-3 sm:p-4">
-            <div className="flex flex-col gap-3">
-              <div className="flex items-center justify-between gap-3">
+          <div key={key} className="min-w-0 max-w-full rounded-xl border border-slate-200 p-3 sm:p-4">
+            <div className="flex min-w-0 flex-col gap-3">
+              <div className="flex min-w-0 items-center justify-between gap-3">
                 <span className="font-medium text-slate-800">{label}</span>
                 {!disabled ? (
                   <label className="flex min-h-10 cursor-pointer items-center gap-2">

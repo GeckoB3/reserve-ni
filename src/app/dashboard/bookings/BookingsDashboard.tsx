@@ -19,7 +19,7 @@ import {
   isBookingInstantRevertTransition,
   type BookingStatus,
 } from '@/lib/table-management/booking-status';
-import { bookingStatusVisualForKey } from '@/lib/table-management/booking-status-visual';
+import { bookingStatusVisualForRow } from '@/lib/table-management/booking-status-visual';
 import { useToast } from '@/components/ui/Toast';
 import { readResponseJson } from '@/lib/http/read-response-json';
 import { PageFrame } from '@/components/ui/dashboard/PageFrame';
@@ -2151,7 +2151,7 @@ export function BookingsDashboard({
 }
 
 function statusBorderClass(booking: BookingRow): string {
-  return bookingStatusVisualForKey(booking.status).listBorderLeft;
+  return bookingStatusVisualForRow(booking).listBorderLeft;
 }
 
 function sourceBadge(s: string) {

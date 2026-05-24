@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse, after } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff, requireManagedCalendarAccess } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { stripe } from '@/lib/stripe';
@@ -73,11 +73,11 @@ function cancellationDeadline(bookingDate: string, bookingTime: string): string 
 
 /** GET /api/venue/bookings/[id] - full booking detail with guest and events timeline. */
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const supabase = await createClient();
+    const supabase = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabase);
     if (!staff) {
       return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
@@ -265,7 +265,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const supabase = await createClient();
+    const supabase = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabase);
     if (!staff) {
       return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
@@ -905,10 +905,17 @@ export async function PATCH(
       return NextResponse.json(updated.data);
     }
 
-    /** Appointment bookings: staff marks client as arrived / waiting (optional; cleared when status → Seated). */
+    /** Staff marks client as arrived / waiting (appointments and CDE rosters). */
     if (body.client_arrived !== undefined) {
-      if (!booking.practitioner_id && !booking.calendar_id) {
-        return NextResponse.json({ error: 'Arrived is only available for appointment bookings' }, { status: 400 });
+      const canMarkArrived =
+        Boolean(booking.practitioner_id || booking.calendar_id) ||
+        Boolean(
+          (booking as { experience_event_id?: string | null }).experience_event_id ||
+            (booking as { class_instance_id?: string | null }).class_instance_id ||
+            (booking as { resource_id?: string | null }).resource_id,
+        );
+      if (!canMarkArrived) {
+        return NextResponse.json({ error: 'Arrived is not available for this booking type' }, { status: 400 });
       }
       const st = booking.status as string;
       if (!['Pending', 'Booked', 'Confirmed'].includes(st)) {
@@ -1751,11 +1758,11 @@ export async function PATCH(
  * Clears related rows that would otherwise remain with null booking_id.
  */
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const supabase = await createClient();
+    const supabase = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabase);
     if (!staff) {
       return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });

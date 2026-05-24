@@ -99,6 +99,24 @@ import { buildPractitionerBreakBlocks } from '@/lib/calendar/practitioner-break-
 import { formatWorkingHoursLineForDate } from '@/lib/calendar/format-working-hours-for-date';
 import { formatEventUptakeLine } from '@/lib/calendar/event-block-label';
 import {
+  bookingCalendarBlockCardStyle,
+  bookingCalendarBlockPalette,
+  bookingCalendarBlockPaletteForDisplayRow,
+  bookingCalendarBlockPaletteWithOverlay,
+  CalendarBookingStatusStripe,
+  isArrivedWaitingDisplay,
+} from '@/lib/calendar/booking-calendar-block-style';
+import {
+  applyBookingRowOverlayFields,
+  mergeBookingRowOverlay,
+  overlayFromClientArrivedPatch,
+  overlayFromPatchBody,
+  overlayFromPatchPayload,
+  overlayFromStatusTransition,
+  retainBookingRowOverlay,
+  type BookingRowOverlay,
+} from '@/lib/booking/booking-row-overlay';
+import {
   isAttendanceConfirmed,
   showAttendanceConfirmedSupplementPill,
   showDepositPendingPill,
@@ -485,104 +503,6 @@ function isPractitionerCalendarPreferences(value: unknown): value is Practitione
   return true;
 }
 
-/**
- * Staff calendar booking blocks — product palette (`accent` = left stripe; fill/text/border match {@link bookingStatusVisualForKey}).
- * Pending orange · Booked cyan-sky · Confirmed indigo · Arrived amber · Started emerald · Completed slate · No-show red · Cancelled slate.
- */
-interface BookingBlockPalette {
-  bg: string;
-  text: string;
-  border: string;
-  accent: string;
-}
-
-const BOOKING_PALETTE_PENDING: BookingBlockPalette = {
-  bg: '#FFEDD5',
-  text: '#9A3412',
-  border: '#FDBA74',
-  accent: '#EA580C',
-};
-const BOOKING_PALETTE_BOOKED: BookingBlockPalette = {
-  bg: '#E0F2FE',
-  text: '#0C4A6E',
-  border: '#38BDF8',
-  accent: '#0369A1',
-};
-const BOOKING_PALETTE_CONFIRMED: BookingBlockPalette = {
-  bg: '#E0E7FF',
-  text: '#312E81',
-  border: '#818CF8',
-  accent: '#4338CA',
-};
-const BOOKING_PALETTE_ARRIVED_WAITING: BookingBlockPalette = {
-  bg: '#FEF3C7',
-  text: '#78350F',
-  border: '#FBBF24',
-  accent: '#D97706',
-};
-const BOOKING_PALETTE_STARTED: BookingBlockPalette = {
-  bg: '#D1FAE5',
-  text: '#064E3B',
-  border: '#34D399',
-  accent: '#047857',
-};
-const BOOKING_PALETTE_COMPLETED: BookingBlockPalette = {
-  bg: '#E5E7EB',
-  text: '#374151',
-  border: '#9CA3AF',
-  accent: '#4B5563',
-};
-const BOOKING_PALETTE_NO_SHOW: BookingBlockPalette = {
-  bg: '#FEE2E2',
-  text: '#991B1B',
-  border: '#F87171',
-  accent: '#DC2626',
-};
-const BOOKING_PALETTE_CANCELLED: BookingBlockPalette = {
-  bg: '#E5E7EB',
-  text: '#4B5563',
-  border: '#D1D5DB',
-  accent: '#4B5563',
-};
-
-function bookingBlockCardStyle(p: BookingBlockPalette): CSSProperties {
-  return {
-    backgroundColor: p.bg,
-    color: p.text,
-    borderTopColor: p.border,
-    borderRightColor: p.border,
-    borderBottomColor: p.border,
-    borderLeftWidth: 4,
-    borderLeftColor: p.accent,
-    boxShadow: '0 10px 26px rgba(15, 23, 42, 0.11), inset 0 1px 0 rgba(255, 255, 255, 0.42)',
-  };
-}
-
-function isArrivedWaitingDisplay(b: Pick<Booking, 'client_arrived_at' | 'status'>): boolean {
-  if (!b.client_arrived_at) return false;
-  return b.status === 'Pending' || b.status === 'Booked' || b.status === 'Confirmed';
-}
-
-function bookingCalendarBlockStyle(b: Booking): BookingBlockPalette {
-  const status = b.status;
-  if (status === 'Cancelled') return BOOKING_PALETTE_CANCELLED;
-  if (status === 'No-Show') return BOOKING_PALETTE_NO_SHOW;
-  if (status === 'Completed') return BOOKING_PALETTE_COMPLETED;
-  if (status === 'Seated') return BOOKING_PALETTE_STARTED;
-  if (isArrivedWaitingDisplay(b)) return BOOKING_PALETTE_ARRIVED_WAITING;
-  if (status === 'Confirmed') return BOOKING_PALETTE_CONFIRMED;
-  if (status === 'Pending' || status === 'Booked') {
-    if (isAttendanceConfirmed(b)) return BOOKING_PALETTE_CONFIRMED;
-    if (status === 'Pending') return BOOKING_PALETTE_PENDING;
-    return BOOKING_PALETTE_BOOKED;
-  }
-  return BOOKING_PALETTE_BOOKED;
-}
-
-function linkedBookingCalendarBlockStyle(status: string): BookingBlockPalette {
-  return bookingCalendarBlockStyle({ status, client_arrived_at: null } as Booking);
-}
-
 function calendarStatusLabel(b: Booking): string {
   if (isArrivedWaitingDisplay(b)) return 'Arrived';
   return bookingStatusDisplayLabel(b.status, isTableReservationBooking(b));
@@ -597,8 +517,15 @@ function calendarBookingServiceLabel(
   return [resourceName, label].filter(Boolean).join(' · ') || null;
 }
 
-function CalendarBookingStatusBadge({ b }: { b: Booking }) {
-  const p = bookingCalendarBlockStyle(b);
+function CalendarBookingStatusBadge({
+  b,
+  palette,
+}: {
+  b: Booking;
+  /** When set, matches the parent bar stripe (avoids a second palette resolve). */
+  palette?: ReturnType<typeof bookingCalendarBlockPalette>;
+}) {
+  const p = palette ?? bookingCalendarBlockPalette(b);
   return (
     <span
       className="inline-flex max-w-full items-center gap-1 rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-bold leading-tight shadow-sm ring-1 ring-black/5 backdrop-blur-sm"
@@ -1610,7 +1537,7 @@ function DragBookingPreview({
   /** Target time / column while dragging; shown on the preview card (not a global banner). */
   movePreview?: { label: string; invalid: boolean } | null;
 }) {
-  const p = bookingCalendarBlockStyle(booking);
+  const p = bookingCalendarBlockPalette(booking);
   return (
     <div
       className="flex max-w-[min(90vw,20rem)] flex-col overflow-hidden rounded-xl border-2 border-dashed border-brand-200/90 bg-white/95 shadow-2xl shadow-slate-900/15 ring-1 ring-brand-100/70"
@@ -1776,14 +1703,20 @@ function linkedBookingIsClickable(column: LinkedColumn, b: LinkedBooking): boole
   return column.visibility === 'full_details' && b.status !== 'Cancelled';
 }
 
-function linkedBookingStatusBooking(b: LinkedBooking): Booking {
-  return {
-    status: b.status,
-    client_arrived_at: b.clientArrivedAt ?? null,
-    booking_model: b.bookingModel ?? null,
-    guest_attendance_confirmed_at: b.guestAttendanceConfirmedAt ?? null,
-    staff_attendance_confirmed_at: b.staffAttendanceConfirmedAt ?? null,
-  } as unknown as Booking;
+function linkedBookingStatusBooking(
+  b: LinkedBooking,
+  overlay: BookingRowOverlay = {},
+): Booking {
+  return applyBookingRowOverlayFields(
+    {
+      status: b.status,
+      client_arrived_at: b.clientArrivedAt ?? null,
+      booking_model: b.bookingModel ?? null,
+      guest_attendance_confirmed_at: b.guestAttendanceConfirmedAt ?? null,
+      staff_attendance_confirmed_at: b.staffAttendanceConfirmedAt ?? null,
+    } as unknown as Booking,
+    overlay,
+  );
 }
 
 function linkedBookingCardContent(
@@ -1821,16 +1754,21 @@ const LinkedBookingCalendarBar = memo(function LinkedBookingCalendarBar({
   venueName,
   variant,
   blockHeightPx = SLOT_HEIGHT,
+  rowOverlay = {},
 }: {
   booking: LinkedBooking;
   visibility: LinkedColumn['visibility'];
   venueName: string;
   variant: 'day-grid' | 'week-grid';
   blockHeightPx?: number;
+  rowOverlay?: BookingRowOverlay;
 }) {
   const content = linkedBookingCardContent(booking, visibility, venueName);
-  const statusBooking = linkedBookingStatusBooking(booking);
-  const statusPill = content.showStatus ? <CalendarBookingStatusBadge b={statusBooking} /> : null;
+  const statusBooking = linkedBookingStatusBooking(booking, rowOverlay);
+  const palette = bookingCalendarBlockPaletteWithOverlay(statusBooking, rowOverlay);
+  const statusPill = content.showStatus ? (
+    <CalendarBookingStatusBadge b={statusBooking} palette={palette} />
+  ) : null;
 
   if (variant === 'week-grid') {
     return (
@@ -1850,13 +1788,13 @@ const LinkedBookingCalendarBar = memo(function LinkedBookingCalendarBar({
   const contentHeightPx = blockHeightPx;
   const cardDensity = contentHeightPx < 56 ? 'compact' : 'comfortable';
   const blockH = blockHeightPx;
-  const palette = linkedBookingCalendarBlockStyle(booking.status);
 
   return (
     <div
-      className="group relative flex h-full min-h-0 flex-row items-stretch overflow-hidden rounded-2xl border border-solid shadow-sm ring-1 ring-white/70 transition-shadow hover:shadow-xl hover:shadow-slate-900/12"
-      style={bookingBlockCardStyle(palette)}
+      className="group relative flex h-full min-h-0 flex-row items-stretch overflow-hidden rounded-2xl shadow-sm ring-1 ring-white/70 transition-shadow hover:shadow-xl hover:shadow-slate-900/12"
+      style={bookingCalendarBlockCardStyle(palette)}
     >
+      <CalendarBookingStatusStripe palette={palette} />
       <div
         className={`flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden px-2.5 text-left ${
           blockH < 56 ? 'py-1.5' : 'py-2'
@@ -1895,6 +1833,7 @@ const LinkedDayColumn = memo(function LinkedDayColumn({
   onEventBlockClick,
   onClassBlockClick,
   onCreateAt,
+  bookingRowOverlayForId,
 }: {
   column: LinkedColumn;
   bookings: LinkedBooking[];
@@ -1908,6 +1847,7 @@ const LinkedDayColumn = memo(function LinkedDayColumn({
   onClassBlockClick?: (block: ScheduleBlockDTO, anchor: { x: number; y: number }) => void;
   /** When set, empty slots are clickable to create a booking (§4.3). */
   onCreateAt?: (time: string) => void;
+  bookingRowOverlayForId?: (id: string) => BookingRowOverlay;
 }) {
   return (
     <div className="min-w-[min(16rem,calc(100vw-5.5rem))] flex-1 border-r border-slate-300 last:border-r-0 sm:min-w-[240px]">
@@ -2044,6 +1984,7 @@ const LinkedDayColumn = memo(function LinkedDayColumn({
                   venueName={column.venueName}
                   variant="day-grid"
                   blockHeightPx={height}
+                  rowOverlay={bookingRowOverlayForId?.(b.id) ?? {}}
                 />
               </button>
             </div>
@@ -2107,6 +2048,10 @@ export function PractitionerCalendarView({
   const [practitioners, setPractitioners] = useState<Practitioner[]>([]);
   const [services, setServices] = useState<AppointmentService[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
+  /** Optimistic status / arrived overlays until list refetch catches up (calendar bars). */
+  const [calendarBookingOverlays, setCalendarBookingOverlays] = useState<Record<string, BookingRowOverlay>>(
+    {},
+  );
   const [blocks, setBlocks] = useState<CalendarBlock[]>([]);
   const [venueResources, setVenueResources] = useState<VenueResourceRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -2547,9 +2492,7 @@ export function PractitionerCalendarView({
       isPractitionerCalendarPreferences,
     );
     if (remembered.viewMode) setViewMode(remembered.viewMode);
-    if (remembered.date) setDate(remembered.date);
-    if (remembered.weekStart) setWeekStart(remembered.weekStart);
-    if (remembered.monthAnchor) setMonthAnchor(remembered.monthAnchor);
+    // Date navigation resets to venue-local today on each visit (see initialIsoDate).
     if (remembered.visibleCalendarIdsState !== undefined) {
       setVisibleCalendarIdsState(remembered.visibleCalendarIdsState);
     }
@@ -2573,32 +2516,29 @@ export function PractitionerCalendarView({
     return Number.isFinite(n) && n > 0 ? n : ((21 - 7) * 60) / SLOT_MINUTES;
   })();
 
-  useEffect(() => {
-    if (!calendarPrefsHydrated) return;
-    writeSessionPreference<PractitionerCalendarPreferences>(preferencesKey, {
+  const calendarPrefsSnapshot = useMemo(
+    (): PractitionerCalendarPreferences => ({
       viewMode,
-      date,
-      weekStart,
-      monthAnchor,
       visibleCalendarIdsState,
       visibleLinkedColumnIds,
       filterStatus,
       startHourOverride,
       endHourOverride,
-    });
-  }, [
-    calendarPrefsHydrated,
-    preferencesKey,
-    viewMode,
-    date,
-    weekStart,
-    monthAnchor,
-    visibleCalendarIdsState,
-    visibleLinkedColumnIds,
-    filterStatus,
-    startHourOverride,
-    endHourOverride,
-  ]);
+    }),
+    [
+      viewMode,
+      visibleCalendarIdsState,
+      visibleLinkedColumnIds,
+      filterStatus,
+      startHourOverride,
+      endHourOverride,
+    ],
+  );
+
+  useEffect(() => {
+    if (!calendarPrefsHydrated) return;
+    writeSessionPreference<PractitionerCalendarPreferences>(preferencesKey, calendarPrefsSnapshot);
+  }, [calendarPrefsHydrated, preferencesKey, calendarPrefsSnapshot]);
 
   const fetchData = useCallback(
     async (options?: { silent?: boolean }) => {
@@ -2691,7 +2631,18 @@ export function PractitionerCalendarView({
         }
 
         setPractitioners(pracData.practitioners ?? []);
-        setBookings((bookData.bookings ?? []) as Booking[]);
+        const nextBookings = (bookData.bookings ?? []) as Booking[];
+        setBookings(nextBookings);
+        setCalendarBookingOverlays((prev) => {
+          if (Object.keys(prev).length === 0) return prev;
+          const next: Record<string, BookingRowOverlay> = { ...prev };
+          for (const row of nextBookings) {
+            const pruned = retainBookingRowOverlay(prev[row.id] ?? {}, row);
+            if (Object.keys(pruned).length === 0) delete next[row.id];
+            else next[row.id] = pruned;
+          }
+          return next;
+        });
         setServices(svcData.services ?? []);
         setBlocks((bjson as { blocks?: CalendarBlock[] }).blocks ?? []);
       } catch {
@@ -3214,6 +3165,23 @@ export function PractitionerCalendarView({
       return serviceMap;
     },
     [linkedServiceMapsByVenue, serviceMap],
+  );
+
+  const bookingRowOverlayForId = useCallback(
+    (bookingId: string): BookingRowOverlay => calendarBookingOverlays[bookingId] ?? {},
+    [calendarBookingOverlays],
+  );
+
+  const bookingForCalendarDisplay = useCallback(
+    (b: Booking): Booking =>
+      applyBookingRowOverlayFields(b, bookingRowOverlayForId(b.id)) as Booking,
+    [bookingRowOverlayForId],
+  );
+
+  const calendarBlockPaletteForBooking = useCallback(
+    (b: Booking): ReturnType<typeof bookingCalendarBlockPalette> =>
+      bookingCalendarBlockPaletteForDisplayRow(b, bookingRowOverlayForId(b.id)),
+    [bookingRowOverlayForId],
   );
 
   function bookingsForPractitioner(pracId: string, dayDate: string): Booking[] {
@@ -3794,26 +3762,167 @@ export function PractitionerCalendarView({
     loadLinkedData,
   ]);
 
+  function applyCalendarBookingQuickPatch(b: Booking, body: Record<string, unknown>): Booking {
+    if (typeof body.status === 'string') {
+      const from = b.status as BookingStatus;
+      const to = body.status as BookingStatus;
+      return { ...b, ...overlayFromStatusTransition(from, to, isTableReservationBooking(b)) };
+    }
+    if (body.client_arrived !== undefined) {
+      return { ...b, ...overlayFromClientArrivedPatch(Boolean(body.client_arrived)) };
+    }
+    return { ...b, ...overlayFromPatchBody(body, b) };
+  }
+
+  function applyLinkedBookingPatchFromPayload(lb: LinkedBooking, payload: Record<string, unknown>): LinkedBooking {
+    const overlay = overlayFromPatchPayload(payload);
+    return {
+      ...lb,
+      ...(overlay.status != null ? { status: overlay.status } : {}),
+      ...(overlay.client_arrived_at !== undefined
+        ? { clientArrivedAt: overlay.client_arrived_at }
+        : {}),
+      ...(overlay.staff_attendance_confirmed_at !== undefined
+        ? { staffAttendanceConfirmedAt: overlay.staff_attendance_confirmed_at }
+        : {}),
+      ...(overlay.guest_attendance_confirmed_at !== undefined
+        ? { guestAttendanceConfirmedAt: overlay.guest_attendance_confirmed_at }
+        : {}),
+    };
+  }
+
+  function applyCalendarBookingPatchFromPayload(b: Booking, payload: Record<string, unknown>): Booking {
+    return { ...b, ...overlayFromPatchPayload(payload) };
+  }
+
+  function mergeCalendarBookingOverlay(bookingId: string, patch: BookingRowOverlay) {
+    if (Object.keys(patch).length === 0) return;
+    setCalendarBookingOverlays((prev) => ({
+      ...prev,
+      [bookingId]: mergeBookingRowOverlay(prev[bookingId] ?? {}, patch),
+    }));
+  }
+
   async function quickPatchBooking(bookingId: string, body: Record<string, unknown>) {
     setQuickActionId(bookingId);
+    const gridBooking = allGridBookings.find((b) => b.id === bookingId) ?? null;
+    const linkedOwnerVenueId = gridBooking?._linkedOwnerVenueId ?? null;
+    const nativeSnapshot = !linkedOwnerVenueId
+      ? (bookings.find((b) => b.id === bookingId) ?? null)
+      : null;
+    const linkedSnapshot = linkedOwnerVenueId
+      ? (linkedVenues
+          .map((v) => v.bookings.find((lb) => lb.id === bookingId))
+          .find((lb) => lb != null) ?? null)
+      : null;
+    const arrivedOnlyPatch = body.client_arrived !== undefined && body.status === undefined;
+    const overlayRow = gridBooking ?? nativeSnapshot ?? linkedSnapshot ?? {};
+    const optimisticOverlay =
+      typeof body.status === 'string' && gridBooking
+        ? overlayFromStatusTransition(
+            gridBooking.status as BookingStatus,
+            body.status as BookingStatus,
+            isTableReservationBooking(gridBooking),
+          )
+        : body.client_arrived !== undefined
+          ? overlayFromClientArrivedPatch(Boolean(body.client_arrived))
+          : overlayFromPatchBody(body, overlayRow);
+    if (Object.keys(optimisticOverlay).length > 0) {
+      mergeCalendarBookingOverlay(bookingId, optimisticOverlay);
+    }
+
+    if (linkedOwnerVenueId && linkedSnapshot) {
+      setLinkedVenues((venues) =>
+        venues.map((v) => ({
+          ...v,
+          bookings: v.bookings.map((lb) => {
+            if (lb.id !== bookingId) return lb;
+            const next = { ...lb };
+            if (typeof body.status === 'string') next.status = body.status as string;
+            if (body.client_arrived !== undefined) {
+              next.clientArrivedAt = body.client_arrived ? new Date().toISOString() : null;
+            }
+            return next;
+          }),
+        })),
+      );
+    } else if (nativeSnapshot || gridBooking) {
+      setBookings((rows) =>
+        rows.map((b) => (b.id === bookingId ? applyCalendarBookingQuickPatch(b, body) : b)),
+      );
+    }
+
     try {
       const res = await fetch(`/api/venue/bookings/${bookingId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
+      const payload = (await res.json().catch(() => ({}))) as Record<string, unknown>;
       if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        addToast((j as { error?: string }).error ?? 'Update failed', 'error');
+        addToast((payload.error as string | undefined) ?? 'Update failed', 'error');
+        if (linkedSnapshot) {
+          setLinkedVenues((venues) =>
+            venues.map((v) => ({
+              ...v,
+              bookings: v.bookings.map((lb) => (lb.id === bookingId ? linkedSnapshot : lb)),
+            })),
+          );
+        } else if (nativeSnapshot) {
+          setBookings((rows) => rows.map((b) => (b.id === bookingId ? nativeSnapshot : b)));
+        }
+        setCalendarBookingOverlays((prev) => {
+          const next = { ...prev };
+          delete next[bookingId];
+          return next;
+        });
         return;
+      }
+      if (payload && typeof payload === 'object' && !('error' in payload)) {
+        mergeCalendarBookingOverlay(bookingId, overlayFromPatchPayload(payload));
+        if (linkedOwnerVenueId) {
+          setLinkedVenues((venues) =>
+            venues.map((v) => ({
+              ...v,
+              bookings: v.bookings.map((lb) =>
+                lb.id === bookingId ? applyLinkedBookingPatchFromPayload(lb, payload) : lb,
+              ),
+            })),
+          );
+        } else {
+          setBookings((rows) =>
+            rows.map((b) =>
+              b.id === bookingId ? applyCalendarBookingPatchFromPayload(b, payload) : b,
+            ),
+          );
+        }
       }
       if (body.status === 'Cancelled') {
         scheduleWaitlistAlertsRefresh();
       }
-      void fetchData({ silent: true });
-      void loadLinkedData();
+      if (!arrivedOnlyPatch) {
+        void fetchData({ silent: true });
+        void loadLinkedData();
+      } else if (linkedOwnerVenueId) {
+        void loadLinkedData();
+      }
     } catch {
       addToast('Update failed', 'error');
+      if (linkedSnapshot) {
+        setLinkedVenues((venues) =>
+          venues.map((v) => ({
+            ...v,
+            bookings: v.bookings.map((lb) => (lb.id === bookingId ? linkedSnapshot : lb)),
+          })),
+        );
+      } else if (nativeSnapshot) {
+        setBookings((rows) => rows.map((b) => (b.id === bookingId ? nativeSnapshot : b)));
+      }
+      setCalendarBookingOverlays((prev) => {
+        const next = { ...prev };
+        delete next[bookingId];
+        return next;
+      });
     } finally {
       setQuickActionId(null);
     }
@@ -4898,7 +5007,8 @@ export function PractitionerCalendarView({
                               );
                             })}
                             {dayBookings.map((b) => {
-                              const p = bookingCalendarBlockStyle(b);
+                              const displayB = bookingForCalendarDisplay(b);
+                              const p = calendarBlockPaletteForBooking(b);
                               const resName = b.resource_id ? resourceNameById.get(b.resource_id) : null;
                               const sid = serviceIdForBooking(b);
                               const svc = sid ? serviceMapForBooking(b).get(sid) : null;
@@ -4909,10 +5019,11 @@ export function PractitionerCalendarView({
                                   type="button"
                                   onClick={(e) => openGridBookingDetail(b, { x: e.clientX, y: e.clientY })}
                                   {...bindDetailPrefetchHandlers(b.id, prefetchBookingDetail)}
-                                  className="rounded-xl border border-solid px-2.5 py-2 text-left text-xs shadow-sm ring-1 ring-white/70 transition-shadow hover:shadow-lg hover:shadow-slate-900/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
-                                  style={bookingBlockCardStyle(p)}
+                                  className="flex w-full rounded-xl px-0 py-0 text-left text-xs shadow-sm ring-1 ring-white/70 transition-shadow hover:shadow-lg hover:shadow-slate-900/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                                  style={bookingCalendarBlockCardStyle(p)}
                                 >
-                                  <div className="flex min-w-0 flex-col gap-1">
+                                  <CalendarBookingStatusStripe palette={p} />
+                                  <div className="flex min-w-0 flex-1 flex-col gap-1 px-2.5 py-2">
                                     <div className="min-w-0">
                                       <div className="truncate font-bold">{b.guest_name}</div>
                                       {serviceLine ? (
@@ -4924,7 +5035,7 @@ export function PractitionerCalendarView({
                                         {b.booking_time.slice(0, 5)}
                                       </div>
                                     </div>
-                                    <CalendarBookingStatusBadge b={b} />
+                                    <CalendarBookingStatusBadge b={displayB} palette={p} />
                                   </div>
                                 </button>
                               );
@@ -5101,7 +5212,6 @@ export function PractitionerCalendarView({
                             })}
                             {dayBookings.map((b) => {
                               const clickable = linkedBookingIsClickable(col, b);
-                              const palette = linkedBookingCalendarBlockStyle(b.status);
                               return (
                                 <button
                                   key={b.id}
@@ -5109,8 +5219,13 @@ export function PractitionerCalendarView({
                                   onClick={(e) =>
                                     openLinkedBooking(col, b, { x: e.clientX, y: e.clientY })
                                   }
-                                  className="block w-full rounded-xl border border-solid px-2.5 py-2 text-left text-xs shadow-sm ring-1 ring-white/70 transition-shadow hover:shadow-lg hover:shadow-slate-900/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
-                                  style={bookingBlockCardStyle(palette)}
+                                  className="block w-full rounded-xl px-2.5 py-2 text-left text-xs shadow-sm ring-1 ring-white/70 transition-shadow hover:shadow-lg hover:shadow-slate-900/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                                  style={bookingCalendarBlockCardStyle(
+                                    bookingCalendarBlockPaletteWithOverlay(
+                                      linkedBookingStatusBooking(b, bookingRowOverlayForId(b.id)),
+                                      bookingRowOverlayForId(b.id),
+                                    ),
+                                  )}
                                   title={
                                     clickable
                                       ? `Edit in ${col.venueName}`
@@ -5122,6 +5237,7 @@ export function PractitionerCalendarView({
                                     visibility={col.visibility}
                                     venueName={col.venueName}
                                     variant="week-grid"
+                                    rowOverlay={bookingRowOverlayForId(b.id)}
                                   />
                                 </button>
                               );
@@ -5353,7 +5469,7 @@ export function PractitionerCalendarView({
                 const linkedCol = isLinkedCol ? col.column : null;
                 const linkedSchedule =
                   linkedCol != null ? linkedScheduleForColumn(linkedCol, date) : null;
-                const pracBookings = bookingsForPractitioner(pracId, date);
+                const pracBookings = bookingsForPractitioner(pracId, date).map(bookingForCalendarDisplay);
                 const pracClassBlocks = isLinkedCol
                   ? (linkedSchedule?.classBlocks ?? [])
                   : classBlocksForGrid.filter(
@@ -5685,8 +5801,8 @@ export function PractitionerCalendarView({
                           const layout = clusterLayouts.get(clusterKey(cluster)) ?? { laneIndex: 0, laneCount: 1 };
                         if (cluster.kind === 'single') {
                           const b = cluster.booking;
+                          const palette = calendarBlockPaletteForBooking(b);
                           const duration = getBookingDuration(b);
-                          const palette = bookingCalendarBlockStyle(b);
                           const sid = serviceIdForBooking(b);
                           const svc = sid ? serviceMapForBooking(b).get(sid) : null;
                           const top = slotTop(b.booking_time);
@@ -5717,7 +5833,7 @@ export function PractitionerCalendarView({
                             !isOverlapLane && contentHeightPx >= (cardDensity === 'compact' ? 72 : 88);
                           return (
                             <DraggableBookingShell
-                              key={b.id}
+                              key={`${b.id}-${b.status}-${b.client_arrived_at ?? ''}`}
                               booking={b}
                               top={top}
                               height={height}
@@ -5728,11 +5844,12 @@ export function PractitionerCalendarView({
                             >
                               {(handle) => (
                                 <div
-                                  className={`group relative flex h-full min-h-0 flex-row items-stretch overflow-hidden rounded-2xl border border-solid shadow-sm ring-1 ring-white/70 transition-shadow hover:shadow-xl hover:shadow-slate-900/12 focus-within:ring-2 focus-within:ring-brand-400/60 ${
+                                  className={`group relative flex h-full min-h-0 flex-row items-stretch overflow-hidden rounded-2xl shadow-sm ring-1 ring-white/70 transition-shadow hover:shadow-xl hover:shadow-slate-900/12 focus-within:ring-2 focus-within:ring-brand-400/60 ${
                                     flash ? 'motion-safe:animate-pulse ring-2 ring-brand-400/60' : ''
                                   }`}
-                                  style={bookingBlockCardStyle(palette)}
+                                  style={bookingCalendarBlockCardStyle(palette)}
                                 >
+                                  <CalendarBookingStatusStripe palette={palette} />
                                   <BookingProcessingStrip b={b} serviceMap={serviceMapForBooking(b)} />
                                   {canDrag && handle.listeners && handle.attributes ? (
                                     <button
@@ -5793,7 +5910,7 @@ export function PractitionerCalendarView({
                                                 phone={formatPhoneForDisplay(b.guest_phone)}
                                                 start={b.booking_time.slice(0, 5)}
                                                 end={displayEndHm}
-                                                pill={<CalendarBookingStatusBadge b={b} />}
+                                                pill={<CalendarBookingStatusBadge b={b} palette={palette} />}
                                                 contentHeightPx={contentHeightPx}
                                                 density={cardDensity}
                                                 actionsReservePx={
@@ -5914,13 +6031,13 @@ export function PractitionerCalendarView({
                         const items = cluster.items;
                         const first = items[0]!;
                         const last = items[items.length - 1]!;
+                        const clusterPalette = calendarBlockPaletteForBooking(first);
                         const spanMins =
                           timeToMinutes(last.booking_time) +
                           getBookingDuration(last) -
                           timeToMinutes(first.booking_time);
                         const top = slotTop(first.booking_time);
                         const height = slotHeightFromDuration(spanMins);
-                        const palette = bookingCalendarBlockStyle(first);
                         const flash = items.some((x) => flashIds.has(x.id));
                         const qBusy = items.some((x) => quickActionId === x.id);
                         const isOverlapLane = layout.laneCount > 1;
@@ -5933,7 +6050,7 @@ export function PractitionerCalendarView({
                           .join(' → ');
                         return (
                           <DraggableBookingShell
-                            key={first.id}
+                            key={`${first.id}-${first.status}-${first.client_arrived_at ?? ''}`}
                             booking={first}
                             top={top}
                             height={height}
@@ -5943,13 +6060,14 @@ export function PractitionerCalendarView({
                           >
                             {() => (
                               <div
-                                className={`group flex h-full min-h-0 flex-row items-stretch overflow-hidden rounded-2xl border border-solid shadow-sm ring-1 ring-white/70 transition-shadow hover:shadow-xl hover:shadow-slate-900/12 focus-within:ring-2 focus-within:ring-brand-400/60 ${
+                                className={`group flex h-full min-h-0 flex-row items-stretch overflow-hidden rounded-2xl shadow-sm ring-1 ring-white/70 transition-shadow hover:shadow-xl hover:shadow-slate-900/12 focus-within:ring-2 focus-within:ring-brand-400/60 ${
                                   flash ? 'motion-safe:animate-pulse ring-2 ring-brand-400/60' : ''
                                 }`}
-                                style={bookingBlockCardStyle(palette)}
+                                style={bookingCalendarBlockCardStyle(clusterPalette)}
                                 title={serviceTitle || undefined}
                                 {...bindDetailPrefetchHandlers(first.id, prefetchBookingDetail)}
                               >
+                                <CalendarBookingStatusStripe palette={clusterPalette} />
                                 <BookingGuestActionsRowMeasured className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
                                   {(shellRowWidthPx) => {
                                     const actionInset = computeBookingActionCornerInset(first, height);
@@ -5974,7 +6092,7 @@ export function PractitionerCalendarView({
                                             <div
                                               key={b.id}
                                               className="relative flex min-h-0 flex-col overflow-hidden"
-                                              style={{ flex: dur, backgroundColor: palette.bg }}
+                                              style={{ flex: dur, backgroundColor: clusterPalette.bg }}
                                             >
                                               <BookingProcessingStrip b={b} serviceMap={serviceMapForBooking(b)} wallPaintMinutes={dur} />
                                               <button
@@ -5992,7 +6110,7 @@ export function PractitionerCalendarView({
                                                   end={minutesToTime(timeToMinutes(b.booking_time) + dur)}
                                                   pill={
                                                     segIdx === 0 ? (
-                                                      <CalendarBookingStatusBadge b={first} />
+                                                      <CalendarBookingStatusBadge b={first} palette={clusterPalette} />
                                                     ) : null
                                                   }
                                                   contentHeightPx={segmentApproxPx}
@@ -6073,6 +6191,7 @@ export function PractitionerCalendarView({
                       resourceMintSlots={linkedResourceAvailabilityByColumnKey.get(col.key) ?? []}
                       startHour={startHour}
                       totalSlots={TOTAL_SLOTS}
+                      bookingRowOverlayForId={bookingRowOverlayForId}
                       onBookingClick={(b, anchor) => openLinkedBooking(col, b, anchor)}
                       onEventBlockClick={(b) => openEventInstanceDetail(b, col)}
                       onClassBlockClick={openClassInstanceDetail}
@@ -6353,6 +6472,19 @@ export function PractitionerCalendarView({
             setDetailBookingAnchor(null);
           }}
           onUpdated={() => {
+            if (detailBookingId) {
+              void fetch(`/api/venue/bookings/${detailBookingId}`)
+                .then((r) => (r.ok ? r.json() : null))
+                .then((payload) => {
+                  if (payload && typeof payload === 'object' && !('error' in payload)) {
+                    mergeCalendarBookingOverlay(
+                      detailBookingId,
+                      overlayFromPatchPayload(payload as Record<string, unknown>),
+                    );
+                  }
+                })
+                .catch(() => undefined);
+            }
             void fetchData({ silent: true });
             void loadLinkedData();
           }}

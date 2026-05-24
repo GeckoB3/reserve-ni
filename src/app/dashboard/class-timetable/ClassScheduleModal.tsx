@@ -769,7 +769,7 @@ export function ClassScheduleModal({
             </div>
           </div>
 
-          <div className="flex w-full shrink-0 flex-col border-t border-slate-200/80 bg-gradient-to-b from-slate-50/90 to-slate-50 lg:w-[min(28rem,100%)] lg:border-l lg:border-t-0">
+          <div className="flex w-full min-w-0 shrink-0 flex-col border-t border-slate-200/80 bg-gradient-to-b from-slate-50/90 to-slate-50 lg:w-[min(28rem,100%)] lg:border-l lg:border-t-0">
             {scheduleFormError && (
               <div
                 className="border-b border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-800"
@@ -805,7 +805,7 @@ export function ClassScheduleModal({
                   ) : null}
                 </div>
 
-                <div className="flex gap-1 border-b border-slate-200/80 bg-slate-100/50 px-2 py-2">
+                <div className="flex min-w-0 gap-1 border-b border-slate-200/80 bg-slate-100/50 px-2 py-2">
                   {(
                     [
                       ['single', 'One-off session', 'Single date'],
@@ -829,7 +829,7 @@ export function ClassScheduleModal({
                   ))}
                 </div>
 
-                <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+                <div className="min-h-0 min-w-0 flex-1 overflow-y-auto px-4 py-4 [&_input]:min-w-0 [&_input]:max-w-full [&_select]:min-w-0 [&_select]:max-w-full">
                   {mode === 'single' && (
                     <div className="space-y-3">
                       <p className="text-xs text-slate-600">
@@ -923,19 +923,19 @@ export function ClassScheduleModal({
                             <span>Between dates</span>
                           </label>
                           {weeklyScope === 'range' && (
-                            <div className="ml-6 flex flex-col gap-2 sm:flex-row sm:items-center">
+                            <div className="flex min-w-0 flex-col gap-2 pl-6 sm:flex-row sm:items-center">
                               <input
                                 type="date"
                                 value={weeklyRangeStart}
                                 onChange={(e) => setWeeklyRangeStart(e.target.value)}
-                                className="w-full max-w-[11rem] rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
+                                className="w-full max-w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm sm:max-w-[11rem]"
                               />
                               <span className="text-slate-500">to</span>
                               <input
                                 type="date"
                                 value={weeklyRangeEnd}
                                 onChange={(e) => setWeeklyRangeEnd(e.target.value)}
-                                className="w-full max-w-[11rem] rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
+                                className="w-full max-w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm sm:max-w-[11rem]"
                               />
                             </div>
                           )}
@@ -991,7 +991,7 @@ export function ClassScheduleModal({
                             autoComplete="off"
                             value={intervalOccurrences}
                             onChange={(e) => setIntervalOccurrences(e.target.value.replace(/[^0-9]/g, ''))}
-                            className="mb-3 ml-6 w-24 rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
+                            className="mb-3 ml-6 max-w-[calc(100%-1.5rem)] rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
                           />
                         )}
                         <label className="flex items-center gap-2 text-sm">
@@ -1008,7 +1008,7 @@ export function ClassScheduleModal({
                             type="date"
                             value={intervalUntil}
                             onChange={(e) => setIntervalUntil(e.target.value)}
-                            className="ml-6 mt-1 w-full max-w-xs rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
+                            className="mt-1 w-full max-w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm sm:max-w-xs"
                           />
                         )}
                       </div>

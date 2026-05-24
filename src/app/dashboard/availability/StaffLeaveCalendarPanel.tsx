@@ -446,13 +446,13 @@ export function StaffLeaveCalendarPanel({
             />
 
             {canManageUnavailability && (
-              <div className="rounded-xl border border-slate-100 bg-slate-50/50 p-4 space-y-3">
+              <div className="min-w-0 max-w-full rounded-xl border border-slate-100 bg-slate-50/50 p-4 space-y-3">
                 <h3 className="text-sm font-semibold text-slate-800">
                   {editingId ? 'Edit block' : 'New block'}
                 </h3>
 
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <div className="sm:col-span-2">
+                <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 [&_input]:min-w-0 [&_input]:max-w-full [&_select]:min-w-0 [&_select]:max-w-full">
+                  <div className="min-w-0 sm:col-span-2">
                     <label className="mb-1 block text-xs font-medium text-slate-600">Type</label>
                     <select
                       value={draft.block_type}
@@ -476,7 +476,7 @@ export function StaffLeaveCalendarPanel({
                     </p>
                   </div>
 
-                  <div>
+                  <div className="min-w-0">
                     <label className="mb-1 block text-xs font-medium text-slate-600">Start date</label>
                     <input
                       type="date"
@@ -491,7 +491,7 @@ export function StaffLeaveCalendarPanel({
                       className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
                     />
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <label className="mb-1 block text-xs font-medium text-slate-600">End date</label>
                     <input
                       type="date"
@@ -503,7 +503,7 @@ export function StaffLeaveCalendarPanel({
 
                   {(draft.block_type === 'closed' || draft.block_type === 'partial') && (
                     <>
-                      <div>
+                      <div className="min-w-0">
                         <label className="mb-1 block text-xs font-medium text-slate-600">
                           {draft.block_type === 'partial'
                             ? 'Start time'
@@ -518,7 +518,7 @@ export function StaffLeaveCalendarPanel({
                           className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
                         />
                       </div>
-                      <div>
+                      <div className="min-w-0">
                         <label className="mb-1 block text-xs font-medium text-slate-600">
                           {draft.block_type === 'partial' ? 'End time' : 'End time (optional)'}
                         </label>
@@ -532,7 +532,7 @@ export function StaffLeaveCalendarPanel({
                     </>
                   )}
 
-                  <div className="sm:col-span-2">
+                  <div className="min-w-0 sm:col-span-2">
                     <label className="mb-1 block text-xs font-medium text-slate-600">Label (optional)</label>
                     <select
                       value={draft.leave_type}
@@ -547,7 +547,7 @@ export function StaffLeaveCalendarPanel({
                     </select>
                   </div>
 
-                  <div className="sm:col-span-2">
+                  <div className="min-w-0 sm:col-span-2">
                     <label className="mb-1 block text-xs font-medium text-slate-600">Notes (optional)</label>
                     <input
                       type="text"
@@ -559,7 +559,7 @@ export function StaffLeaveCalendarPanel({
                   </div>
 
                   {isAdmin && !selfPractitionerId && !editingId && (
-                    <div className="sm:col-span-2">
+                    <div className="min-w-0 sm:col-span-2">
                       <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-slate-200 bg-white p-3">
                         <input
                           type="checkbox"

@@ -85,7 +85,7 @@ export function AppointmentServiceFormFields({
   }, [form.variants, form.payment_requirement]);
 
   return (
-    <div className="space-y-4">
+    <div className="min-w-0 max-w-full space-y-4">
       {staffNotice}
 
       <div>
@@ -111,7 +111,7 @@ export function AppointmentServiceFormFields({
       </div>
 
       {isAdmin && (
-        <div className="space-y-3 rounded-xl border border-slate-200 bg-gradient-to-b from-slate-50/90 to-white p-4 shadow-sm ring-1 ring-slate-100/80">
+        <div className="min-w-0 max-w-full space-y-3 rounded-xl border border-slate-200 bg-gradient-to-b from-slate-50/90 to-white p-4 shadow-sm ring-1 ring-slate-100/80">
           <div>
             <p className="text-sm font-semibold text-slate-900">How will clients book this service?</p>
             <p className="mt-1 text-xs leading-relaxed text-slate-600">
@@ -192,7 +192,7 @@ export function AppointmentServiceFormFields({
       )}
 
       {usesVariants && (
-        <div className="space-y-4 rounded-xl border border-brand-100 bg-white p-4 shadow-sm ring-1 ring-brand-50">
+        <div className="min-w-0 max-w-full space-y-4 rounded-xl border border-brand-100 bg-white p-4 shadow-sm ring-1 ring-brand-50">
           <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 pb-3">
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
@@ -243,7 +243,7 @@ export function AppointmentServiceFormFields({
               return (
               <div
                 key={variant.id ?? `new-${idx}`}
-                className={`space-y-2.5 rounded-xl border bg-white p-3.5 shadow-sm transition-shadow ${
+                className={`min-w-0 max-w-full space-y-2.5 rounded-xl border bg-white p-3.5 shadow-sm transition-shadow ${
                   complete
                     ? 'border-slate-200'
                     : 'border-amber-300 ring-2 ring-amber-100/90'
@@ -279,7 +279,7 @@ export function AppointmentServiceFormFields({
                     Remove
                   </button>
                 </div>
-                <div className="flex items-start gap-2">
+                <div className="flex min-w-0 items-start gap-2">
                   <input
                     type="text"
                     value={variant.name}
@@ -310,7 +310,7 @@ export function AppointmentServiceFormFields({
                     className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs text-slate-700 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                   />
                 </div>
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <div className="grid grid-cols-1 gap-2 min-[420px]:grid-cols-2 sm:grid-cols-4">
                   <div>
                     <label className="mb-0.5 block text-[11px] font-medium text-slate-600">Duration (mins) *</label>
                     <NumericInput
@@ -409,7 +409,7 @@ export function AppointmentServiceFormFields({
             })}
           </div>
 
-          <div className="flex flex-col gap-2 border-t border-slate-100 pt-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 flex-col gap-2 border-t border-slate-100 pt-3 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-[11px] text-slate-600">
               {allVariantsReadyForAnother
                 ? 'Need another length, price band, or session type? Add it here.'
@@ -588,12 +588,12 @@ export function AppointmentServiceFormFields({
         </SectionCard.Body>
       </SectionCard>
 
-      <div className="space-y-3 rounded-lg border border-slate-200 p-4">
+      <div className="min-w-0 max-w-full space-y-3 rounded-lg border border-slate-200 p-4">
         <p className="text-sm font-medium text-slate-800">Guest booking rules</p>
         <p className="text-xs text-slate-500">
           Applies to online bookings for this service (advance window, notice, and deposit refund notice).
         </p>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
             <label className="mb-1 block text-sm text-slate-700">Max advance (days)</label>
             <NumericInput
@@ -678,7 +678,7 @@ export function AppointmentServiceFormFields({
       </div>
 
       {isAdmin && !hideStaffMaySection && (
-        <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50/90 p-4">
+        <div className="min-w-0 max-w-full space-y-3 rounded-lg border border-slate-200 bg-slate-50/90 p-4">
           <p className="text-sm font-medium text-slate-800">Optional overrides per calendar</p>
           <p className="text-xs text-slate-500">
             {usesVariants ? (
@@ -726,7 +726,7 @@ export function AppointmentServiceFormFields({
 
       {calendarsSection}
 
-      <div className="space-y-4 rounded-xl border border-slate-200 bg-white p-4">
+      <div className="min-w-0 max-w-full space-y-4 rounded-xl border border-slate-200 bg-white p-4">
         <div>
           <p className="text-sm font-medium text-slate-800">When guests can book this service online</p>
           <p className="mt-0.5 text-xs text-slate-500">
