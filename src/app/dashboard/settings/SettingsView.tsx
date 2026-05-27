@@ -40,7 +40,7 @@ import { SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE } from '@/lib/subscription-canc
 import { planCalendarLimit } from '@/lib/plan-limits';
 import type { VenueBillingQuotePayload } from '@/lib/stripe/billing-quote';
 import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
-import type { BookingModel } from '@/types/booking-models';
+import type { BookingModel, VenueTerminology } from '@/types/booking-models';
 import { isRestaurantTableProductTier } from '@/lib/tier-enforcement';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 import { TabBar } from '@/components/ui/dashboard/TabBar';
@@ -54,6 +54,11 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { FeatureFlagsSection } from './sections/FeatureFlagsSection';
 import type { ResolvedAppointmentsFeatureFlags, VenueFeatureFlags } from '@/lib/feature-flags';
 import { DEFAULT_RESOLVED_APPOINTMENTS_FEATURE_FLAGS } from '@/lib/feature-flags';
+import { ReportsView } from '../reports/ReportsView';
+import { SmsUsageBanner } from '../reports/SmsUsageBanner';
+import { ReferralsDashboardContent } from '../referrals/ReferralsDashboardContent';
+import type { ReferralsDashboardData } from '@/lib/referrals/load-dashboard';
+import type { VenueTrialBreakdown } from '@/lib/billing/trial-info';
 interface SettingsViewProps {
   initialVenue: VenueSettings | null;
   isAdmin: boolean;
@@ -70,6 +75,18 @@ interface SettingsViewProps {
   publicBaseUrl: string;
   initialFeatureFlagsRaw?: VenueFeatureFlags;
   initialFeatureFlagsResolved?: ResolvedAppointmentsFeatureFlags;
+  /** Admin: reports tab context (booking model, terminology, venue id). */
+  reportsContext?: {
+    bookingModel: BookingModel;
+    terminology: VenueTerminology;
+    venueId: string;
+    pricingTier: string | null;
+  } | null;
+  /** Admin: Refer & Earn tab payload when the programme is enabled. */
+  referralsDashboard?: ReferralsDashboardData | null;
+  referralsProgrammeAvailable?: boolean;
+  /** Trial-window breakdown for the Plan tab (free-trial countdown + source). */
+  trialBreakdown?: VenueTrialBreakdown | null;
 }
 
 const TABS = [
@@ -114,6 +131,16 @@ const TABS = [
     description: 'Team logins, roles, calendar access, and session security.',
   },
   {
+    key: 'reports',
+    label: 'Reports',
+    description: 'Covers, revenue, exports, and client insights for your venue.',
+  },
+  {
+    key: 'refer-earn',
+    label: 'Refer & Earn',
+    description: 'Share your code and earn subscription credit when venues you refer subscribe.',
+  },
+  {
     key: 'linked-accounts',
     label: 'Linked Accounts',
     description:
@@ -126,12 +153,15 @@ function resolveInitialTab(
   initialTab: string | undefined,
   isAdmin: boolean,
   linkedAccountsAvailable: boolean,
+  referralsProgrammeAvailable: boolean,
 ): TabKey {
   const t = initialTab as TabKey | undefined;
   if (t && TABS.some((x) => x.key === t)) {
     if (t === 'staff' && !isAdmin) return 'profile';
     if (t === 'booking-settings' && !isAdmin) return 'profile';
     if (t === 'linked-accounts' && !linkedAccountsAvailable) return 'profile';
+    if (t === 'reports' && !isAdmin) return 'profile';
+    if (t === 'refer-earn' && (!isAdmin || !referralsProgrammeAvailable)) return 'profile';
     return t;
   }
   return 'profile';
@@ -306,11 +336,13 @@ function PlanSection({
   isAdmin,
   smsCountUsesStripePeriod = false,
   onVenueUpdate,
+  trialBreakdown,
 }: {
   venue: VenueSettings;
   isAdmin: boolean;
   smsCountUsesStripePeriod?: boolean;
   onVenueUpdate: (patch: Partial<VenueSettings>) => void;
+  trialBreakdown: VenueTrialBreakdown | null;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -739,6 +771,7 @@ function PlanSection({
           </p>
         </div>
       ) : null}
+      <TrialBreakdownBanner breakdown={trialBreakdown} />
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="rounded-xl border border-slate-200 bg-slate-50/90 px-3 py-3">
           <p className="text-xs uppercase tracking-wide text-slate-500">Current plan</p>
@@ -1072,6 +1105,10 @@ function SettingsViewInner({
   publicBaseUrl,
   initialFeatureFlagsRaw = {},
   initialFeatureFlagsResolved = DEFAULT_RESOLVED_APPOINTMENTS_FEATURE_FLAGS,
+  reportsContext = null,
+  referralsDashboard = null,
+  referralsProgrammeAvailable = false,
+  trialBreakdown = null,
 }: SettingsViewProps) {
   const router = useRouter();
   const pathname = usePathname() ?? '/dashboard/settings';
@@ -1086,10 +1123,10 @@ function SettingsViewInner({
   const linkedAccountsAvailable =
     isAdmin && !isRestaurantTableProductTier(initialVenue?.pricing_tier ?? null);
   const [selectedTab, setSelectedTab] = useState<TabKey>(() =>
-    resolveInitialTab(initialTab, isAdmin, linkedAccountsAvailable),
+    resolveInitialTab(initialTab, isAdmin, linkedAccountsAvailable, referralsProgrammeAvailable),
   );
   const [visitedTabs, setVisitedTabs] = useState<Set<TabKey>>(() => {
-    const initial = resolveInitialTab(initialTab, isAdmin, linkedAccountsAvailable);
+    const initial = resolveInitialTab(initialTab, isAdmin, linkedAccountsAvailable, referralsProgrammeAvailable);
     const tabs = new Set<TabKey>([initial]);
     if (planCheckoutReturn) tabs.add('plan');
     return tabs;
@@ -1105,9 +1142,11 @@ function SettingsViewInner({
       TABS.filter((x) => {
         if (x.key === 'booking-settings' && !isAdmin) return false;
         if (x.key === 'linked-accounts' && !linkedAccountsAvailable) return false;
+        if (x.key === 'reports' && !isAdmin) return false;
+        if (x.key === 'refer-earn' && (!isAdmin || !referralsProgrammeAvailable)) return false;
         return true;
       }),
-    [isAdmin, linkedAccountsAvailable],
+    [isAdmin, linkedAccountsAvailable, referralsProgrammeAvailable],
   );
   const tabBarTabs = useMemo(
     (): { id: TabKey; label: string; description?: string }[] =>
@@ -1149,13 +1188,18 @@ function SettingsViewInner({
   useEffect(() => {
     const onPopState = () => {
       const params = new URLSearchParams(window.location.search);
-      const tab = resolveInitialTab(params.get('tab') ?? undefined, isAdmin, linkedAccountsAvailable);
+      const tab = resolveInitialTab(
+        params.get('tab') ?? undefined,
+        isAdmin,
+        linkedAccountsAvailable,
+        referralsProgrammeAvailable,
+      );
       setSelectedTab(tab);
       markTabVisited(tab);
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
-  }, [isAdmin, linkedAccountsAvailable, markTabVisited]);
+  }, [isAdmin, linkedAccountsAvailable, referralsProgrammeAvailable, markTabVisited]);
 
   useLayoutEffect(() => {
     if (skipScrollOnTabChangeRef.current) {
@@ -1218,7 +1262,13 @@ function SettingsViewInner({
     if (raw === 'linked-accounts' && !linkedAccountsAvailable) {
       queueMicrotask(() => replaceWithTab('profile'));
     }
-  }, [isAdmin, linkedAccountsAvailable, searchParams, replaceWithTab]);
+    if (raw === 'reports' && !isAdmin) {
+      queueMicrotask(() => replaceWithTab('profile'));
+    }
+    if (raw === 'refer-earn' && (!isAdmin || !referralsProgrammeAvailable)) {
+      queueMicrotask(() => replaceWithTab('profile'));
+    }
+  }, [isAdmin, linkedAccountsAvailable, referralsProgrammeAvailable, searchParams, replaceWithTab]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -1539,6 +1589,7 @@ function SettingsViewInner({
             isAdmin={isAdmin}
             smsCountUsesStripePeriod={smsCountUsesStripePeriod}
             onVenueUpdate={onUpdate}
+            trialBreakdown={trialBreakdown}
           />
         ) : null}
 
@@ -1573,6 +1624,26 @@ function SettingsViewInner({
             />
         ) : null}
 
+        {isAdmin && reportsContext && visitedTabs.has('reports') && selectedTab === 'reports' ? (
+          <div className="space-y-6">
+            <SmsUsageBanner />
+            <ReportsView
+              bookingModel={reportsContext.bookingModel}
+              terminology={reportsContext.terminology}
+              venueId={reportsContext.venueId}
+              pricingTier={reportsContext.pricingTier}
+              subTabQueryKey="reportsTab"
+            />
+          </div>
+        ) : null}
+
+        {referralsProgrammeAvailable &&
+        referralsDashboard &&
+        visitedTabs.has('refer-earn') &&
+        selectedTab === 'refer-earn' ? (
+          <ReferralsDashboardContent data={referralsDashboard} />
+        ) : null}
+
         {linkedAccountsAvailable && visitedTabs.has('linked-accounts') && selectedTab === 'linked-accounts' ? (
               <LinkedAccountsSection venueName={venue.name ?? 'Your venue'} />
         ) : null}
@@ -1587,5 +1658,80 @@ export function SettingsView(props: SettingsViewProps) {
     <SettingsSaveProvider>
       <SettingsViewInner {...props} />
     </SettingsSaveProvider>
+  );
+}
+
+/**
+ * Free-trial countdown + source breakdown for the Plan tab. Renders only while
+ * the venue is trialing. Days-remaining is recomputed every render so the value
+ * is fresh on any user interaction, with an hourly ticker for long-idle tabs.
+ */
+function TrialBreakdownBanner({ breakdown }: { breakdown: VenueTrialBreakdown | null | undefined }) {
+  // Track wall-clock as state so daysRemaining stays fresh on long-open tabs.
+  // The lazy initializer keeps the first render pure (no Date.now() in the body).
+  const [nowMs, setNowMs] = useState<number>(() => Date.now());
+  useEffect(() => {
+    if (!breakdown?.isTrialing || !breakdown.trialEndIso) return;
+    const id = window.setInterval(() => setNowMs(Date.now()), 60 * 60 * 1000);
+    return () => window.clearInterval(id);
+  }, [breakdown?.isTrialing, breakdown?.trialEndIso]);
+
+  if (!breakdown || !breakdown.isTrialing || !breakdown.trialEndIso) return null;
+
+  const MS_PER_DAY = 24 * 60 * 60 * 1000;
+  const targetMs = Date.parse(breakdown.trialEndIso);
+  const daysRemaining = Number.isFinite(targetMs)
+    ? Math.max(0, Math.ceil((targetMs - nowMs) / MS_PER_DAY))
+    : breakdown.daysRemaining;
+
+  const trialEndDisplay = (() => {
+    try {
+      return new Date(breakdown.trialEndIso).toLocaleDateString('en-GB', {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+      });
+    } catch {
+      return null;
+    }
+  })();
+
+  const hasReferralBonus = breakdown.referralBonusDays > 0;
+  const totalDays = breakdown.totalDays;
+  const referrerLabel = breakdown.referrerVenueName ?? 'a ReserveNI customer';
+
+  return (
+    <div
+      className={`rounded-xl border px-4 py-3 ${
+        hasReferralBonus
+          ? 'border-emerald-200 bg-emerald-50/80 text-emerald-950'
+          : 'border-brand-200 bg-brand-50/70 text-brand-900'
+      }`}
+    >
+      <div className="flex flex-wrap items-baseline gap-x-2">
+        <p className="text-sm font-semibold">
+          {daysRemaining === 0
+            ? 'Your free trial ends today.'
+            : daysRemaining === 1
+              ? '1 day of free trial remaining.'
+              : `${daysRemaining} days of free trial remaining.`}
+        </p>
+        {trialEndDisplay ? (
+          <p className="text-xs opacity-80">First charge on {trialEndDisplay}.</p>
+        ) : null}
+      </div>
+      <p className="mt-1.5 text-xs leading-relaxed">
+        Trial breakdown:{' '}
+        <span className="font-semibold">{breakdown.standardDays} days</span> standard signup trial
+        {hasReferralBonus ? (
+          <>
+            {' + '}
+            <span className="font-semibold">{breakdown.referralBonusDays} days</span> from referral by{' '}
+            <span className="font-semibold">{referrerLabel}</span>
+          </>
+        ) : null}
+        {totalDays > 0 ? <> = <span className="font-semibold">{totalDays} days</span> total.</> : '.'}
+      </p>
+    </div>
   );
 }

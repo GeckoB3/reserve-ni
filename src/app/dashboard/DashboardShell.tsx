@@ -161,7 +161,8 @@ export function DashboardShell({
     router.prefetch('/dashboard/day-sheet');
     router.prefetch('/dashboard/settings');
     if (isAdmin) {
-      router.prefetch('/dashboard/reports');
+      router.prefetch('/dashboard/settings?tab=reports');
+      router.prefetch('/dashboard/settings?tab=refer-earn');
       router.prefetch('/dashboard/appointment-services');
       router.prefetch('/dashboard/calendar-availability');
     }
