@@ -58,6 +58,7 @@ import { ReportsView } from '../reports/ReportsView';
 import { SmsUsageBanner } from '../reports/SmsUsageBanner';
 import { ReferralsDashboardContent } from '../referrals/ReferralsDashboardContent';
 import type { ReferralsDashboardData } from '@/lib/referrals/load-dashboard';
+import type { VenueTrialBreakdown } from '@/lib/billing/trial-info';
 interface SettingsViewProps {
   initialVenue: VenueSettings | null;
   isAdmin: boolean;
@@ -84,6 +85,8 @@ interface SettingsViewProps {
   /** Admin: Refer & Earn tab payload when the programme is enabled. */
   referralsDashboard?: ReferralsDashboardData | null;
   referralsProgrammeAvailable?: boolean;
+  /** Trial-window breakdown for the Plan tab (free-trial countdown + source). */
+  trialBreakdown?: VenueTrialBreakdown | null;
 }
 
 const TABS = [
@@ -333,11 +336,13 @@ function PlanSection({
   isAdmin,
   smsCountUsesStripePeriod = false,
   onVenueUpdate,
+  trialBreakdown,
 }: {
   venue: VenueSettings;
   isAdmin: boolean;
   smsCountUsesStripePeriod?: boolean;
   onVenueUpdate: (patch: Partial<VenueSettings>) => void;
+  trialBreakdown: VenueTrialBreakdown | null;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -766,6 +771,7 @@ function PlanSection({
           </p>
         </div>
       ) : null}
+      <TrialBreakdownBanner breakdown={trialBreakdown} />
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="rounded-xl border border-slate-200 bg-slate-50/90 px-3 py-3">
           <p className="text-xs uppercase tracking-wide text-slate-500">Current plan</p>
@@ -1102,6 +1108,7 @@ function SettingsViewInner({
   reportsContext = null,
   referralsDashboard = null,
   referralsProgrammeAvailable = false,
+  trialBreakdown = null,
 }: SettingsViewProps) {
   const router = useRouter();
   const pathname = usePathname() ?? '/dashboard/settings';
@@ -1582,6 +1589,7 @@ function SettingsViewInner({
             isAdmin={isAdmin}
             smsCountUsesStripePeriod={smsCountUsesStripePeriod}
             onVenueUpdate={onUpdate}
+            trialBreakdown={trialBreakdown}
           />
         ) : null}
 
@@ -1650,5 +1658,80 @@ export function SettingsView(props: SettingsViewProps) {
     <SettingsSaveProvider>
       <SettingsViewInner {...props} />
     </SettingsSaveProvider>
+  );
+}
+
+/**
+ * Free-trial countdown + source breakdown for the Plan tab. Renders only while
+ * the venue is trialing. Days-remaining is recomputed every render so the value
+ * is fresh on any user interaction, with an hourly ticker for long-idle tabs.
+ */
+function TrialBreakdownBanner({ breakdown }: { breakdown: VenueTrialBreakdown | null | undefined }) {
+  // Track wall-clock as state so daysRemaining stays fresh on long-open tabs.
+  // The lazy initializer keeps the first render pure (no Date.now() in the body).
+  const [nowMs, setNowMs] = useState<number>(() => Date.now());
+  useEffect(() => {
+    if (!breakdown?.isTrialing || !breakdown.trialEndIso) return;
+    const id = window.setInterval(() => setNowMs(Date.now()), 60 * 60 * 1000);
+    return () => window.clearInterval(id);
+  }, [breakdown?.isTrialing, breakdown?.trialEndIso]);
+
+  if (!breakdown || !breakdown.isTrialing || !breakdown.trialEndIso) return null;
+
+  const MS_PER_DAY = 24 * 60 * 60 * 1000;
+  const targetMs = Date.parse(breakdown.trialEndIso);
+  const daysRemaining = Number.isFinite(targetMs)
+    ? Math.max(0, Math.ceil((targetMs - nowMs) / MS_PER_DAY))
+    : breakdown.daysRemaining;
+
+  const trialEndDisplay = (() => {
+    try {
+      return new Date(breakdown.trialEndIso).toLocaleDateString('en-GB', {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+      });
+    } catch {
+      return null;
+    }
+  })();
+
+  const hasReferralBonus = breakdown.referralBonusDays > 0;
+  const totalDays = breakdown.totalDays;
+  const referrerLabel = breakdown.referrerVenueName ?? 'a ReserveNI customer';
+
+  return (
+    <div
+      className={`rounded-xl border px-4 py-3 ${
+        hasReferralBonus
+          ? 'border-emerald-200 bg-emerald-50/80 text-emerald-950'
+          : 'border-brand-200 bg-brand-50/70 text-brand-900'
+      }`}
+    >
+      <div className="flex flex-wrap items-baseline gap-x-2">
+        <p className="text-sm font-semibold">
+          {daysRemaining === 0
+            ? 'Your free trial ends today.'
+            : daysRemaining === 1
+              ? '1 day of free trial remaining.'
+              : `${daysRemaining} days of free trial remaining.`}
+        </p>
+        {trialEndDisplay ? (
+          <p className="text-xs opacity-80">First charge on {trialEndDisplay}.</p>
+        ) : null}
+      </div>
+      <p className="mt-1.5 text-xs leading-relaxed">
+        Trial breakdown:{' '}
+        <span className="font-semibold">{breakdown.standardDays} days</span> standard signup trial
+        {hasReferralBonus ? (
+          <>
+            {' + '}
+            <span className="font-semibold">{breakdown.referralBonusDays} days</span> from referral by{' '}
+            <span className="font-semibold">{referrerLabel}</span>
+          </>
+        ) : null}
+        {totalDays > 0 ? <> = <span className="font-semibold">{totalDays} days</span> total.</> : '.'}
+      </p>
+    </div>
   );
 }

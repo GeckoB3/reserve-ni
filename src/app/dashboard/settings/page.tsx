@@ -30,6 +30,7 @@ import {
 import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlags } from '@/lib/feature-flags';
 import { referralProgrammeEnabled } from '@/lib/referrals/constants';
 import { loadReferralsDashboardForVenue } from '@/lib/referrals/load-dashboard';
+import { loadVenueTrialBreakdown } from '@/lib/billing/trial-info';
 
 function mergeVenueTerminology(model: BookingModel, raw: unknown): VenueTerminology {
   const base = DEFAULT_TERMINOLOGY[model];
@@ -262,6 +263,22 @@ export default async function SettingsPage({
       ? await loadReferralsDashboardForVenue(staff.db, venueId)
       : null;
 
+  // Trial-window breakdown for the Plan tab — countdown + source (signup vs referral).
+  // Only computed while the venue is trialing; otherwise null (Plan tab skips rendering).
+  const trialBreakdown =
+    venueId && venue
+      ? await loadVenueTrialBreakdown(staff.db, {
+          venueId,
+          planStatus: (venue as { plan_status?: string | null }).plan_status ?? null,
+          subscriptionCurrentPeriodStart:
+            (venue as { subscription_current_period_start?: string | null }).subscription_current_period_start ??
+            null,
+          subscriptionCurrentPeriodEnd:
+            (venue as { subscription_current_period_end?: string | null }).subscription_current_period_end ??
+            null,
+        })
+      : null;
+
   return (
     <PageFrame maxWidthClass="max-w-5xl">
       <Suspense
@@ -288,6 +305,7 @@ export default async function SettingsPage({
           reportsContext={reportsContext}
           referralsDashboard={referralsDashboard}
           referralsProgrammeAvailable={referralsProgrammeAvailable}
+          trialBreakdown={trialBreakdown}
         />
       </Suspense>
     </PageFrame>
