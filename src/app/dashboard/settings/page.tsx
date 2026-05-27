@@ -9,7 +9,8 @@ import {
   getDefaultBookingModelFromActive,
   resolveActiveBookingModels,
 } from '@/lib/booking/active-models';
-import type { BookingModel } from '@/types/booking-models';
+import type { BookingModel, VenueTerminology } from '@/types/booking-models';
+import { DEFAULT_TERMINOLOGY } from '@/types/booking-models';
 import { computeSmsMonthlyAllowance, updateVenueSmsMonthlyAllowance } from '@/lib/billing/sms-allowance';
 import { parseVenueOpeningExceptions } from '@/types/venue-opening-exceptions';
 import type { VenueSettings } from './types';
@@ -27,6 +28,19 @@ import {
   resolveSmsBillingPeriod,
 } from '@/lib/sms-usage';
 import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlags } from '@/lib/feature-flags';
+import { referralProgrammeEnabled } from '@/lib/referrals/constants';
+import { loadReferralsDashboardForVenue } from '@/lib/referrals/load-dashboard';
+
+function mergeVenueTerminology(model: BookingModel, raw: unknown): VenueTerminology {
+  const base = DEFAULT_TERMINOLOGY[model];
+  if (!raw || typeof raw !== 'object') return base;
+  const t = raw as Partial<VenueTerminology>;
+  return {
+    client: typeof t.client === 'string' ? t.client : base.client,
+    booking: typeof t.booking === 'string' ? t.booking : base.booking,
+    staff: typeof t.staff === 'string' ? t.staff : base.staff,
+  };
+}
 
 export default async function SettingsPage({
   searchParams,
@@ -83,7 +97,7 @@ export default async function SettingsPage({
   let hasServiceConfig = false;
   const { data: fullVenue, error: fullErr } = await staff.db
     .from('venues')
-    .select('id, name, slug, address, phone, email, website_url, cover_photo_url, logo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, communication_templates, opening_hours, venue_opening_exceptions, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, table_management_enabled, combination_threshold, pricing_tier, plan_status, billing_access_source, free_access_granted_at, free_access_granted_by, free_access_reason, subscription_current_period_start, subscription_current_period_end, calendar_count, booking_model, enabled_models, active_booking_models, sms_monthly_allowance, stripe_subscription_id, created_at, require_account_login_for_bookings, feature_flags, embed_accent_colour')
+    .select('id, name, slug, address, phone, email, website_url, cover_photo_url, logo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, communication_templates, opening_hours, venue_opening_exceptions, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, table_management_enabled, combination_threshold, pricing_tier, plan_status, billing_access_source, free_access_granted_at, free_access_granted_by, free_access_reason, subscription_current_period_start, subscription_current_period_end, calendar_count, booking_model, enabled_models, active_booking_models, terminology, sms_monthly_allowance, stripe_subscription_id, created_at, require_account_login_for_bookings, feature_flags, embed_accent_colour')
     .eq('id', venueId)
     .single();
 
@@ -227,6 +241,27 @@ export default async function SettingsPage({
   );
   const featureFlagsResolved = resolveAppointmentsFeatureFlags(featureFlagsRaw);
 
+  const bookingModelForReports = ((venue as { booking_model?: string } | null)?.booking_model ??
+    'table_reservation') as BookingModel;
+  const reportsContext =
+    isAdmin && venueId
+      ? {
+          bookingModel: bookingModelForReports,
+          terminology: mergeVenueTerminology(
+            bookingModelForReports,
+            (venue as { terminology?: unknown } | null)?.terminology,
+          ),
+          venueId,
+          pricingTier: (venue as { pricing_tier?: string | null } | null)?.pricing_tier ?? null,
+        }
+      : null;
+
+  const referralsProgrammeAvailable = isAdmin && referralProgrammeEnabled();
+  const referralsDashboard =
+    referralsProgrammeAvailable && venueId
+      ? await loadReferralsDashboardForVenue(staff.db, venueId)
+      : null;
+
   return (
     <PageFrame maxWidthClass="max-w-5xl">
       <Suspense
@@ -250,6 +285,9 @@ export default async function SettingsPage({
           publicBaseUrl={publicBaseUrl}
           initialFeatureFlagsRaw={featureFlagsRaw}
           initialFeatureFlagsResolved={featureFlagsResolved}
+          reportsContext={reportsContext}
+          referralsDashboard={referralsDashboard}
+          referralsProgrammeAvailable={referralsProgrammeAvailable}
         />
       </Suspense>
     </PageFrame>

@@ -274,7 +274,7 @@ async function sendReferrerCreditedEmail(params: {
     return;
   }
   const origin = normalizePublicBaseUrl(process.env.NEXT_PUBLIC_BASE_URL);
-  const dashboardUrl = `${origin}/dashboard/referrals`;
+  const dashboardUrl = `${origin}/dashboard/settings?tab=refer-earn`;
   const { html, text } = renderReferralCreditedEmail({
     referrerVenueName: params.referrerVenue.name?.trim() || 'ReserveNI',
     refereeVenueName: params.refereeName,

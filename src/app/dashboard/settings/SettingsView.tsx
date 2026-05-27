@@ -40,7 +40,7 @@ import { SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE } from '@/lib/subscription-canc
 import { planCalendarLimit } from '@/lib/plan-limits';
 import type { VenueBillingQuotePayload } from '@/lib/stripe/billing-quote';
 import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
-import type { BookingModel } from '@/types/booking-models';
+import type { BookingModel, VenueTerminology } from '@/types/booking-models';
 import { isRestaurantTableProductTier } from '@/lib/tier-enforcement';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 import { TabBar } from '@/components/ui/dashboard/TabBar';
@@ -54,6 +54,10 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { FeatureFlagsSection } from './sections/FeatureFlagsSection';
 import type { ResolvedAppointmentsFeatureFlags, VenueFeatureFlags } from '@/lib/feature-flags';
 import { DEFAULT_RESOLVED_APPOINTMENTS_FEATURE_FLAGS } from '@/lib/feature-flags';
+import { ReportsView } from '../reports/ReportsView';
+import { SmsUsageBanner } from '../reports/SmsUsageBanner';
+import { ReferralsDashboardContent } from '../referrals/ReferralsDashboardContent';
+import type { ReferralsDashboardData } from '@/lib/referrals/load-dashboard';
 interface SettingsViewProps {
   initialVenue: VenueSettings | null;
   isAdmin: boolean;
@@ -70,6 +74,16 @@ interface SettingsViewProps {
   publicBaseUrl: string;
   initialFeatureFlagsRaw?: VenueFeatureFlags;
   initialFeatureFlagsResolved?: ResolvedAppointmentsFeatureFlags;
+  /** Admin: reports tab context (booking model, terminology, venue id). */
+  reportsContext?: {
+    bookingModel: BookingModel;
+    terminology: VenueTerminology;
+    venueId: string;
+    pricingTier: string | null;
+  } | null;
+  /** Admin: Refer & Earn tab payload when the programme is enabled. */
+  referralsDashboard?: ReferralsDashboardData | null;
+  referralsProgrammeAvailable?: boolean;
 }
 
 const TABS = [
@@ -114,6 +128,16 @@ const TABS = [
     description: 'Team logins, roles, calendar access, and session security.',
   },
   {
+    key: 'reports',
+    label: 'Reports',
+    description: 'Covers, revenue, exports, and client insights for your venue.',
+  },
+  {
+    key: 'refer-earn',
+    label: 'Refer & Earn',
+    description: 'Share your code and earn subscription credit when venues you refer subscribe.',
+  },
+  {
     key: 'linked-accounts',
     label: 'Linked Accounts',
     description:
@@ -126,12 +150,15 @@ function resolveInitialTab(
   initialTab: string | undefined,
   isAdmin: boolean,
   linkedAccountsAvailable: boolean,
+  referralsProgrammeAvailable: boolean,
 ): TabKey {
   const t = initialTab as TabKey | undefined;
   if (t && TABS.some((x) => x.key === t)) {
     if (t === 'staff' && !isAdmin) return 'profile';
     if (t === 'booking-settings' && !isAdmin) return 'profile';
     if (t === 'linked-accounts' && !linkedAccountsAvailable) return 'profile';
+    if (t === 'reports' && !isAdmin) return 'profile';
+    if (t === 'refer-earn' && (!isAdmin || !referralsProgrammeAvailable)) return 'profile';
     return t;
   }
   return 'profile';
@@ -1072,6 +1099,9 @@ function SettingsViewInner({
   publicBaseUrl,
   initialFeatureFlagsRaw = {},
   initialFeatureFlagsResolved = DEFAULT_RESOLVED_APPOINTMENTS_FEATURE_FLAGS,
+  reportsContext = null,
+  referralsDashboard = null,
+  referralsProgrammeAvailable = false,
 }: SettingsViewProps) {
   const router = useRouter();
   const pathname = usePathname() ?? '/dashboard/settings';
@@ -1086,10 +1116,10 @@ function SettingsViewInner({
   const linkedAccountsAvailable =
     isAdmin && !isRestaurantTableProductTier(initialVenue?.pricing_tier ?? null);
   const [selectedTab, setSelectedTab] = useState<TabKey>(() =>
-    resolveInitialTab(initialTab, isAdmin, linkedAccountsAvailable),
+    resolveInitialTab(initialTab, isAdmin, linkedAccountsAvailable, referralsProgrammeAvailable),
   );
   const [visitedTabs, setVisitedTabs] = useState<Set<TabKey>>(() => {
-    const initial = resolveInitialTab(initialTab, isAdmin, linkedAccountsAvailable);
+    const initial = resolveInitialTab(initialTab, isAdmin, linkedAccountsAvailable, referralsProgrammeAvailable);
     const tabs = new Set<TabKey>([initial]);
     if (planCheckoutReturn) tabs.add('plan');
     return tabs;
@@ -1105,9 +1135,11 @@ function SettingsViewInner({
       TABS.filter((x) => {
         if (x.key === 'booking-settings' && !isAdmin) return false;
         if (x.key === 'linked-accounts' && !linkedAccountsAvailable) return false;
+        if (x.key === 'reports' && !isAdmin) return false;
+        if (x.key === 'refer-earn' && (!isAdmin || !referralsProgrammeAvailable)) return false;
         return true;
       }),
-    [isAdmin, linkedAccountsAvailable],
+    [isAdmin, linkedAccountsAvailable, referralsProgrammeAvailable],
   );
   const tabBarTabs = useMemo(
     (): { id: TabKey; label: string; description?: string }[] =>
@@ -1149,13 +1181,18 @@ function SettingsViewInner({
   useEffect(() => {
     const onPopState = () => {
       const params = new URLSearchParams(window.location.search);
-      const tab = resolveInitialTab(params.get('tab') ?? undefined, isAdmin, linkedAccountsAvailable);
+      const tab = resolveInitialTab(
+        params.get('tab') ?? undefined,
+        isAdmin,
+        linkedAccountsAvailable,
+        referralsProgrammeAvailable,
+      );
       setSelectedTab(tab);
       markTabVisited(tab);
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
-  }, [isAdmin, linkedAccountsAvailable, markTabVisited]);
+  }, [isAdmin, linkedAccountsAvailable, referralsProgrammeAvailable, markTabVisited]);
 
   useLayoutEffect(() => {
     if (skipScrollOnTabChangeRef.current) {
@@ -1218,7 +1255,13 @@ function SettingsViewInner({
     if (raw === 'linked-accounts' && !linkedAccountsAvailable) {
       queueMicrotask(() => replaceWithTab('profile'));
     }
-  }, [isAdmin, linkedAccountsAvailable, searchParams, replaceWithTab]);
+    if (raw === 'reports' && !isAdmin) {
+      queueMicrotask(() => replaceWithTab('profile'));
+    }
+    if (raw === 'refer-earn' && (!isAdmin || !referralsProgrammeAvailable)) {
+      queueMicrotask(() => replaceWithTab('profile'));
+    }
+  }, [isAdmin, linkedAccountsAvailable, referralsProgrammeAvailable, searchParams, replaceWithTab]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -1571,6 +1614,26 @@ function SettingsViewInner({
               enabledModels={normalizeEnabledModels(venue.enabled_models, (bookingModel as BookingModel) ?? 'table_reservation')}
               pricingTier={venue.pricing_tier ?? null}
             />
+        ) : null}
+
+        {isAdmin && reportsContext && visitedTabs.has('reports') && selectedTab === 'reports' ? (
+          <div className="space-y-6">
+            <SmsUsageBanner />
+            <ReportsView
+              bookingModel={reportsContext.bookingModel}
+              terminology={reportsContext.terminology}
+              venueId={reportsContext.venueId}
+              pricingTier={reportsContext.pricingTier}
+              subTabQueryKey="reportsTab"
+            />
+          </div>
+        ) : null}
+
+        {referralsProgrammeAvailable &&
+        referralsDashboard &&
+        visitedTabs.has('refer-earn') &&
+        selectedTab === 'refer-earn' ? (
+          <ReferralsDashboardContent data={referralsDashboard} />
         ) : null}
 
         {linkedAccountsAvailable && visitedTabs.has('linked-accounts') && selectedTab === 'linked-accounts' ? (

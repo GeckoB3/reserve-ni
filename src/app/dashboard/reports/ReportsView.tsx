@@ -237,9 +237,20 @@ export interface ReportsViewProps {
   venueId: string;
   /** Fallback before SWR resolves (matches `venues.pricing_tier`). */
   pricingTier?: string | null;
+  /**
+   * Query param for Overview / Clients sub-tabs. Use `reportsTab` when embedded in Settings
+   * (`?tab=reports`) so it does not clash with the settings tab key.
+   */
+  subTabQueryKey?: string;
 }
 
-export function ReportsView({ bookingModel, terminology, venueId, pricingTier = null }: ReportsViewProps) {
+export function ReportsView({
+  bookingModel,
+  terminology,
+  venueId,
+  pricingTier = null,
+  subTabQueryKey = 'tab',
+}: ReportsViewProps) {
   const searchParams = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
@@ -272,18 +283,18 @@ export function ReportsView({ bookingModel, terminology, venueId, pricingTier = 
     [data?.pricing_tier, data?.enabled_models, pricingTier, resolvedBookingModel],
   );
   const [exportFlash, setExportFlash] = useState<ExportFlash | null>(null);
-  const activeTab = searchParams.get('tab') === 'clients' ? 'clients' : 'overview';
+  const activeTab = searchParams.get(subTabQueryKey) === 'clients' ? 'clients' : 'overview';
   const recharts = useDeferredRecharts(activeTab === 'overview' && Boolean(data));
 
   const setActiveTab = useCallback(
     (tab: 'overview' | 'clients') => {
       const p = new URLSearchParams(searchParams.toString());
-      if (tab === 'clients') p.set('tab', 'clients');
-      else p.delete('tab');
+      if (tab === 'clients') p.set(subTabQueryKey, 'clients');
+      else p.delete(subTabQueryKey);
       const qs = p.toString();
       router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
     },
-    [pathname, router, searchParams],
+    [pathname, router, searchParams, subTabQueryKey],
   );
 
   const dismissExportFlashSoon = useCallback(() => {
