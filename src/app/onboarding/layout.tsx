@@ -7,7 +7,10 @@ import { hasActiveVenueSupportSession } from '@/lib/support-session-server';
 import { resolveActiveBookingModels } from '@/lib/booking/active-models';
 import { isAppointmentPlanTier } from '@/lib/tier-enforcement';
 import { getVenueStaff } from '@/lib/venue-auth';
-import { ONBOARDING_SHELL_MAX_WIDTH_CLASS } from '@/lib/onboarding/layout-constants';
+import {
+  ONBOARDING_LAYOUT_MAX_WIDTH_CLASS,
+  ONBOARDING_SHELL_MAX_WIDTH_CLASS,
+} from '@/lib/onboarding/layout-constants';
 
 export default async function OnboardingLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient();
@@ -69,8 +72,10 @@ export default async function OnboardingLayout({ children }: { children: React.R
           </div>
         </div>
       </nav>
-      <main className="flex w-full min-w-0 flex-1 items-start justify-center overflow-x-hidden px-3 pb-10 pt-8 sm:px-4 sm:py-16">
-        {children}
+      <main className="flex w-full min-w-0 flex-1 flex-col items-center overflow-x-hidden px-3 pb-10 pt-8 sm:px-4 sm:py-16">
+        <div className={`box-border w-full min-w-0 shrink-0 ${ONBOARDING_LAYOUT_MAX_WIDTH_CLASS}`}>
+          {children}
+        </div>
       </main>
     </div>
   );

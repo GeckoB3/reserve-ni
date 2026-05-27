@@ -60,11 +60,8 @@ import {
   syncedMinBookingMinutesFromSlot,
 } from '@/lib/booking/resource-booking-defaults';
 import { SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE } from '@/lib/subscription-cancellation-copy';
-import {
-  ONBOARDING_CARD_PADDING_CLASS,
-  ONBOARDING_SHELL_MAX_WIDTH_CLASS,
-  onboardingShellMaxWidthClass,
-} from '@/lib/onboarding/layout-constants';
+import { ONBOARDING_CARD_PADDING_CLASS } from '@/lib/onboarding/layout-constants';
+import { OnboardingShell } from '@/components/onboarding/OnboardingShell';
 
 type Currency = 'GBP' | 'EUR';
 
@@ -2271,19 +2268,19 @@ export default function OnboardingPage() {
 
   if (loading) {
     return (
-      <div className={`mx-auto w-full min-w-0 ${ONBOARDING_SHELL_MAX_WIDTH_CLASS}`}>
+      <OnboardingShell>
         <div className="flex min-h-[60vh] items-center justify-center">
           <div className="h-10 w-10 animate-spin rounded-full border-4 border-brand-200 border-t-brand-600" />
         </div>
-      </div>
+      </OnboardingShell>
     );
   }
 
   if (!venue) {
     return (
-      <div className={`mx-auto w-full min-w-0 text-center text-slate-500 ${ONBOARDING_SHELL_MAX_WIDTH_CLASS}`}>
-        <p>Unable to load your venue. Please try refreshing.</p>
-      </div>
+      <OnboardingShell>
+        <p className="text-center text-slate-500">Unable to load your venue. Please try refreshing.</p>
+      </OnboardingShell>
     );
   }
 
@@ -2299,10 +2296,8 @@ export default function OnboardingPage() {
     'r_dashboard',
   ]);
 
-  const shellMaxWidthClass = onboardingShellMaxWidthClass(currentStepKey);
-
   return (
-    <div className={`mx-auto w-full min-w-0 ${shellMaxWidthClass}`}>
+    <OnboardingShell stepKey={currentStepKey}>
       {/* Progress */}
       <div className="mb-6 sm:mb-8">
         <div className="mb-2 flex flex-col gap-1 text-xs font-medium text-slate-400 sm:flex-row sm:items-center sm:justify-between">
@@ -4607,6 +4602,6 @@ export default function OnboardingPage() {
           </div>
         </div>
       )}
-    </div>
+    </OnboardingShell>
   );
 }
