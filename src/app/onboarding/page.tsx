@@ -60,6 +60,11 @@ import {
   syncedMinBookingMinutesFromSlot,
 } from '@/lib/booking/resource-booking-defaults';
 import { SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE } from '@/lib/subscription-cancellation-copy';
+import {
+  ONBOARDING_CARD_PADDING_CLASS,
+  ONBOARDING_SHELL_MAX_WIDTH_CLASS,
+  onboardingShellMaxWidthClass,
+} from '@/lib/onboarding/layout-constants';
 
 type Currency = 'GBP' | 'EUR';
 
@@ -2266,15 +2271,17 @@ export default function OnboardingPage() {
 
   if (loading) {
     return (
-      <div className="flex min-h-[60vh] items-center justify-center">
-        <div className="h-10 w-10 animate-spin rounded-full border-4 border-brand-200 border-t-brand-600" />
+      <div className={`mx-auto w-full min-w-0 ${ONBOARDING_SHELL_MAX_WIDTH_CLASS}`}>
+        <div className="flex min-h-[60vh] items-center justify-center">
+          <div className="h-10 w-10 animate-spin rounded-full border-4 border-brand-200 border-t-brand-600" />
+        </div>
       </div>
     );
   }
 
   if (!venue) {
     return (
-      <div className="text-center text-slate-500">
+      <div className={`mx-auto w-full min-w-0 text-center text-slate-500 ${ONBOARDING_SHELL_MAX_WIDTH_CLASS}`}>
         <p>Unable to load your venue. Please try refreshing.</p>
       </div>
     );
@@ -2292,32 +2299,10 @@ export default function OnboardingPage() {
     'r_dashboard',
   ]);
 
-  const wideOnboardingStep =
-    currentStepKey === 'welcome' ||
-    currentStepKey === 'dashboard' ||
-    currentStepKey === 'first_event' ||
-    currentStepKey === 'stripe_onboarding' ||
-    currentStepKey === 'r_welcome' ||
-    currentStepKey === 'r_services' ||
-    currentStepKey === 'r_table_mode' ||
-    currentStepKey === 'r_dashboard' ||
-    (currentStepKey === 'hours' &&
-      (isAppointmentsPlanVenue || isUnifiedSchedulingVenue(venue.booking_model))) ||
-    (currentStepKey === 'services' && isUnifiedSchedulingVenue(venue.booking_model)) ||
-    currentStepKey === 'classes' ||
-    currentStepKey === 'resources';
-
-  const serviceSetupOnboardingStep = currentStepKey === 'r_services';
-  const extraWideOnboardingStep = currentStepKey === 'r_table_setup' || serviceSetupOnboardingStep;
-  const onboardingWidthClass = extraWideOnboardingStep
-    ? 'max-w-7xl'
-    : wideOnboardingStep
-      ? 'max-w-3xl'
-      : 'max-w-xl';
-  const onboardingCardPaddingClass = extraWideOnboardingStep ? 'p-4 sm:p-6' : 'p-4 sm:p-8';
+  const shellMaxWidthClass = onboardingShellMaxWidthClass(currentStepKey);
 
   return (
-    <div className={`w-full min-w-0 max-w-full ${onboardingWidthClass}`}>
+    <div className={`mx-auto w-full min-w-0 ${shellMaxWidthClass}`}>
       {/* Progress */}
       <div className="mb-6 sm:mb-8">
         <div className="mb-2 flex flex-col gap-1 text-xs font-medium text-slate-400 sm:flex-row sm:items-center sm:justify-between">
@@ -2341,7 +2326,7 @@ export default function OnboardingPage() {
       </div>
 
       <div
-        className={`min-w-0 max-w-full overflow-x-hidden break-words rounded-2xl border border-slate-200 bg-white shadow-sm [&_button]:max-w-full [&_input]:max-w-full [&_input]:min-w-0 [&_select]:max-w-full [&_select]:min-w-0 [&_textarea]:max-w-full [&_textarea]:min-w-0 ${onboardingCardPaddingClass}`}
+        className={`min-w-0 overflow-x-hidden break-words rounded-2xl border border-slate-200 bg-white shadow-sm [&_button]:max-w-full [&_input]:max-w-full [&_input]:min-w-0 [&_select]:max-w-full [&_select]:min-w-0 [&_textarea]:max-w-full [&_textarea]:min-w-0 ${ONBOARDING_CARD_PADDING_CLASS}`}
       >
         {error && (
           <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
