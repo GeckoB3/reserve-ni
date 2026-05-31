@@ -16,6 +16,10 @@ import type { VenueSettings } from './types';
 import { ProfileSection } from './sections/ProfileSection';
 import { VenueProfileSection } from './sections/VenueProfileSection';
 import { BookingPageSection } from './sections/BookingPageSection';
+import {
+  BOOKING_PAGE_EYEBROW_CLASS,
+  BOOKING_PAGE_SECTION_HEADING_CLASS,
+} from './sections/booking-page-settings-typography';
 import { OpeningHoursSection } from './sections/OpeningHoursSection';
 import { StaffSection } from './sections/StaffSection';
 import { CommunicationTemplatesSection } from './sections/CommunicationTemplatesSection';
@@ -1367,7 +1371,7 @@ function SettingsViewInner({
 
   return (
     <>
-      <div ref={settingsScrollAnchorRef} className="space-y-8">
+      <div ref={settingsScrollAnchorRef} data-settings-scroll-anchor className="space-y-8">
       <header className="space-y-5">
         <PageHeader
           eyebrow="Venue"
@@ -1536,6 +1540,7 @@ function SettingsViewInner({
         {visitedTabs.has('booking-page') && selectedTab === 'booking-page' ? (
         <div className="space-y-10">
           <SettingsProfileGroup
+            brandHeadings
             eyebrow="Guest-facing page"
             title="URL & branding"
             description="Your public booking page address, logo, and cover photo — what guests see before they book."
@@ -1549,6 +1554,7 @@ function SettingsViewInner({
           </SettingsProfileGroup>
 
           <SettingsProfileGroup
+            brandHeadings
             id="booking-widget"
             eyebrow="Share & embed"
             title="Website widget & QR code"
@@ -1557,7 +1563,9 @@ function SettingsViewInner({
             <SectionCard elevated>
               <SectionCard.Header
                 eyebrow="Embeds"
+                eyebrowClassName={BOOKING_PAGE_EYEBROW_CLASS}
                 title="Booking widget & QR code"
+                titleClassName={`mt-1 ${BOOKING_PAGE_SECTION_HEADING_CLASS}`}
                 description="Copy the iframe snippet for your site and download a QR code that opens your public booking page."
               />
               <SectionCard.Body className="pt-0">
