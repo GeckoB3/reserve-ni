@@ -122,7 +122,7 @@ export default function Home() {
             <div className="aspect-video">
               <iframe
                 className="h-full w-full"
-                src="https://www.youtube-nocookie.com/embed/o6QeXkH0q-0?rel=0"
+                src="https://www.youtube-nocookie.com/embed/o6QeXkH0q-0?rel=0&vq=hd720"
                 title="Resneo promo video"
                 loading="lazy"
                 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
