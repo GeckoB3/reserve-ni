@@ -1764,6 +1764,28 @@ tier gating, card visual distinction across every render path, read-only-vs-edit
 time_only PII suppression, §18 read scope, audit + §17 notify on every cross-venue write, accepted-
 only data exposure, month/realtime/refresh. Typecheck/lint clean; **331 unit tests green**;
 calendar + Filter panel ("No linked venues yet") preview-verified.
+(17) **Linked-calendar opening hours + after-hours bookings + chip removal (post-go-live review).**
+With two venues genuinely linked (full-mutual), a live review surfaced four items, all fixed:
+**(a) Linked columns now reflect the LINKED venue's opening hours.** Previously a linked column
+drew no closed-hours shading (it inherited none from the viewing venue). `buildLinkedColumnClosureBlocks`
+derives "closed" blocks from the linked venue's own `working_hours` template (in the linked venue's
+timezone) over the grid window, so e.g. a venue that opens an hour later shows that earlier hour
+greyed on its column (native-grid editable path; unit-tested). **(b) Walk-ins past closing are
+allowed.** The walk-in create path now passes `allowOutsideHours` to `validateAppointmentCustomInterval`,
+so a walk-in taken after close (any duration) is no longer 409'd "Outside working hours". **(c) Staff
+can move/extend a booking past opening hours.** A new `allowOutsideHours` option on the interval
+validators (threaded through `validateAppointmentModificationInterval` → the `[id]` PATCH via an
+`allow_outside_hours` flag) drops only the hours gates (breaks/blocks/overlap/duration still apply).
+Client-side, a drag-move outside hours is now an **amber "outside opening hours" warning** (allowed),
+distinct from a red **conflict** (blocked); resize can extend up to ~2h past the grid close (capped at
+midnight) and flags the same warning; both send `allow_outside_hours`. **(d) Removed the per-card
+linked-venue name chip** on native-grid booking bars — it overlapped the action buttons on short bars
+and was redundant (the column header already reads "Linked · {venue}"); the dashed/hatch treatment
+still marks linked cards, and the week-strip chip (where columns are days) + the read-only lock badge
+remain. Typecheck/lint clean; 1175 unit tests green (incl. new closure-block + outside-hours bypass
+tests); production build clean; live calendar render verified against the dev plus1↔light3 link.
+Note: linked-column shading on the *read-only* `LinkedDayColumn` (time-only / no-edit links) is a
+small follow-up; the full-mutual (editable) path is covered.
 
 A linked-in entity must be instantly distinguishable from own data **without relying on colour
 alone** (WCAG 1.4.1):

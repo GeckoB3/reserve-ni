@@ -970,7 +970,9 @@ export async function POST(request: NextRequest) {
           timeStr,
           endHHmmFromDuration(timeStr, parsed.data.duration_minutes),
           undefined,
-          { allowBookingOverlap: true },
+          // Walk-ins are deliberately allowed past opening hours (e.g. a walk-in
+          // taken after closing). Keep the overlap/duration checks, drop the hours gate.
+          { allowBookingOverlap: true, allowOutsideHours: true },
         );
         if (!intervalCheck.ok) {
           return NextResponse.json(

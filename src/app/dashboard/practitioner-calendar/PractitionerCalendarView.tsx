@@ -107,6 +107,7 @@ import {
 } from '@/lib/calendar/schedule-blocks-grouping';
 import { buildPractitionerBreakBlocks } from '@/lib/calendar/practitioner-break-blocks';
 import {
+  buildLinkedColumnClosureBlocks,
   buildPractitionerScheduleClosureBlocks,
   buildVenueScheduleClosureBlocks,
   isScheduleClosureBlockType,
@@ -1611,7 +1612,7 @@ function DragBookingPreview({
 }: {
   booking: Booking;
   /** Target time / column while dragging; shown on the preview card (not a global banner). */
-  movePreview?: { label: string; invalid: boolean } | null;
+  movePreview?: { label: string; invalid: boolean; outsideHours?: boolean } | null;
 }) {
   const p = bookingCalendarBlockPalette(booking);
   return (
@@ -1622,7 +1623,11 @@ function DragBookingPreview({
       {movePreview ? (
         <div
           className={`border-b border-black/10 px-2 py-1 text-center text-[10px] font-bold leading-snug ${
-            movePreview.invalid ? 'bg-red-600 text-white' : 'bg-slate-900 text-white'
+            movePreview.invalid
+              ? 'bg-red-600 text-white'
+              : movePreview.outsideHours
+                ? 'bg-amber-500 text-white'
+                : 'bg-slate-900 text-white'
           }`}
           aria-live="polite"
         >
@@ -1686,7 +1691,7 @@ function DragBlockPreview({
   movePreview,
 }: {
   block: CalendarBlock;
-  movePreview?: { label: string; invalid: boolean } | null;
+  movePreview?: { label: string; invalid: boolean; outsideHours?: boolean } | null;
 }) {
   const heading = calendarBlockHeading(block);
   const label = block.reason?.trim() ? `${heading}: ${block.reason.trim()}` : heading;
@@ -1702,7 +1707,11 @@ function DragBlockPreview({
       {movePreview ? (
         <div
           className={`border-b border-black/10 px-2 py-1 text-center text-[10px] font-bold leading-snug ${
-            movePreview.invalid ? 'bg-red-600 text-white' : 'bg-slate-900 text-white'
+            movePreview.invalid
+              ? 'bg-red-600 text-white'
+              : movePreview.outsideHours
+                ? 'bg-amber-500 text-white'
+                : 'bg-slate-900 text-white'
           }`}
           aria-live="polite"
         >
@@ -2273,12 +2282,18 @@ export function PractitionerCalendarView({
   const [dragExcludeBookingId, setDragExcludeBookingId] = useState<string | null>(null);
   const [dragBlock, setDragBlock] = useState<CalendarBlock | null>(null);
   const [dragExcludeBlockId, setDragExcludeBlockId] = useState<string | null>(null);
-  const [calendarDragPreview, setCalendarDragPreview] = useState<{ label: string; invalid: boolean } | null>(null);
+  const [calendarDragPreview, setCalendarDragPreview] = useState<{
+    label: string;
+    invalid: boolean;
+    /** Allowed, but lands outside opening hours — shown as an amber warning, not blocked. */
+    outsideHours?: boolean;
+  } | null>(null);
   const [calendarDragTarget, setCalendarDragTarget] = useState<{
     pracId: string;
     startMin: number;
     endMin: number;
     invalid: boolean;
+    outsideHours?: boolean;
   } | null>(null);
   const calendarDragTargetRef = useRef<typeof calendarDragTarget>(null);
   const [resizeVisual, setResizeVisual] = useState<{ bookingId: string; deltaYPx: number } | null>(null);
@@ -3712,7 +3727,13 @@ export function PractitionerCalendarView({
     }
   }
 
-  async function patchBookingMove(booking: Booking, newDate: string, newTime: string, newPracId: string) {
+  async function patchBookingMove(
+    booking: Booking,
+    newDate: string,
+    newTime: string,
+    newPracId: string,
+    opts?: { allowOutsideHours?: boolean },
+  ) {
     const prev = { ...booking };
     const realPracId = resolveLinkedGridPractitionerIdForPatch(newPracId);
     const linkedOwnerVenueId = booking._linkedOwnerVenueId;
@@ -3773,6 +3794,7 @@ export function PractitionerCalendarView({
             practitioner_id: realPracId,
             booking_end_time: bookingEndForStore,
             allow_manual_overlap: true,
+            allow_outside_hours: opts?.allowOutsideHours === true,
             defer_modification_guest_notification: true,
           }),
         });
@@ -3832,7 +3854,7 @@ export function PractitionerCalendarView({
   }
 
   const patchBookingResize = useCallback(
-    async (booking: Booking, newEndHm: string) => {
+    async (booking: Booking, newEndHm: string, opts?: { allowOutsideHours?: boolean }) => {
       const prev = { ...booking };
       const linkedOwnerVenueId = booking._linkedOwnerVenueId;
       const startHm = booking.booking_time.slice(0, 5);
@@ -3885,6 +3907,7 @@ export function PractitionerCalendarView({
             body: JSON.stringify({
               booking_end_time: bookingEndForStore,
               allow_manual_overlap: true,
+              allow_outside_hours: opts?.allowOutsideHours === true,
               defer_modification_guest_notification: true,
             }),
           });
@@ -4402,23 +4425,25 @@ export function PractitionerCalendarView({
       targetStartMins,
       serviceMapForBooking(b),
     );
-    const invalid =
-      targetStartMins < dayStartMin ||
-      endMin > dayEndMin ||
-      appointmentWindowCollides(
-        targetStartMins,
-        endMin,
-        pracId,
-        dateStr,
-        b.id,
-        allGridBookings,
-        displayBlocks,
-        serviceMapForBooking,
-        pracClassBlocks,
-        pracEventBlocks,
-        resourceParentById,
-        { ignoreBookings: true, candidatePractitionerBusy: candBusy },
-      );
+    // Landing before open / after close is allowed (staff can book past opening
+    // hours) — surfaced as an amber warning, not blocked. Only a genuine
+    // conflict (a block/class/event/busy overlap) blocks the move.
+    const outsideHours = targetStartMins < dayStartMin || endMin > dayEndMin;
+    const conflict = appointmentWindowCollides(
+      targetStartMins,
+      endMin,
+      pracId,
+      dateStr,
+      b.id,
+      allGridBookings,
+      displayBlocks,
+      serviceMapForBooking,
+      pracClassBlocks,
+      pracEventBlocks,
+      resourceParentById,
+      { ignoreBookings: true, candidatePractitionerBusy: candBusy },
+    );
+    const invalid = conflict;
     const pracName =
       linkedNativeGridColumnByKey.get(pracId)?.practitionerName ??
       filteredPractitioners.find((p) => p.id === pracId)?.name ??
@@ -4426,8 +4451,8 @@ export function PractitionerCalendarView({
     const timeLabel = minutesToTime(targetStartMins);
     const sameColumn = resolveBookingColumnId(b, resourceParentById) === pracId && b.booking_date === dateStr;
     const label = sameColumn ? `Move to ${timeLabel}` : `Move to ${pracName} · ${timeLabel}`;
-    setCalendarDragPreview({ label, invalid });
-    setCalendarDragTarget({ pracId, startMin: targetStartMins, endMin, invalid });
+    setCalendarDragPreview({ label, invalid, outsideHours });
+    setCalendarDragTarget({ pracId, startMin: targetStartMins, endMin, invalid, outsideHours });
   }
 
   function handleDragCancel(_e: DragCancelEvent) {
@@ -4484,7 +4509,11 @@ export function PractitionerCalendarView({
       addToast('A booking can only be moved within the same venue.', 'error');
       return;
     }
-    void patchBookingMove(b, dateStr, newTime, pracId);
+    const movedOutsideHours = target?.outsideHours === true;
+    if (movedOutsideHours) {
+      addToast('Moved outside opening hours.', 'info');
+    }
+    void patchBookingMove(b, dateStr, newTime, pracId, { allowOutsideHours: movedOutsideHours });
   }
 
   const beginAppointmentResize = useCallback(
@@ -4500,7 +4529,11 @@ export function PractitionerCalendarView({
       const dur0 = bookingDurationMinutes(booking, serviceMapForBooking(booking));
       const endM0 = startM + dur0;
       const minEnd = startM + SLOT_MINUTES;
-      const gridEndMax = endHour * 60;
+      // The booking may be extended past the grid's close (staff can run past
+      // opening hours) — allow up to ~2h beyond, capped at midnight. The portion
+      // beyond `gridCloseMin` counts as outside opening hours.
+      const gridCloseMin = endHour * 60;
+      const gridEndMax = Math.min(24 * 60, gridCloseMin + 120);
       const target = downEvent.currentTarget;
 
       setResizeVisual({ bookingId: booking.id, deltaYPx: 0 });
@@ -4559,18 +4592,22 @@ export function PractitionerCalendarView({
         setResizeVisual(null);
         setResizePreviewEnd(null);
         if (committedEndMin === endM0) return;
+        const extendedOutsideHours = committedEndMin > gridCloseMin;
+        if (extendedOutsideHours) {
+          addToast('Extended outside opening hours.', 'info');
+        }
         justResizedBookingIdRef.current = booking.id;
         window.setTimeout(() => {
           if (justResizedBookingIdRef.current === booking.id) justResizedBookingIdRef.current = null;
         }, 220);
-        void patchBookingResize(booking, endStr);
+        void patchBookingResize(booking, endStr, { allowOutsideHours: extendedOutsideHours });
       };
 
       window.addEventListener('pointermove', onMove, { passive: false });
       window.addEventListener('pointerup', finish);
       window.addEventListener('pointercancel', finish);
     },
-    [endHour, patchBookingResize, serviceMapForBooking],
+    [addToast, endHour, patchBookingResize, serviceMapForBooking],
   );
 
   const beginBlockResize = useCallback(
@@ -5869,7 +5906,19 @@ export function PractitionerCalendarView({
                       (b) => b.calendar_id === pracId && b.date === date,
                     );
                 const pracBlocks = isLinkedCol
-                  ? []
+                  ? // §8.2 — a linked column reflects the LINKED venue's own opening
+                    // hours: shade the hours it is closed (e.g. if it opens later than
+                    // this venue) from its working-hours template in its own timezone.
+                    (linkedCol
+                      ? (buildLinkedColumnClosureBlocks({
+                          columnId: pracId,
+                          workingHours: linkedCol.workingHours,
+                          dateYmd: date,
+                          timeZone: linkedCol.venueTimezone || venueTimezone,
+                          gridStartHour: startHour,
+                          gridEndHour: endHour,
+                        }) as unknown as CalendarBlock[])
+                      : [])
                   : displayBlocks.filter(
                       (bl) =>
                         columnIdForBlock(bl) === pracId &&
@@ -5955,8 +6004,10 @@ export function PractitionerCalendarView({
                         <div
                           className={`pointer-events-none absolute left-0 right-0 z-[8] rounded-lg border-x-2 border-b-2 border-t-2 ${
                             calendarDragTarget.invalid
-                              ? 'border-amber-500 bg-amber-200/35 ring-1 ring-inset ring-amber-400/50'
-                              : 'border-emerald-500 bg-emerald-200/35 ring-1 ring-inset ring-emerald-400/50'
+                              ? 'border-red-500 bg-red-200/35 ring-1 ring-inset ring-red-400/50'
+                              : calendarDragTarget.outsideHours
+                                ? 'border-amber-500 bg-amber-200/35 ring-1 ring-inset ring-amber-400/50'
+                                : 'border-emerald-500 bg-emerald-200/35 ring-1 ring-inset ring-emerald-400/50'
                           }`}
                           style={{
                             top: ((calendarDragTarget.startMin - startHour * 60) / SLOT_MINUTES) * SLOT_HEIGHT,
@@ -6261,31 +6312,9 @@ export function PractitionerCalendarView({
                                   })}
                                 >
                                   <CalendarBookingStatusStripe palette={palette} />
-                                  {b._linkedColumnKey ? (
-                                    <span
-                                      className="linked-chip pointer-events-none absolute right-1 top-1 z-[5] inline-flex max-w-[78%] items-center gap-0.5 rounded-full px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide"
-                                      title={`Linked from ${linkedVenueById.get(b._linkedOwnerVenueId ?? '')?.venueName ?? 'another venue'}`}
-                                    >
-                                      <svg
-                                        aria-hidden
-                                        viewBox="0 0 24 24"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        strokeWidth="2.4"
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        className="h-2.5 w-2.5 shrink-0"
-                                      >
-                                        <path d="M9 17H7A5 5 0 0 1 7 7h2" />
-                                        <path d="M15 7h2a5 5 0 0 1 0 10h-2" />
-                                        <path d="M8 12h8" />
-                                      </svg>
-                                      <span className="truncate">
-                                        {linkedVenueById.get(b._linkedOwnerVenueId ?? '')?.venueName ??
-                                          'Linked'}
-                                      </span>
-                                    </span>
-                                  ) : null}
+                                  {/* The source venue is shown in the column header ("Linked · {venue}"),
+                                      so no per-card venue chip here — it overlapped the action buttons
+                                      on short bars. The dashed/hatch treatment still marks it as linked. */}
                                   <BookingProcessingStrip b={b} serviceMap={serviceMapForBooking(b)} />
                                   {canDrag && handle.listeners && handle.attributes ? (
                                     <button

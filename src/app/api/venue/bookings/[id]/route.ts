@@ -1444,6 +1444,9 @@ export async function PATCH(
           body.appointment_service_id !== undefined ||
           body.service_item_id !== undefined
         );
+      // Staff moving/extending a booking past opening hours from the calendar
+      // (the UI shows an amber "outside opening hours" warning first).
+      const allowOutsideHoursCalendar = isAppointment && body.allow_outside_hours === true;
       const idLc = id.toLowerCase();
       const beforeEndHm =
         typeof (booking as { booking_end_time?: string | null }).booking_end_time === 'string'
@@ -1536,6 +1539,7 @@ export async function PATCH(
           processingTimeBlocksOverride:
             body.processing_time_blocks !== undefined ? body.processing_time_blocks : undefined,
           allowManualOverlap: allowManualCalendarOverlap,
+          allowOutsideHours: allowOutsideHoursCalendar,
         });
         if (!intervalResult.ok) {
           return NextResponse.json(
