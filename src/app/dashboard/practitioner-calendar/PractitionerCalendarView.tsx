@@ -1842,10 +1842,14 @@ const LinkedBookingCalendarBar = memo(function LinkedBookingCalendarBar({
   const statusPill = content.showStatus ? (
     <CalendarBookingStatusBadge b={statusBooking} palette={palette} />
   ) : null;
+  // Read-only when the link is time-only or this venue wasn't granted edit rights.
+  const readOnly = visibility === 'time_only' || !booking.editable || booking.status === 'Cancelled';
 
   if (variant === 'week-grid') {
     return (
       <div className="flex min-w-0 flex-col gap-1">
+        {/* §19.1 — week columns are days, so each card carries its source-venue chip. */}
+        <LinkedVenueChip venueName={venueName} readOnly={readOnly} />
         <div className="min-w-0">
           <div className="truncate font-bold">{content.name}</div>
           {content.service ? (
@@ -1865,7 +1869,7 @@ const LinkedBookingCalendarBar = memo(function LinkedBookingCalendarBar({
   return (
     <div
       className="group relative flex h-full min-h-0 flex-row items-stretch overflow-hidden rounded-2xl"
-      style={bookingCalendarBlockCardStyle(palette)}
+      style={bookingCalendarBlockCardStyle(palette, { linked: true })}
     >
       <CalendarBookingStatusStripe palette={palette} />
       <div
@@ -1884,9 +1888,72 @@ const LinkedBookingCalendarBar = memo(function LinkedBookingCalendarBar({
           density={cardDensity}
         />
       </div>
+      {readOnly ? (
+        <span
+          className="pointer-events-none absolute right-1.5 top-1.5 z-[4] inline-flex h-4 w-4 items-center justify-center rounded-full bg-white/75 text-slate-500 shadow-sm ring-1 ring-slate-900/5"
+          title={`View-only — ${venueName} hasn't granted edit rights for this booking.`}
+          aria-label={`Read-only linked booking from ${venueName}`}
+        >
+          <LinkedReadOnlyLockIcon />
+        </span>
+      ) : null}
     </div>
   );
 });
+
+/** Padlock glyph for read-only linked cards (§19.1 — a real icon, not an emoji). */
+function LinkedReadOnlyLockIcon({ className = 'h-2.5 w-2.5' }: { className?: string }) {
+  return (
+    <svg
+      aria-hidden
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <rect x="5" y="11" width="14" height="9" rx="2" />
+      <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+    </svg>
+  );
+}
+
+/**
+ * Source-venue chip for a linked booking card (§19.1): a link glyph + the venue
+ * name, with a padlock appended when the booking is read-only. Conveys "linked,
+ * and from whom" without relying on colour alone.
+ */
+function LinkedVenueChip({ venueName, readOnly }: { venueName: string; readOnly: boolean }) {
+  return (
+    <span
+      className="linked-chip inline-flex max-w-full items-center gap-1 self-start rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide"
+      title={
+        readOnly
+          ? `Linked from ${venueName} · view-only`
+          : `Linked from ${venueName}`
+      }
+    >
+      <svg
+        aria-hidden
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className="h-2.5 w-2.5 shrink-0"
+      >
+        <path d="M9 17H7A5 5 0 0 1 7 7h2" />
+        <path d="M15 7h2a5 5 0 0 1 0 10h-2" />
+        <path d="M8 12h8" />
+      </svg>
+      <span className="truncate">{venueName}</span>
+      {readOnly ? <LinkedReadOnlyLockIcon className="h-2.5 w-2.5 shrink-0" /> : null}
+    </span>
+  );
+}
 
 /**
  * One read-only day-grid column for a linked venue's practitioner (§8.2).
@@ -2153,6 +2220,10 @@ export function PractitionerCalendarView({
   );
   /** Linked-venue calendars (§8.2). Adjacent to the native pipeline, never merged. */
   const [linkedVenues, setLinkedVenues] = useState<LinkedVenueCalendar[]>([]);
+  /** §19.3 — true when the linked-calendar fetch failed, so we show a retry notice rather than a silent empty state. */
+  const [linkedLoadError, setLinkedLoadError] = useState(false);
+  /** True once the first linked-calendar fetch has resolved (so zero links shows "none" not a perpetual "Loading…"). */
+  const [linkedLoaded, setLinkedLoaded] = useState(false);
   /** Linked columns to show. `null` = all linked columns (default). */
   const [visibleLinkedColumnIds, setVisibleLinkedColumnIds] = useState<string[] | null>(null);
   const [linkedViewing, setLinkedViewing] = useState<
@@ -2861,6 +2932,7 @@ export function PractitionerCalendarView({
   const loadLinkedData = useCallback(async () => {
     if (!linkFeature) {
       setLinkedVenues([]);
+      setLinkedLoadError(false);
       return;
     }
     try {
@@ -2868,13 +2940,22 @@ export function PractitionerCalendarView({
       const params = from === to ? `date=${from}` : `from=${from}&to=${to}`;
       const res = await fetch(`/api/venue/linked-calendar?${params}`);
       if (!res.ok) {
+        // §19.3 — a load failure must be distinguishable from "no linked columns",
+        // not silently collapse to an empty calendar.
         setLinkedVenues([]);
+        setLinkedLoadError(true);
         return;
       }
       const json = (await res.json()) as { venues?: LinkedVenueCalendar[] };
       setLinkedVenues(json.venues ?? []);
+      setLinkedLoadError(false);
     } catch {
       setLinkedVenues([]);
+      setLinkedLoadError(true);
+    } finally {
+      // Mark the first load complete so a venue with zero links shows an explicit
+      // "no linked venues" state instead of a perpetual "Loading…" (§19.3).
+      setLinkedLoaded(true);
     }
   }, [linkFeature, listFromTo]);
 
@@ -4392,6 +4473,17 @@ export function PractitionerCalendarView({
     }
     if (!['Pending', 'Booked', 'Confirmed', 'Seated'].includes(b.status)) return;
     if (b.resource_id) return;
+    // A booking can only be moved within its OWN venue: a linked (other-venue)
+    // booking must stay in that venue's columns, and an own booking must not land
+    // on a linked column. Otherwise the move would PATCH a foreign practitioner /
+    // calendar id onto the booking. (The drop column's owning venue is the linked
+    // column's `venueId`, or this venue for a native column.)
+    const draggedOwnerVenueId = b._linkedOwnerVenueId ?? venueId;
+    const targetOwnerVenueId = linkedNativeGridColumnByKey.get(pracId)?.venueId ?? venueId;
+    if (draggedOwnerVenueId !== targetOwnerVenueId) {
+      addToast('A booking can only be moved within the same venue.', 'error');
+      return;
+    }
     void patchBookingMove(b, dateStr, newTime, pracId);
   }
 
@@ -4667,7 +4759,19 @@ export function PractitionerCalendarView({
           <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
             Linked venues
           </p>
-          {linkedColumns.length === 0 &&
+          {linkedLoadError ? (
+            // §19.3 — a load failure is visually distinct from "no linked columns".
+            <div className="flex items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5">
+              <span className="text-xs text-amber-800">Couldn’t load linked calendars.</span>
+              <button
+                type="button"
+                className="shrink-0 text-xs font-semibold text-amber-900 underline hover:no-underline"
+                onClick={() => void loadLinkedData()}
+              >
+                Retry
+              </button>
+            </div>
+          ) : linkedColumns.length === 0 &&
           visibleLinkedColumnIds !== null &&
           visibleLinkedColumnIds.length === 0 ? (
             <button
@@ -4678,7 +4782,11 @@ export function PractitionerCalendarView({
               Show linked calendars
             </button>
           ) : linkedColumns.length === 0 ? (
-            <p className="text-xs text-slate-500">Loading linked calendars…</p>
+            linkedLoaded ? (
+              <p className="text-xs text-slate-500">No linked venues yet.</p>
+            ) : (
+              <p className="text-xs text-slate-500">Loading linked calendars…</p>
+            )
           ) : (
           <div className="max-h-56 space-y-2 overflow-y-auto pr-1">
             <label className="flex cursor-pointer items-center gap-2 rounded-lg px-1 py-1.5 text-sm text-slate-800">
@@ -5491,10 +5599,15 @@ export function PractitionerCalendarView({
                                       linkedBookingStatusBooking(b, bookingRowOverlayForId(b.id)),
                                       bookingRowOverlayForId(b.id),
                                     ),
+                                    { linked: true },
                                   )}
                                   title={
                                     clickable
-                                      ? `Edit in ${col.venueName}`
+                                      ? linkedBookingUsesExpandedDetail(col)
+                                        ? b.editable
+                                          ? `Edit in ${col.venueName}`
+                                          : `View booking · ${col.venueName}`
+                                        : `View booking · ${col.venueName}`
                                       : `View detail · ${col.venueName}`
                                   }
                                 >
@@ -5805,16 +5918,26 @@ export function PractitionerCalendarView({
                             disabled={occ}
                             onEmptyClick={(ev, pid, dstr, t) => {
                               const linkedCol = linkedNativeGridColumnByKey.get(pid);
-                              if (linkedCol?.action === 'create_edit_cancel') {
-                                const v = linkedVenueById.get(linkedCol.venueId);
-                                if (v) {
-                                  setLinkedCreating({
-                                    venue: v,
-                                    practitionerId: linkedCol.practitionerId,
-                                    time: t,
-                                  });
-                                  return;
+                              if (linkedCol) {
+                                // A linked column must never fall through to the own-venue
+                                // slot menu (it would create a booking on the wrong venue).
+                                // Only a create grant may start a booking here.
+                                if (linkedCol.action === 'create_edit_cancel') {
+                                  const v = linkedVenueById.get(linkedCol.venueId);
+                                  if (v) {
+                                    setLinkedCreating({
+                                      venue: v,
+                                      practitionerId: linkedCol.practitionerId,
+                                      time: t,
+                                    });
+                                  }
+                                } else {
+                                  addToast(
+                                    `${linkedCol.venueName} hasn’t granted permission to create bookings on this calendar.`,
+                                    'info',
+                                  );
                                 }
+                                return;
                               }
                               setSlotMenu({
                                 pracId: pid,
@@ -6133,9 +6256,36 @@ export function PractitionerCalendarView({
                                   className={`group relative flex h-full min-h-0 flex-row items-stretch overflow-hidden rounded-2xl ${
                                     flash ? 'motion-safe:animate-pulse ring-2 ring-brand-400/60' : ''
                                   }`}
-                                  style={bookingCalendarBlockCardStyle(palette)}
+                                  style={bookingCalendarBlockCardStyle(palette, {
+                                    linked: Boolean(b._linkedColumnKey),
+                                  })}
                                 >
                                   <CalendarBookingStatusStripe palette={palette} />
+                                  {b._linkedColumnKey ? (
+                                    <span
+                                      className="linked-chip pointer-events-none absolute right-1 top-1 z-[5] inline-flex max-w-[78%] items-center gap-0.5 rounded-full px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide"
+                                      title={`Linked from ${linkedVenueById.get(b._linkedOwnerVenueId ?? '')?.venueName ?? 'another venue'}`}
+                                    >
+                                      <svg
+                                        aria-hidden
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeWidth="2.4"
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        className="h-2.5 w-2.5 shrink-0"
+                                      >
+                                        <path d="M9 17H7A5 5 0 0 1 7 7h2" />
+                                        <path d="M15 7h2a5 5 0 0 1 0 10h-2" />
+                                        <path d="M8 12h8" />
+                                      </svg>
+                                      <span className="truncate">
+                                        {linkedVenueById.get(b._linkedOwnerVenueId ?? '')?.venueName ??
+                                          'Linked'}
+                                      </span>
+                                    </span>
+                                  ) : null}
                                   <BookingProcessingStrip b={b} serviceMap={serviceMapForBooking(b)} />
                                   {canDrag && handle.listeners && handle.attributes ? (
                                     <button
@@ -6373,7 +6523,9 @@ export function PractitionerCalendarView({
                                 className={`group flex h-full min-h-0 flex-row items-stretch overflow-hidden rounded-2xl shadow-sm ring-1 ring-white/70 transition-shadow hover:shadow-xl hover:shadow-slate-900/12 focus-within:ring-2 focus-within:ring-brand-400/60 ${
                                   flash ? 'motion-safe:animate-pulse ring-2 ring-brand-400/60' : ''
                                 }`}
-                                style={bookingCalendarBlockCardStyle(clusterPalette)}
+                                style={bookingCalendarBlockCardStyle(clusterPalette, {
+                                  linked: Boolean(first._linkedColumnKey),
+                                })}
                                 title={serviceTitle || undefined}
                                 {...bindDetailPrefetchHandlers(first.id, prefetchBookingDetail)}
                               >
