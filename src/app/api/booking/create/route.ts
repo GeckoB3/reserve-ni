@@ -70,6 +70,8 @@ import { createRouteHandlerClient } from '@/lib/supabase/server';
 import { sumAvailableClassCreditsForClassType } from '@/lib/class-commerce/available-class-credits';
 import { consumeClassCreditsForBooking } from '@/lib/class-commerce/consume-class-credits';
 import { formatGuestDisplayName, normaliseGuestNamePart } from '@/lib/guests/name';
+import { resolveCollectiveServiceOverride } from '@/lib/linked-accounts/collective-booking-override';
+import { resolveCombinedBookingTarget } from '@/lib/linked-accounts/collective-booking-bridge';
 import {
   completeWaitlistEntryAfterGuestBooking,
   loadActiveWaitlistOfferForGuestAccess,
@@ -119,6 +121,8 @@ const createBookingSchema = z.object({
   marketing_consent: z.boolean().optional(),
   /** §7.7: set when the booking was routed through a venue collective page (attribution only). */
   collective_id: z.string().uuid().optional(),
+  /** Combined page: the offering that produced this booking (price/duration resolved server-side). */
+  collective_service_item_id: z.string().uuid().optional(),
   /** Active waitlist offer — bypasses guest min-notice for offered slots. */
   waitlist_offer_id: z.string().uuid().optional(),
   /** Optional add-ons stacked on the service at booking time. */
@@ -152,6 +156,34 @@ export async function POST(request: NextRequest) {
     }
 
     venueIdForLog = parsed.data.venue_id;
+
+    // Combined booking page (plan §22): the customer flow targets the synthetic
+    // collective venue (venue_id === collective_id). Resolve the chosen
+    // (offering, calendar) to the real owning venue + source service so the
+    // booking is created normally and the effective price/duration override is
+    // applied via collective_service_item_id.
+    if (
+      parsed.data.collective_id &&
+      parsed.data.venue_id === parsed.data.collective_id &&
+      parsed.data.practitioner_id &&
+      parsed.data.appointment_service_id
+    ) {
+      const target = await resolveCombinedBookingTarget(getSupabaseAdminClient(), {
+        collectiveId: parsed.data.collective_id,
+        offeringId: parsed.data.appointment_service_id,
+        calendarId: parsed.data.practitioner_id,
+      });
+      if (!target) {
+        return NextResponse.json(
+          { error: 'This booking option is no longer available.' },
+          { status: 409 },
+        );
+      }
+      parsed.data.collective_service_item_id = parsed.data.appointment_service_id;
+      parsed.data.venue_id = target.venueId;
+      parsed.data.appointment_service_id = target.sourceServiceId;
+      venueIdForLog = target.venueId;
+    }
 
     const {
       venue_id,
@@ -613,9 +645,14 @@ async function handleNonTableBooking(
     event_session_id,
     capacity_used,
     collective_id,
+    collective_service_item_id,
     waitlist_offer_id,
     addons: requestedAddons,
   } = data;
+  // Resolved server-side from the approved provider row when this is a combined-
+  // page booking (never trusted from the client). Affects slot length, deposit
+  // and attribution. Null for ordinary bookings. Set in the unified branch.
+  let collectiveOverride: Awaited<ReturnType<typeof resolveCollectiveServiceOverride>> = null;
   // Validated + canonical-ordered addons (resolved against the chosen service).
   let chosenAddonSnapshots: ReturnType<typeof buildAddonSnapshots> = [];
   let chosenAddonTotals = { total_price_pence: 0, total_duration_minutes: 0 };
@@ -841,6 +878,26 @@ async function handleNonTableBooking(
       });
     }
 
+    // Combined booking page (plan §6.3): resolve the server-side price/duration
+    // override from the approved provider row and inject the effective duration
+    // so the slot check reserves the right length. No-op for ordinary bookings.
+    collectiveOverride = await resolveCollectiveServiceOverride(supabase, {
+      collectiveId: collective_id,
+      collectiveServiceItemId: collective_service_item_id,
+      venueId: venue_id,
+      sourceServiceId: appointment_service_id,
+      practitionerId: practitioner_id,
+    });
+    if (collectiveOverride?.durationMinutes != null) {
+      const oidx = input.services.findIndex((s) => s.id === appointment_service_id);
+      if (oidx >= 0) {
+        input.services[oidx] = {
+          ...input.services[oidx]!,
+          duration_minutes: collectiveOverride.durationMinutes,
+        };
+      }
+    }
+
     // Resolve + validate add-ons up-front so the slot check below uses the EXTENDED
     // duration. Otherwise the engine would consider the slot bookable at base
     // duration and the booking would overlap once add-on minutes are added.
@@ -933,17 +990,22 @@ async function handleNonTableBooking(
     const mergedSvc = baseSvc ? mergeAppointmentServiceWithPractitionerLink(baseSvc, ps) : undefined;
     const svc = mergedSvc ? resolveBookableServiceWithVariant(mergedSvc, chosenVariant) : undefined;
     const practRow = input.practitioners.find((p) => p.id === practitioner_id);
+    // Combined page (plan §6.3 / D7): the customer is charged/deposited against the
+    // effective (overridden) price shown on the combined page, not the venue's own.
+    const effectivePricePence =
+      collectiveOverride?.pricePence != null ? collectiveOverride.pricePence : svc?.price_pence ?? null;
     appointmentEmailExtras = {
       email_variant: 'appointment',
       booking_model: 'unified_scheduling',
       practitioner_name: practRow?.name ?? null,
       appointment_service_name: svc?.name ?? null,
       appointment_price_display:
-        svc?.price_pence != null ? `£${(svc.price_pence / 100).toFixed(2)}` : null,
+        effectivePricePence != null ? `£${(effectivePricePence / 100).toFixed(2)}` : null,
     };
     if (svc) {
       // `svc` was derived from the engine input which we already extended with the
-      // add-on duration above. So `svc.duration_minutes` already includes add-ons.
+      // add-on duration above (and the combined-page override, if any). So
+      // `svc.duration_minutes` already reflects the slot length to reserve.
       chosenAddonSnapshots = chosenAddonSnapshotsBuilt;
       chosenAddonTotals = chosenAddonTotalsBuilt;
 
@@ -954,9 +1016,15 @@ async function handleNonTableBooking(
       estimatedEndTime = endDate.toISOString();
 
       // Model B: online charge from service payment mode (none / deposit / full payment).
-      // For full_payment the addon prices roll in; deposit stays on base+variant.
+      // The combined-page override replaces the price the deposit is computed from;
+      // the deposit rules (mode / percentage) stay the venue's own. For full_payment
+      // the addon prices roll in; deposit stays on base+variant.
+      const svcForCharge =
+        collectiveOverride?.pricePence != null
+          ? { ...svc, price_pence: collectiveOverride.pricePence }
+          : svc;
       const online = resolveAppointmentServiceOnlineChargeWithAddons({
-        svc,
+        svc: svcForCharge,
         addons_total_price_pence: chosenAddonTotals.total_price_pence,
       });
       if (online != null && online.amountPence > 0) {
@@ -1297,7 +1365,14 @@ async function handleNonTableBooking(
       .eq('venue_id', venue_id)
       .eq('status', 'active')
       .maybeSingle();
-    if (membership) bookingInsert.collective_id = collective_id;
+    if (membership) {
+      bookingInsert.collective_id = collective_id;
+      // Record the offering that produced this booking when the override resolved
+      // (i.e. it is a genuine, bookable combined-page offering).
+      if (collectiveOverride) {
+        bookingInsert.collective_service_item_id = collectiveOverride.collectiveServiceItemId;
+      }
+    }
   }
 
   // Compliance requirements gate (§5.1). Online context blocks on `block_online`

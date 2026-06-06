@@ -12,6 +12,18 @@ import {
 export type CollectiveStatus = 'active' | 'dissolved';
 export type CollectiveMemberStatus = 'invited' | 'active' | 'left' | 'removed';
 export type ServiceGrouping = 'by_practitioner' | 'by_service_type';
+/** Combined booking page (plan §1.3). `directory` = the Phase 2 list-of-venues page. */
+export type PageMode = 'directory' | 'unified_catalog';
+/** Where the combined page is served (plan D1). */
+export type SlugStrategy = 'dedicated' | 'adopt_member';
+/** What a member's own /book/{slug} does while the combined page is live (plan D2). */
+export type SoloPageBehavior = 'keep_live' | 'redirect';
+export type ItemStatus = 'active' | 'archived';
+/** Member consent on the commercial terms for its calendars (plan D6). */
+export type ProviderApprovalStatus = 'pending' | 'approved' | 'rejected';
+/** Link/eligibility-driven bookability of a provider (plan §8). */
+export type ProviderStatus = 'active' | 'suspended' | 'removed';
+export type PricingDisplay = 'from' | 'fixed' | 'per_provider';
 
 export interface CollectiveBranding {
   logo_url?: string | null;
@@ -28,6 +40,11 @@ export interface VenueCollectiveRow {
   service_grouping: ServiceGrouping;
   allow_any_practitioner: boolean;
   status: CollectiveStatus;
+  page_mode: PageMode;
+  slug_strategy: SlugStrategy;
+  adopted_venue_id: string | null;
+  timezone: string | null;
+  booking_page_config: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
 }
@@ -41,8 +58,43 @@ export interface CollectiveMemberRow {
   visible_practitioner_ids: string[];
   visible_service_ids: string[];
   allow_any_practitioner_substitution: boolean;
+  solo_page_behavior: SoloPageBehavior;
   joined_at: string | null;
   left_at: string | null;
+}
+
+/** A merged offering on the combined page (plan §4.3). */
+export interface CollectiveServiceItemRow {
+  id: string;
+  collective_id: string;
+  name: string;
+  description: string | null;
+  category: string | null;
+  display_order: number;
+  default_duration_minutes: number | null;
+  default_price_pence: number | null;
+  pricing_display: PricingDisplay;
+  allow_any_available: boolean;
+  status: ItemStatus;
+  created_at: string;
+  updated_at: string;
+}
+
+/** A calendar (venue + service + optional practitioner) that provides an item (plan §4.4). */
+export interface CollectiveServiceProviderRow {
+  id: string;
+  item_id: string;
+  member_id: string;
+  venue_id: string;
+  source_service_id: string;
+  practitioner_id: string | null;
+  price_pence_override: number | null;
+  duration_minutes_override: number | null;
+  approval_status: ProviderApprovalStatus;
+  approved_by_user_id: string | null;
+  status: ProviderStatus;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface CollectiveView {
@@ -53,6 +105,13 @@ export interface CollectiveView {
   branding: CollectiveBranding;
   serviceGrouping: ServiceGrouping;
   allowAnyPractitioner: boolean;
+  /** Combined booking page (plan §1.3). */
+  pageMode: PageMode;
+  slugStrategy: SlugStrategy;
+  adoptedVenueId: string | null;
+  timezone: string | null;
+  /** Single-venue-grade public-page config for the combined page (plan §22 / G6). */
+  bookingPageConfig: Record<string, unknown> | null;
   isHost: boolean;
   /** The host venue's id (so the UI can identify which member is the host). */
   hostVenueId: string;
@@ -66,18 +125,20 @@ export interface CollectiveView {
     visibleServiceIds: string[];
     allowAnyPractitionerSubstitution: boolean;
     displayOrder: number;
+    soloPageBehavior: SoloPageBehavior;
   } | null;
   members: {
     venueId: string;
     venueName: string;
     status: CollectiveMemberStatus;
     displayOrder: number;
+    soloPageBehavior: SoloPageBehavior;
   }[];
   activeMemberCount: number;
 }
 
 const COLLECTIVE_COLUMNS =
-  'id, slug, name, host_venue_id, branding, service_grouping, allow_any_practitioner, status, created_at, updated_at';
+  'id, slug, name, host_venue_id, branding, service_grouping, allow_any_practitioner, status, page_mode, slug_strategy, adopted_venue_id, timezone, booking_page_config, created_at, updated_at';
 
 /**
  * True when `venueId` holds an accepted link with full_details visibility in
@@ -100,6 +161,94 @@ export async function hasFullMutualLinks(
     }
   }
   return true;
+}
+
+/**
+ * Combined-page gate (plan D4). Like {@link hasFullMutualLinks} but additionally
+ * requires `create_edit_cancel` in BOTH directions and no §18 calendar scoping
+ * — a combined page lets any member's staff manage any combined booking, so the
+ * write right must be full and cover every calendar. Used to gate upgrade to
+ * `unified_catalog` and to drive the provider suspend/resume ladder on reconcile.
+ */
+export async function hasFullMutualWriteLinks(
+  admin: SupabaseClient,
+  venueId: string,
+  otherVenueIds: string[],
+): Promise<boolean> {
+  for (const otherId of otherVenueIds) {
+    if (otherId === venueId) continue;
+    const link = await getAcceptedLinkBetween(admin, venueId, otherId);
+    if (!link) return false;
+    if (
+      link.low_grants_calendar !== 'full_details' ||
+      link.high_grants_calendar !== 'full_details' ||
+      link.low_grants_act !== 'create_edit_cancel' ||
+      link.high_grants_act !== 'create_edit_cancel' ||
+      link.low_grants_calendar_ids != null ||
+      link.high_grants_calendar_ids != null
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Effective price a customer is shown/charged for a provider on the combined
+ * page (plan §4.4): the provider override, else the item default, else the
+ * venue's own source-service price. Pure — `null` means "no price set".
+ */
+export function effectiveProviderPricePence(
+  item: { default_price_pence: number | null },
+  provider: { price_pence_override: number | null },
+  sourcePricePence: number | null,
+): number | null {
+  if (provider.price_pence_override != null) return provider.price_pence_override;
+  if (item.default_price_pence != null) return item.default_price_pence;
+  return sourcePricePence;
+}
+
+/**
+ * Effective duration (minutes) the slot must occupy in the owning venue's
+ * calendar (plan §4.4 / §6.3): provider override, else item default, else the
+ * venue's own source-service duration. Pure.
+ */
+export function effectiveProviderDurationMinutes(
+  item: { default_duration_minutes: number | null },
+  provider: { duration_minutes_override: number | null },
+  sourceDurationMinutes: number | null,
+): number | null {
+  if (provider.duration_minutes_override != null) return provider.duration_minutes_override;
+  if (item.default_duration_minutes != null) return item.default_duration_minutes;
+  return sourceDurationMinutes;
+}
+
+/**
+ * Decide each provider's link/eligibility-driven `status` after a reconcile
+ * (plan §8). Pure so the split logic is unit-testable:
+ *   - a provider whose venue was removed from the collective → `removed`;
+ *   - otherwise → `active` when its venue currently holds full mutual write with
+ *     all surviving members, else `suspended` (recoverable).
+ * Never touches `approval_status` (the consent dimension) and leaves already
+ * `removed` rows alone. Returns only the rows whose status must change.
+ */
+export function planProviderStatuses(
+  providers: { id: string; venueId: string; status: ProviderStatus }[],
+  removedVenueIds: string[],
+  writeOkByVenue: Record<string, boolean>,
+): { id: string; status: ProviderStatus }[] {
+  const removed = new Set(removedVenueIds);
+  const changes: { id: string; status: ProviderStatus }[] = [];
+  for (const p of providers) {
+    if (p.status === 'removed') continue;
+    const next: ProviderStatus = removed.has(p.venueId)
+      ? 'removed'
+      : writeOkByVenue[p.venueId]
+        ? 'active'
+        : 'suspended';
+    if (next !== p.status) changes.push({ id: p.id, status: next });
+  }
+  return changes;
 }
 
 /** Load every collective `venueId` hosts or is a member of, as views. */
@@ -131,7 +280,7 @@ export async function loadCollectiveViewsForVenue(
   const { data: allMembers } = await admin
     .from('venue_collective_members')
     .select(
-      'collective_id, venue_id, status, display_order, visible_practitioner_ids, visible_service_ids, allow_any_practitioner_substitution',
+      'collective_id, venue_id, status, display_order, visible_practitioner_ids, visible_service_ids, allow_any_practitioner_substitution, solo_page_behavior',
     )
     .in('collective_id', [...collectiveIds])
     .in('status', ['invited', 'active']);
@@ -156,6 +305,7 @@ export async function loadCollectiveViewsForVenue(
         venueName: venueNames[m.venue_id as string] ?? 'Venue',
         status: m.status as CollectiveMemberStatus,
         displayOrder: (m.display_order as number) ?? 0,
+        soloPageBehavior: ((m.solo_page_behavior as SoloPageBehavior) ?? 'keep_live'),
       }))
       .sort((a, b) => a.displayOrder - b.displayOrder);
     const mine = members.find((m) => m.venueId === venueId);
@@ -170,6 +320,11 @@ export async function loadCollectiveViewsForVenue(
       branding: row.branding ?? {},
       serviceGrouping: row.service_grouping,
       allowAnyPractitioner: row.allow_any_practitioner,
+      pageMode: (row.page_mode as PageMode) ?? 'directory',
+      slugStrategy: (row.slug_strategy as SlugStrategy) ?? 'dedicated',
+      adoptedVenueId: row.adopted_venue_id ?? null,
+      timezone: row.timezone ?? null,
+      bookingPageConfig: (row.booking_page_config as Record<string, unknown> | null) ?? null,
       isHost: row.host_venue_id === venueId,
       hostVenueId: row.host_venue_id,
       myVenueId: venueId,
@@ -181,6 +336,8 @@ export async function loadCollectiveViewsForVenue(
             allowAnyPractitionerSubstitution:
               (myRaw.allow_any_practitioner_substitution as boolean) ?? false,
             displayOrder: (myRaw.display_order as number) ?? 0,
+            soloPageBehavior:
+              ((myRaw.solo_page_behavior as SoloPageBehavior) ?? 'keep_live'),
           }
         : null,
       members,
@@ -226,7 +383,7 @@ export async function reconcileCollective(
   const removedVenueIds: string[] = [];
   const { data: collective } = await admin
     .from('venue_collectives')
-    .select('id, status, host_venue_id')
+    .select('id, status, host_venue_id, page_mode')
     .eq('id', collectiveId)
     .maybeSingle();
   if (!collective || collective.status !== 'active') {
@@ -263,6 +420,9 @@ export async function reconcileCollective(
       .from('venue_collectives')
       .update({ status: 'dissolved' })
       .eq('id', collectiveId);
+    // No catalogue cleanup needed on dissolve: `status='dissolved'` takes the
+    // page offline, and the overrides are collective-scoped so every venue's own
+    // services are already pristine (plan §8.3, the non-destructive guarantee).
     return { removedVenueIds, dissolved: true, hostTransferredTo: null };
   }
 
@@ -284,7 +444,70 @@ export async function reconcileCollective(
     }
   }
 
+  // plan §8.2 — for a combined page, re-evaluate provider bookability: suspend
+  // (recoverably) the providers of any surviving member that no longer holds
+  // full mutual write with all others, reactivate those that regained it, and
+  // mark removed-member providers `removed`. Never touches member consent.
+  if (collective.page_mode === 'unified_catalog') {
+    await suspendOrRemoveCollectiveProviders(
+      admin,
+      collectiveId,
+      survivors.map((m) => m.venueId),
+      removedVenueIds,
+    );
+  }
+
   return { removedVenueIds, dissolved: false, hostTransferredTo };
+}
+
+/**
+ * Apply the plan §8.2 provider suspend/resume/remove ladder for a unified
+ * catalogue. Computes each surviving member's write-eligibility, then uses the
+ * pure {@link planProviderStatuses} to decide the new `status` for every
+ * non-removed provider and applies only the changes. Source data untouched.
+ */
+async function suspendOrRemoveCollectiveProviders(
+  admin: SupabaseClient,
+  collectiveId: string,
+  survivorVenueIds: string[],
+  removedVenueIds: string[],
+): Promise<void> {
+  const { data: itemRows } = await admin
+    .from('collective_service_items')
+    .select('id')
+    .eq('collective_id', collectiveId);
+  const itemIds = (itemRows ?? []).map((r) => r.id as string);
+  if (itemIds.length === 0) return;
+
+  const { data: providerRows } = await admin
+    .from('collective_service_providers')
+    .select('id, venue_id, status')
+    .in('item_id', itemIds)
+    .neq('status', 'removed');
+  const providers = (providerRows ?? []).map((p) => ({
+    id: p.id as string,
+    venueId: p.venue_id as string,
+    status: p.status as ProviderStatus,
+  }));
+  if (providers.length === 0) return;
+
+  const writeOkByVenue: Record<string, boolean> = {};
+  for (const venueId of survivorVenueIds) {
+    const others = survivorVenueIds.filter((v) => v !== venueId);
+    writeOkByVenue[venueId] = await hasFullMutualWriteLinks(admin, venueId, others);
+  }
+
+  const changes = planProviderStatuses(providers, removedVenueIds, writeOkByVenue);
+  // Group by target status so each distinct status is one UPDATE.
+  const byStatus = new Map<ProviderStatus, string[]>();
+  for (const c of changes) {
+    const ids = byStatus.get(c.status) ?? [];
+    ids.push(c.id);
+    byStatus.set(c.status, ids);
+  }
+  for (const [status, ids] of byStatus) {
+    await admin.from('collective_service_providers').update({ status }).in('id', ids);
+  }
 }
 
 /**
@@ -374,6 +597,7 @@ export interface PublicCollective {
   branding: CollectiveBranding;
   serviceGrouping: ServiceGrouping;
   allowAnyPractitioner: boolean;
+  pageMode: PageMode;
   members: PublicCollectiveMember[];
 }
 
@@ -581,6 +805,7 @@ export async function loadPublicCollective(
     branding: collective.branding ?? {},
     serviceGrouping: collective.service_grouping,
     allowAnyPractitioner: collective.allow_any_practitioner,
+    pageMode: collective.page_mode ?? 'directory',
     members,
   };
 }

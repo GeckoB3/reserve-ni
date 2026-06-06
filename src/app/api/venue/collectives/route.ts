@@ -1,10 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { resolveLinkAdmin } from '@/lib/linked-accounts/route-helpers';
 import { createCollectiveSchema } from '@/lib/linked-accounts/validation';
-import {
-  hasFullMutualLinks,
-  loadCollectiveViewsForVenue,
-} from '@/lib/linked-accounts/collectives';
+import { loadCollectiveViewsForVenue } from '@/lib/linked-accounts/collectives';
+import { checkCombinedEligibility } from '@/lib/linked-accounts/catalogue';
 import { notifyCollectiveInvitation } from '@/lib/linked-accounts/notifications';
 
 /** GET /api/venue/collectives — collectives this venue hosts or belongs to. */
@@ -108,30 +106,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Every invitee must hold full-mutual links with the host.
-    const hostLinksOk = await hasFullMutualLinks(ctx.admin, ctx.venueId, inviteVenueIds);
-    if (!hostLinksOk) {
+    // Combined-only (plan §22 / D-V1): a collective is born as a combined page,
+    // so the D4 write gate + D8 single-timezone check is enforced at create time
+    // across every member (host + invitees).
+    const eligibility = await checkCombinedEligibility(ctx.admin, [ctx.venueId, ...inviteVenueIds]);
+    if (!eligibility.ok) {
       return NextResponse.json(
-        {
-          error:
-            'You can only invite venues you hold an accepted link with that shares full calendar detail in both directions.',
-        },
+        { error: eligibility.reason ?? 'These venues can’t run a combined page yet.' },
         { status: 400 },
       );
-    }
-    // And invitees must hold full-mutual links with each other.
-    for (const venueId of inviteVenueIds) {
-      const others = inviteVenueIds.filter((v) => v !== venueId);
-      const ok = await hasFullMutualLinks(ctx.admin, venueId, others);
-      if (!ok) {
-        return NextResponse.json(
-          {
-            error:
-              'Every venue in a collective must hold full mutual links with every other member.',
-          },
-          { status: 400 },
-        );
-      }
     }
 
     const { data: collective, error: insertErr } = await ctx.admin
@@ -142,8 +125,10 @@ export async function POST(request: NextRequest) {
         host_venue_id: ctx.venueId,
         branding: parsed.data.branding ?? {},
         service_grouping: parsed.data.serviceGrouping ?? 'by_practitioner',
-        allow_any_practitioner: parsed.data.allowAnyPractitioner ?? false,
+        allow_any_practitioner: false,
         status: 'active',
+        page_mode: 'unified_catalog',
+        timezone: eligibility.timezone,
       })
       .select('id')
       .single();

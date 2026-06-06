@@ -30,6 +30,15 @@ interface Props {
   accentColour?: string;
   /** §7.7: set when this flow is mounted inside a venue collective page. */
   collectiveId?: string;
+  /** Combined page: the offering id, so the create call resolves the price/duration override. */
+  collectiveServiceItemId?: string;
+  /** Combined page: lock the flow to a specific source service. */
+  preselectedServiceId?: string;
+  /** Combined page: pre-select a specific calendar/practitioner by id (no slug needed). */
+  preselectedPractitionerId?: string;
+  /** Combined "any available": prefill the chosen date/time. */
+  initialDate?: string;
+  initialTime?: string;
 }
 
 export function BookPublicBookingFlow({
@@ -39,6 +48,11 @@ export function BookPublicBookingFlow({
   onHeightChange,
   accentColour,
   collectiveId,
+  collectiveServiceItemId,
+  preselectedServiceId,
+  preselectedPractitionerId,
+  initialDate,
+  initialTime,
 }: Props) {
   const router = useRouter();
   const pathname = usePathname();
@@ -166,10 +180,12 @@ export function BookPublicBookingFlow({
           onHeightChange={onHeightChange}
           accentColour={accentColour}
           collectiveId={collectiveId}
+          collectiveServiceItemId={collectiveServiceItemId}
+          preselectedPractitionerId={preselectedPractitionerId}
           waitlistOfferEntryId={waitlistOfferEntryId}
-          preselectedServiceId={waitlistPrefillServiceId}
-          initialDate={waitlistPrefillDate}
-          initialTime={waitlistPrefillTime}
+          preselectedServiceId={preselectedServiceId ?? waitlistPrefillServiceId}
+          initialDate={initialDate ?? waitlistPrefillDate}
+          initialTime={initialTime ?? waitlistPrefillTime}
         />
       </PublicBookingAccountGateProvider>
     </div>

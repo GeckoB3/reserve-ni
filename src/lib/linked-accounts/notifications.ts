@@ -476,6 +476,95 @@ export async function notifyCollectiveDissolved(
 }
 
 /**
+ * Combined booking page (plan §7.4 / D6) — the host added one of a member's
+ * calendars to the shared catalogue; the member must approve the price/duration
+ * shown for it before it goes live. Sent to the member.
+ */
+export async function notifyCombinedProviderProposed(
+  admin: SupabaseClient,
+  memberVenueId: string,
+  collectiveName: string,
+  hostVenueName: string,
+  offeringName: string,
+  collectiveId?: string,
+): Promise<void> {
+  await notifyVenue(
+    admin,
+    memberVenueId,
+    `${hostVenueName} added “${offeringName}” to ${collectiveName}`,
+    {
+      heading: 'Approve your combined-page pricing',
+      paragraphs: [
+        `${hostVenueName} added your “${offeringName}” to the “${collectiveName}” combined booking page.`,
+        'Review the price and duration shown for your calendar and approve it — or set your own — before it goes live to customers. It won’t be bookable until you approve it.',
+      ],
+      ctaLabel: 'Review offering',
+      ctaUrl: settingsUrl(),
+    },
+    { type: 'combined_provider_proposed', category: 'lifecycle', collectiveId },
+  );
+}
+
+/**
+ * Combined booking page (plan §7.4 / D6) — a member approved or declined the
+ * terms for one of its calendars. Sent to the host.
+ */
+export async function notifyCombinedProviderDecision(
+  admin: SupabaseClient,
+  hostVenueId: string,
+  memberVenueName: string,
+  offeringName: string,
+  approved: boolean,
+  collectiveId?: string,
+): Promise<void> {
+  const verb = approved ? 'approved' : 'declined';
+  await notifyVenue(
+    admin,
+    hostVenueId,
+    `${memberVenueName} ${verb} “${offeringName}”`,
+    {
+      heading: approved ? 'Offering approved' : 'Offering declined',
+      paragraphs: [
+        `${memberVenueName} ${verb} the “${offeringName}” offering on your combined booking page.`,
+        approved
+          ? 'It is now bookable from the combined page.'
+          : 'It will not be offered from their calendars. You can adjust the offering and propose again.',
+      ],
+      ctaLabel: 'Manage combined page',
+      ctaUrl: settingsUrl(),
+    },
+    { type: approved ? 'combined_provider_approved' : 'combined_provider_rejected', category: 'lifecycle', collectiveId },
+  );
+}
+
+/**
+ * Combined booking page — the host switched the collective to a combined
+ * catalogue. Sent to each active member so they know to curate their listing.
+ */
+export async function notifyCombinedPageEnabled(
+  admin: SupabaseClient,
+  memberVenueId: string,
+  collectiveName: string,
+  collectiveId?: string,
+): Promise<void> {
+  await notifyVenue(
+    admin,
+    memberVenueId,
+    `${collectiveName} now has a combined booking page`,
+    {
+      heading: 'Combined booking page enabled',
+      paragraphs: [
+        `The “${collectiveName}” collective now offers a single combined booking page with a merged service menu.`,
+        'When the host adds one of your calendars to an offering, you’ll be asked to approve the price and duration shown for it.',
+      ],
+      ctaLabel: 'View combined page',
+      ctaUrl: settingsUrl(),
+    },
+    { type: 'combined_page_enabled', category: 'lifecycle', collectiveId },
+  );
+}
+
+/**
  * §17.3 — email the owning venue when a linked venue creates / reschedules /
  * cancels / edits a booking in its calendar, gated by the owning venue's
  * per-category email preferences (§17.4). The matching in-app notification is

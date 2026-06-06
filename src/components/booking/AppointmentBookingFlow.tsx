@@ -373,6 +373,8 @@ interface AppointmentBookingFlowProps {
   lockedPractitioner?: { id: string; name: string; bookingSlug: string };
   /** §7.7: set when this flow is mounted inside a venue collective page. */
   collectiveId?: string;
+  /** Combined page: the offering id, so the create call resolves the price/duration override. */
+  collectiveServiceItemId?: string;
   bookingAudience?: BookingFlowAudience;
   onBookingCreated?: () => void;
   initialDate?: string;
@@ -455,6 +457,7 @@ export function AppointmentBookingFlow({
   accentColour,
   lockedPractitioner,
   collectiveId,
+  collectiveServiceItemId,
   bookingAudience = 'public',
   onBookingCreated,
   initialDate,
@@ -1881,6 +1884,7 @@ export function AppointmentBookingFlow({
               })),
               marketing_consent: details.marketing_consent,
               collective_id: collectiveId,
+              collective_service_item_id: collectiveServiceItemId,
             }),
           });
           const data = await res.json();
@@ -1995,6 +1999,7 @@ export function AppointmentBookingFlow({
             occasion: details.occasion,
             marketing_consent: details.marketing_consent,
             collective_id: collectiveId,
+            collective_service_item_id: collectiveServiceItemId,
             ...(singleCreateAddonIds.length > 0
               ? { addons: singleCreateAddonIds.map((id) => ({ addon_id: id })) }
               : {}),
@@ -2042,6 +2047,7 @@ export function AppointmentBookingFlow({
       selectedServiceForPractitioner,
       onBookingCreated,
       collectiveId,
+      collectiveServiceItemId,
       isPublicGuest,
       accountGate,
       publicCreateErrorMessage,

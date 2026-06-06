@@ -65,6 +65,8 @@ const createMultiServiceSchema = z.object({
   marketing_consent: z.boolean().optional(),
   /** §7.7: set when the booking was routed through a venue collective page. */
   collective_id: z.string().uuid().optional(),
+  /** Combined page: the offering that produced this booking (attribution). */
+  collective_service_item_id: z.string().uuid().optional(),
 });
 
 /**
@@ -95,6 +97,7 @@ export async function POST(request: NextRequest) {
       occasion,
       marketing_consent: marketingConsentRaw,
       collective_id,
+      collective_service_item_id,
     } = parsed.data;
 
     const phoneRaw = (phone ?? '').trim();
@@ -436,6 +439,7 @@ export async function POST(request: NextRequest) {
     // §7.7: attribute to a venue collective only when this venue is genuinely
     // an active member, so a forged collective_id cannot be attached.
     let collectiveIdForInsert: string | null = null;
+    let collectiveServiceItemIdForInsert: string | null = null;
     if (collective_id) {
       const { data: membership } = await supabase
         .from('venue_collective_members')
@@ -444,7 +448,10 @@ export async function POST(request: NextRequest) {
         .eq('venue_id', venue_id)
         .eq('status', 'active')
         .maybeSingle();
-      if (membership) collectiveIdForInsert = collective_id;
+      if (membership) {
+        collectiveIdForInsert = collective_id;
+        collectiveServiceItemIdForInsert = collective_service_item_id ?? null;
+      }
     }
 
     for (const seg of validated) {
@@ -476,6 +483,7 @@ export async function POST(request: NextRequest) {
         group_booking_id: groupBookingId,
         person_label: null,
         collective_id: collectiveIdForInsert,
+        collective_service_item_id: collectiveServiceItemIdForInsert,
         processing_time_blocks: seg.processing_time_blocks,
         addons_total_price_pence: seg.addons_total_price_pence,
         addons_total_duration_minutes: seg.addons_total_duration_minutes,

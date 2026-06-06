@@ -106,11 +106,50 @@ export const createCollectiveSchema = z.object({
   inviteVenueIds: z.array(z.string().uuid()).min(1).max(20),
 });
 
+const hexColour = z
+  .string()
+  .regex(/^#[0-9A-Fa-f]{6}$/)
+  .nullable()
+  .optional();
+
+/** Single-venue-grade public-page config for the combined page (plan §22 / G6). */
+export const collectiveBookingPageConfigSchema = z
+  .object({
+    brand_primary: hexColour,
+    brand_accent: hexColour,
+    font_preset: z.string().max(40).nullable().optional(),
+    about: z.string().max(2000).nullable().optional(),
+    announcement: z.string().max(300).nullable().optional(),
+    cover_photo_url: z.union([z.literal(''), z.string().url().max(500)]).nullable().optional(),
+    cover_full_width: z.boolean().optional(),
+    show_services_tab: z.boolean().optional(),
+    show_team_tab: z.boolean().optional(),
+    show_about_tab: z.boolean().optional(),
+    /** Host overrides over inherited staff bios, keyed by calendar id (D-V2). */
+    team_profiles: z
+      .record(
+        z.string().uuid(),
+        z.object({
+          bio: z.string().max(600).nullable().optional(),
+          specialties: z.string().max(200).nullable().optional(),
+          hidden: z.boolean().optional(),
+        }),
+      )
+      .optional(),
+  })
+  .strip();
+
 export const updateCollectiveSchema = z.object({
   name: z.string().min(2).max(120).optional(),
   branding: collectiveBrandingSchema.optional(),
   serviceGrouping: z.enum(['by_practitioner', 'by_service_type']).optional(),
   allowAnyPractitioner: z.boolean().optional(),
+  /** Combined booking page address (plan D1). */
+  slugStrategy: z.enum(['dedicated', 'adopt_member']).optional(),
+  /** Required when slugStrategy = 'adopt_member': the member venue whose /book/{slug} hosts the page. */
+  adoptedVenueId: z.string().uuid().nullable().optional(),
+  /** Single-venue-grade page customisation (plan §22 / G6). */
+  bookingPageConfig: collectiveBookingPageConfigSchema.optional(),
 });
 
 export const collectiveMemberActionSchema = z.object({
@@ -130,4 +169,53 @@ export const collectiveMemberActionSchema = z.object({
   visibleServiceIds: z.array(z.string().uuid()).optional(),
   allowAnyPractitionerSubstitution: z.boolean().optional(),
   displayOrder: z.number().int().min(0).max(999).optional(),
+  /** configure: what this member's own /book/{slug} does while the combined page is live (plan D2). */
+  soloPageBehavior: z.enum(['keep_live', 'redirect']).optional(),
 });
+
+// ---- Combined-page catalogue (plan §4.3/§4.4, §7.3/§7.4) --------------------
+
+/** Sensible pence ceiling shared by item defaults and per-provider overrides. */
+const PRICE_PENCE_MAX = 1_000_000; // £10,000
+
+export const catalogueActionSchema = z.object({
+  action: z.enum([
+    // Host (structure):
+    'create_item',
+    'update_item',
+    'archive_item',
+    'add_provider',
+    'update_provider',
+    'remove_provider',
+    // Member (consent over its own calendars, plan D6):
+    'approve_provider',
+    'reject_provider',
+    'set_provider_terms',
+  ]),
+  // Item fields.
+  itemId: z.string().uuid().optional(),
+  name: z.string().min(1).max(160).optional(),
+  description: z.string().max(2000).nullable().optional(),
+  category: z.string().max(120).nullable().optional(),
+  displayOrder: z.number().int().min(0).max(9999).optional(),
+  defaultDurationMinutes: z.number().int().min(0).max(1440).nullable().optional(),
+  defaultPricePence: z.number().int().min(0).max(PRICE_PENCE_MAX).nullable().optional(),
+  pricingDisplay: z.enum(['from', 'fixed', 'per_provider']).optional(),
+  allowAnyAvailable: z.boolean().optional(),
+  /** Per-offering photo for the Services tab (plan §22 / G6). */
+  imageUrl: z.union([z.literal(''), z.string().url().max(500)]).nullable().optional(),
+  /** Used by create_item to seed providers from a set of source services in one call. */
+  sourceServiceIds: z
+    .array(z.object({ venueId: z.string().uuid(), sourceServiceId: z.string().uuid() }))
+    .max(50)
+    .optional(),
+  // Provider fields.
+  providerId: z.string().uuid().optional(),
+  venueId: z.string().uuid().optional(),
+  sourceServiceId: z.string().uuid().optional(),
+  practitionerId: z.string().uuid().nullable().optional(),
+  pricePenceOverride: z.number().int().min(0).max(PRICE_PENCE_MAX).nullable().optional(),
+  durationMinutesOverride: z.number().int().min(1).max(1440).nullable().optional(),
+});
+
+export type CatalogueActionInput = z.infer<typeof catalogueActionSchema>;

@@ -1,0 +1,247 @@
+/**
+ * The booking-stack bridge for the "virtual venue" (plan §22 G3/G4). Lets the
+ * STANDARD appointment endpoints serve a collective: the customer flow targets
+ * the synthetic venue (its id = the collective id), and these helpers resolve
+ * the merged catalogue / availability / booking routing back to the real owning
+ * venues. Everything is keyed on the OFFERING id (the customer-facing service)
+ * and a CONCRETE calendar id; routing to the owning venue + real source service
+ * happens here, server-side.
+ */
+
+import type { SupabaseClient } from '@supabase/supabase-js';
+import {
+  fetchAppointmentInput,
+  attachVenueClockToAppointmentInput,
+  computeAppointmentAvailability,
+} from '@/lib/availability/appointment-engine';
+import { computeAppointmentAvailableDatesInMonth } from '@/lib/availability/appointment-month-availability';
+import { ANY_AVAILABLE_PRACTITIONER_ID } from '@/lib/availability/appointment-any-practitioner';
+import {
+  loadCollectiveAppointmentCatalog,
+  type CollectiveCatalogPractitioner,
+} from './collective-venue';
+
+/** Is this id a live (active) collective rather than a venue? */
+export async function isCollectiveId(admin: SupabaseClient, id: string): Promise<boolean> {
+  const { data } = await admin
+    .from('venue_collectives')
+    .select('id')
+    .eq('id', id)
+    .eq('status', 'active')
+    .maybeSingle();
+  return Boolean(data);
+}
+
+export interface CombinedBookingTarget {
+  /** The real owning venue the booking must be written to. */
+  venueId: string;
+  /** The real source service id in that venue. */
+  sourceServiceId: string;
+  /** Effective (overridden) price/duration for the offering on this calendar. */
+  pricePence: number | null;
+  durationMinutes: number | null;
+}
+
+/**
+ * Resolve a chosen (offering, calendar) to its owning venue + real source
+ * service + effective price/duration, using the merged catalogue (which already
+ * applies eligibility, member approval and the override resolution). Returns null
+ * when the pairing isn't a currently-bookable offering.
+ */
+export async function resolveCombinedBookingTarget(
+  admin: SupabaseClient,
+  params: { collectiveId: string; offeringId: string; calendarId: string },
+): Promise<CombinedBookingTarget | null> {
+  const { practitioners } = await loadCollectiveAppointmentCatalog(admin, params.collectiveId);
+  const calendar = practitioners.find((p) => p.id === params.calendarId);
+  if (!calendar) return null;
+  const service = calendar.services.find((s) => s.id === params.offeringId);
+  if (!service) return null;
+  return {
+    venueId: calendar.owning_venue_id,
+    sourceServiceId: service.source_service_id,
+    pricePence: service.price_pence,
+    durationMinutes: service.duration_minutes,
+  };
+}
+
+interface DaySlot {
+  start_time: string;
+  service_id: string; // the OFFERING id (so the flow matches)
+  duration_minutes: number;
+  price_pence: number | null;
+  practitioner_id?: string;
+  practitioner_name?: string;
+}
+
+/** The calendars that provide an offering (with routing), from the merged catalogue. */
+function calendarsForOffering(
+  practitioners: CollectiveCatalogPractitioner[],
+  offeringId: string,
+): Array<{ calendarId: string; name: string; venueId: string; sourceServiceId: string; durationMinutes: number | null; pricePence: number | null }> {
+  const out: Array<{ calendarId: string; name: string; venueId: string; sourceServiceId: string; durationMinutes: number | null; pricePence: number | null }> = [];
+  for (const p of practitioners) {
+    const svc = p.services.find((s) => s.id === offeringId);
+    if (!svc) continue;
+    out.push({
+      calendarId: p.id,
+      name: p.name,
+      venueId: p.owning_venue_id,
+      sourceServiceId: svc.source_service_id,
+      durationMinutes: svc.duration_minutes,
+      pricePence: svc.price_pence,
+    });
+  }
+  return out;
+}
+
+/**
+ * Day availability for the combined page, in the EXACT shape the standard
+ * `/api/booking/availability` returns, so the flow consumes it unchanged:
+ * `{ date, venue_id, practitioners: [{ id, name, slots }], any_available? }`.
+ * Slots are relabelled with the offering id and carry the concrete calendar.
+ */
+export async function loadCollectiveDayAvailability(
+  admin: SupabaseClient,
+  params: {
+    collectiveId: string;
+    offeringId: string;
+    calendarId: string | null; // null/ANY → any-available pool
+    anyAvailable: boolean;
+    date: string;
+  },
+): Promise<{ date: string; venue_id: string; practitioners: Array<{ id: string; name: string; slots: DaySlot[] }>; any_available?: boolean }> {
+  const { collectiveId, offeringId, date } = params;
+  const { practitioners } = await loadCollectiveAppointmentCatalog(admin, collectiveId);
+  const all = calendarsForOffering(practitioners, offeringId);
+  const targets =
+    params.anyAvailable || !params.calendarId
+      ? all
+      : all.filter((c) => c.calendarId === params.calendarId);
+
+  // Owning-venue clock rows for the involved venues.
+  const venueIds = [...new Set(targets.map((t) => t.venueId))];
+  const clocks: Record<string, { timezone?: string | null; booking_rules?: unknown; opening_hours?: unknown; venue_opening_exceptions?: unknown }> = {};
+  await Promise.all(
+    venueIds.map(async (venueId) => {
+      const { data } = await admin
+        .from('venues')
+        .select('timezone, booking_rules, opening_hours, venue_opening_exceptions')
+        .eq('id', venueId)
+        .maybeSingle();
+      if (data) clocks[venueId] = data as typeof clocks[string];
+    }),
+  );
+
+  const perCalendar = await Promise.all(
+    targets.map(async (t): Promise<DaySlot[]> => {
+      const clock = clocks[t.venueId];
+      if (!clock) return [];
+      try {
+        const input = await fetchAppointmentInput({
+          supabase: admin,
+          venueId: t.venueId,
+          date,
+          practitionerId: t.calendarId,
+          serviceId: t.sourceServiceId,
+        });
+        if (t.durationMinutes != null) {
+          const idx = input.services.findIndex((s) => s.id === t.sourceServiceId);
+          if (idx >= 0) input.services[idx] = { ...input.services[idx]!, duration_minutes: t.durationMinutes };
+        }
+        attachVenueClockToAppointmentInput(input, clock, null);
+        const result = computeAppointmentAvailability(input);
+        const slots: DaySlot[] = [];
+        for (const prac of result.practitioners) {
+          for (const slot of prac.slots) {
+            if (slot.service_id !== t.sourceServiceId) continue;
+            slots.push({
+              start_time: slot.start_time,
+              service_id: offeringId,
+              duration_minutes: t.durationMinutes ?? slot.duration_minutes,
+              price_pence: t.pricePence,
+              practitioner_id: t.calendarId,
+              practitioner_name: t.name,
+            });
+          }
+        }
+        return slots;
+      } catch {
+        return [];
+      }
+    }),
+  );
+
+  if (params.anyAvailable) {
+    // Pool into one "any available" practitioner; dedupe by time (earliest/first calendar wins).
+    const byTime = new Map<string, DaySlot>();
+    for (const slot of perCalendar.flat()) {
+      if (!byTime.has(slot.start_time)) byTime.set(slot.start_time, slot);
+    }
+    const pooled = [...byTime.values()].sort((a, b) => a.start_time.localeCompare(b.start_time));
+    return {
+      date,
+      venue_id: collectiveId,
+      any_available: true,
+      practitioners: [{ id: ANY_AVAILABLE_PRACTITIONER_ID, name: 'Any available', slots: pooled }],
+    };
+  }
+
+  return {
+    date,
+    venue_id: collectiveId,
+    practitioners: targets.map((t, i) => ({
+      id: t.calendarId,
+      name: t.name,
+      slots: (perCalendar[i] ?? []).sort((a, b) => a.start_time.localeCompare(b.start_time)),
+    })),
+  };
+}
+
+/**
+ * Month available-dates for the combined page, in the standard
+ * `/api/booking/appointment-calendar` shape. Unions each provider calendar's
+ * real month availability (honouring the effective duration).
+ */
+export async function loadCollectiveMonthAvailableDates(
+  admin: SupabaseClient,
+  params: {
+    collectiveId: string;
+    offeringId: string;
+    calendarId: string | null;
+    anyAvailable: boolean;
+    year: number;
+    month: number;
+  },
+): Promise<{ venue_id: string; practitioner_id: string; service_id: string; year: number; month: number; available_dates: string[]; any_available?: boolean }> {
+  const { collectiveId, offeringId, year, month } = params;
+  const { practitioners } = await loadCollectiveAppointmentCatalog(admin, collectiveId);
+  const all = calendarsForOffering(practitioners, offeringId);
+  const targets =
+    params.anyAvailable || !params.calendarId
+      ? all
+      : all.filter((c) => c.calendarId === params.calendarId);
+
+  const perCalendar = await Promise.all(
+    targets.map(async (t) => {
+      try {
+        return await computeAppointmentAvailableDatesInMonth(admin, t.venueId, t.calendarId, t.sourceServiceId, year, month, {
+          audience: 'public',
+          customDurationMinutes: t.durationMinutes ?? undefined,
+        });
+      } catch {
+        return [] as string[];
+      }
+    }),
+  );
+  const available_dates = [...new Set(perCalendar.flat())].sort();
+  return {
+    venue_id: collectiveId,
+    practitioner_id: params.anyAvailable ? ANY_AVAILABLE_PRACTITIONER_ID : params.calendarId ?? ANY_AVAILABLE_PRACTITIONER_ID,
+    service_id: offeringId,
+    year,
+    month,
+    available_dates,
+    any_available: params.anyAvailable || undefined,
+  };
+}

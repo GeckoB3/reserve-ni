@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { Pill } from '@/components/ui/dashboard/Pill';
 import { Modal, btnDanger, btnPrimary, btnSecondary } from './linked-accounts-ui';
+import { CombinedPageManager } from './CombinedPageManager';
 import type { AccountLinkView } from '@/lib/linked-accounts/types';
 import type { CollectiveBranding, CollectiveView } from '@/lib/linked-accounts/collectives';
 
@@ -12,13 +13,19 @@ const inputCls =
 
 type Grouping = 'by_practitioner' | 'by_service_type';
 
-/** Linked venues with full_details visibility both ways — eligible collective members. */
+/**
+ * Linked venues eligible for a COMBINED page (plan §22 / D4): full calendar
+ * detail AND create/edit/cancel access in both directions, so any member's staff
+ * can manage any combined booking. Matches the create/invite write gate.
+ */
 function fullMutualLinks(links: AccountLinkView[]): AccountLinkView[] {
   return links.filter(
     (l) =>
       l.status === 'accepted' &&
       l.iCan.calendar === 'full_details' &&
-      l.theyCan.calendar === 'full_details',
+      l.theyCan.calendar === 'full_details' &&
+      l.iCan.act === 'create_edit_cancel' &&
+      l.theyCan.act === 'create_edit_cancel',
   );
 }
 
@@ -45,6 +52,7 @@ export function VenueCollectivesPanel({
   const [editTarget, setEditTarget] = useState<CollectiveView | null>(null);
   const [inviteTarget, setInviteTarget] = useState<CollectiveView | null>(null);
   const [configTarget, setConfigTarget] = useState<CollectiveView | null>(null);
+  const [manageTarget, setManageTarget] = useState<CollectiveView | null>(null);
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
 
   const eligibleLinks = fullMutualLinks(activeLinks);
@@ -127,7 +135,7 @@ export function VenueCollectivesPanel({
             disabled={eligibleLinks.length === 0}
             title={
               eligibleLinks.length === 0
-                ? 'You need at least one link sharing full calendar detail both ways.'
+                ? 'You need at least one link granting create/edit/cancel access both ways.'
                 : undefined
             }
             onClick={() => {
@@ -152,7 +160,7 @@ export function VenueCollectivesPanel({
         ) : collectives.length === 0 ? (
           <p className="text-sm text-slate-500">
             {eligibleLinks.length === 0
-              ? 'Collectives need a link that shares full calendar detail in both directions. Create one above first.'
+              ? 'A combined page needs a link granting create/edit/cancel access in both directions. Create one above first.'
               : 'No venue collectives yet. Create one to offer a combined booking page.'}
           </p>
         ) : (
@@ -174,6 +182,10 @@ export function VenueCollectivesPanel({
               onConfigure={() => {
                 setError(null);
                 setConfigTarget(c);
+              }}
+              onManage={() => {
+                setError(null);
+                setManageTarget(c);
               }}
               onConfirm={setConfirm}
               onDissolve={() =>
@@ -240,6 +252,28 @@ export function VenueCollectivesPanel({
         />
       ) : null}
 
+      {manageTarget ? (
+        <CombinedPageManager
+          collective={manageTarget}
+          onClose={() => setManageTarget(null)}
+          onChanged={async () => {
+            // Refresh the list AND re-point the open manager at the fresh view so
+            // a mode/address change is reflected without closing the modal.
+            try {
+              const res = await fetch('/api/venue/collectives');
+              const json = await res.json();
+              if (res.ok) {
+                const list: CollectiveView[] = json.collectives ?? [];
+                setCollectives(list);
+                setManageTarget((cur) => (cur ? list.find((c) => c.id === cur.id) ?? cur : cur));
+              }
+            } catch {
+              /* non-fatal: the manager shows its own errors */
+            }
+          }}
+        />
+      ) : null}
+
       <ConfirmModal
         state={confirm}
         busy={busy}
@@ -258,6 +292,7 @@ function CollectiveRow({
   onEdit,
   onInvite,
   onConfigure,
+  onManage,
   onConfirm,
   onDissolve,
 }: {
@@ -268,6 +303,7 @@ function CollectiveRow({
   onEdit: () => void;
   onInvite: () => void;
   onConfigure: () => void;
+  onManage: () => void;
   onConfirm: (state: ConfirmState) => void;
   onDissolve: () => void;
 }) {
@@ -315,6 +351,11 @@ function CollectiveRow({
                 Active
               </Pill>
             )}
+            {collective.pageMode === 'unified_catalog' && !dissolved ? (
+              <Pill variant="brand" size="sm">
+                Combined
+              </Pill>
+            ) : null}
           </div>
           <p className="mt-1 text-xs text-slate-600">
             {collective.activeMemberCount} active{' '}
@@ -395,6 +436,11 @@ function CollectiveRow({
 
       {!dissolved ? (
         <div className="mt-3 flex flex-wrap gap-2">
+          {collective.isHost || isActiveMember ? (
+            <button type="button" className={btnSecondary} disabled={busy} onClick={onManage}>
+              {collective.isHost ? 'Manage combined page' : 'Combined page'}
+            </button>
+          ) : null}
           {invited ? (
             <>
               <button
@@ -649,25 +695,15 @@ function CreateCollectiveModal({
             <option value="by_service_type">Group by service type</option>
           </select>
         </label>
-        {/* §7.6 — cross-venue "any practitioner" routing isn't built yet, so we
-            don't surface a live toggle that would promise it (a false promise). */}
-        <div className="flex items-start gap-2 rounded-lg bg-slate-50 px-3 py-2">
-          <input
-            type="checkbox"
-            disabled
-            className="mt-0.5 rounded border-slate-300"
-            aria-label="Any available practitioner (coming soon)"
-          />
-          <span className="text-sm text-slate-400">
-            Offer an &ldquo;any available practitioner&rdquo; option across the collective —{' '}
-            <span className="font-medium">coming soon</span>.
-          </span>
-        </div>
+        <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
+          Your combined page shows one services menu and one team across all members, like a single
+          venue. You’ll choose which services to offer and customise the page after creating it.
+        </p>
 
         <div>
           <p className="text-sm font-medium text-slate-700">Invite linked venues</p>
           <p className="text-xs text-slate-500">
-            Only venues with a full mutual link to {venueName} can be invited.
+            Only venues granting create/edit/cancel access both ways with {venueName} can be invited.
           </p>
           <div className="mt-2 space-y-1">
             {eligibleLinks.length === 0 ? (
@@ -869,7 +905,7 @@ function InviteMemberModal({
       onClose={onClose}
       busy={busy}
       title={`Invite a venue to ${collective.name}`}
-      description="The venue must hold a full mutual link with every current member."
+      description="The venue must grant create/edit/cancel access both ways with every current member."
     >
       <div className="space-y-3">
         {invitable.length === 0 ? (

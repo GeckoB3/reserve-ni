@@ -10,10 +10,16 @@ async function loadHostedCollective(
 ) {
   const { data } = await admin
     .from('venue_collectives')
-    .select('id, host_venue_id, status, name')
+    .select('id, host_venue_id, status, name, page_mode')
     .eq('id', collectiveId)
     .maybeSingle();
-  return data as { id: string; host_venue_id: string; status: string; name: string } | null;
+  return data as {
+    id: string;
+    host_venue_id: string;
+    status: string;
+    name: string;
+    page_mode: string;
+  } | null;
 }
 
 /** PATCH /api/venue/collectives/[id] — host edits collective settings. */
@@ -100,6 +106,55 @@ export async function PATCH(
     if (parsed.data.allowAnyPractitioner !== undefined) {
       updates.allow_any_practitioner = parsed.data.allowAnyPractitioner;
     }
+    // Single-venue-grade page customisation (plan §22 / G6) — host-curated.
+    if (parsed.data.bookingPageConfig !== undefined) {
+      updates.booking_page_config = parsed.data.bookingPageConfig;
+    }
+
+    // Combined booking page — where it is served (plan D1).
+    if (parsed.data.slugStrategy !== undefined) {
+      if (parsed.data.slugStrategy === 'adopt_member') {
+        const adoptId = parsed.data.adoptedVenueId;
+        if (!adoptId) {
+          return NextResponse.json(
+            { error: 'Choose which member venue’s booking address to use.' },
+            { status: 400 },
+          );
+        }
+        const { data: memberRow } = await ctx.admin
+          .from('venue_collective_members')
+          .select('id')
+          .eq('collective_id', id)
+          .eq('venue_id', adoptId)
+          .eq('status', 'active')
+          .maybeSingle();
+        if (!memberRow) {
+          return NextResponse.json(
+            { error: 'That venue is not an active member of this collective.' },
+            { status: 400 },
+          );
+        }
+        const { data: clash } = await ctx.admin
+          .from('venue_collectives')
+          .select('id')
+          .eq('adopted_venue_id', adoptId)
+          .eq('status', 'active')
+          .neq('id', id)
+          .maybeSingle();
+        if (clash) {
+          return NextResponse.json(
+            { error: 'That venue’s booking address is already used by another combined page.' },
+            { status: 409 },
+          );
+        }
+        updates.slug_strategy = 'adopt_member';
+        updates.adopted_venue_id = adoptId;
+      } else {
+        updates.slug_strategy = 'dedicated';
+        updates.adopted_venue_id = null;
+      }
+    }
+
     if (Object.keys(updates).length === 0) {
       return NextResponse.json({ error: 'No changes supplied.' }, { status: 400 });
     }
