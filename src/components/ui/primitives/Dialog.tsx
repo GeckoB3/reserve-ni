@@ -13,6 +13,15 @@ const sizeClasses: Record<DialogSize, string> = {
   lg: 'max-w-3xl',
 };
 
+/**
+ * True when `cls` contains an *unconditional* `max-w-*` utility (at the start or
+ * after whitespace) rather than only a responsive variant like `lg:max-w-lg`.
+ * Used to decide whether a caller's width override should replace the preset size.
+ */
+function hasUnconditionalMaxWidth(cls: string | undefined): boolean {
+  return cls ? /(?:^|\s)max-w-/.test(cls) : false;
+}
+
 export interface DialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -64,7 +73,13 @@ export function Dialog({
           onClick={(e) => e.stopPropagation()}
           className={cn(
             'fixed left-1/2 top-1/2 z-[var(--z-modal)] flex min-h-0 max-h-[min(90dvh,90vh)] w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl bg-white shadow-xl focus:outline-none',
-            sizeClasses[size],
+            // `cn` only concatenates (no tailwind-merge), so emitting the preset
+            // size alongside a caller's `max-w-*` override leaves both classes on the
+            // element and the cascade picks unpredictably. When the caller supplies an
+            // *unconditional* max-width (not a responsive `lg:max-w-*` variant, which
+            // still needs the preset as its small-screen cap), drop the preset so the
+            // override always wins.
+            hasUnconditionalMaxWidth(contentClassName) ? undefined : sizeClasses[size],
             contentClassName,
           )}
         >

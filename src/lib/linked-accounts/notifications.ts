@@ -476,6 +476,64 @@ export async function notifyCollectiveDissolved(
 }
 
 /**
+ * Combined booking page (plan §7) — the host added one of a member's calendars
+ * to the shared catalogue, so that service is now live on the combined page at
+ * the member's own price/duration. Informational; sent to the member for
+ * transparency (no approval step — joining the collective is the consent).
+ */
+export async function notifyCombinedProviderProposed(
+  admin: SupabaseClient,
+  memberVenueId: string,
+  collectiveName: string,
+  hostVenueName: string,
+  offeringName: string,
+  collectiveId?: string,
+): Promise<void> {
+  await notifyVenue(
+    admin,
+    memberVenueId,
+    `“${offeringName}” is now on the ${collectiveName} combined page`,
+    {
+      heading: 'Added to the combined booking page',
+      paragraphs: [
+        `${hostVenueName} added your “${offeringName}” to the “${collectiveName}” combined booking page. It’s now bookable there at your own service’s price and duration.`,
+        'Manage that service — including its price, duration and availability — from your own Services settings.',
+      ],
+      ctaLabel: 'Open settings',
+      ctaUrl: settingsUrl(),
+    },
+    { type: 'combined_provider_proposed', category: 'lifecycle', collectiveId },
+  );
+}
+
+/**
+ * Combined booking page — the host switched the collective to a combined
+ * catalogue. Sent to each active member so they know to curate their listing.
+ */
+export async function notifyCombinedPageEnabled(
+  admin: SupabaseClient,
+  memberVenueId: string,
+  collectiveName: string,
+  collectiveId?: string,
+): Promise<void> {
+  await notifyVenue(
+    admin,
+    memberVenueId,
+    `${collectiveName} now has a combined booking page`,
+    {
+      heading: 'Combined booking page enabled',
+      paragraphs: [
+        `The “${collectiveName}” collective now offers a single combined booking page with a merged service menu.`,
+        'When the host adds one of your calendars to an offering, you’ll be asked to approve the price and duration shown for it.',
+      ],
+      ctaLabel: 'View combined page',
+      ctaUrl: settingsUrl(),
+    },
+    { type: 'combined_page_enabled', category: 'lifecycle', collectiveId },
+  );
+}
+
+/**
  * §17.3 — email the owning venue when a linked venue creates / reschedules /
  * cancels / edits a booking in its calendar, gated by the owning venue's
  * per-category email preferences (§17.4). The matching in-app notification is

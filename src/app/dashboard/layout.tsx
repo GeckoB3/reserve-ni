@@ -30,6 +30,7 @@ import { StaffRebookBootstrapRouteCleanup } from '@/components/dashboard/StaffRe
 import { isVenueSubscriptionExpiredCancelled } from '@/lib/billing/subscription-entitlement';
 import { LinkedAccountBanner } from '@/components/linked-accounts/LinkedAccountBanner';
 import { venueHasAcceptedLink } from '@/lib/linked-accounts/queries';
+import { loadCollectiveBookingLinksForVenue } from '@/lib/linked-accounts/collectives';
 import { WaitlistAvailabilityBanner } from '@/components/dashboard/waitlist/WaitlistAvailabilityBanner';
 import { isRestaurantTableProductTier } from '@/lib/tier-enforcement';
 import { DEFAULT_RESOLVED_APPOINTMENTS_FEATURE_FLAGS, parseVenueFeatureFlags, resolveAppointmentsFeatureFlags } from '@/lib/feature-flags';
@@ -59,6 +60,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   let venueId: string | undefined;
   let isAdmin = false;
   let hasLinkedAccounts = false;
+  let collectiveBookingLinks: { id: string; name: string; url: string }[] = [];
   let planStatus: string = 'active';
   let subscriptionExpiredCancelled = false;
   let onboardingCompleted = true;
@@ -176,6 +178,10 @@ export default async function DashboardLayout({ children }: { children: React.Re
     if (venueId && isAdmin && !isRestaurantTableProductTier(pricingTier)) {
       hasLinkedAccounts = await venueHasAcceptedLink(admin, venueId);
     }
+    // Combined-page booking links for the sidebar (plan §23) — any staff sees them.
+    if (venueId && !isRestaurantTableProductTier(pricingTier)) {
+      collectiveBookingLinks = await loadCollectiveBookingLinksForVenue(admin, venueId);
+    }
   } catch (e) {
     if (e && typeof e === 'object' && 'digest' in e) throw e;
   }
@@ -203,6 +209,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
           venueTerminology,
           complianceRecordsEnabled: appointmentsFeatureFlags.compliance_records_enabled,
           hasLinkedAccounts,
+          collectiveBookingLinks,
         }}
       >
       <main className="dashboard-coarse-inputs min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-y-contain bg-slate-100/80 pt-[calc(3.5rem+env(safe-area-inset-top,0px))] lg:pt-0">

@@ -1,5 +1,35 @@
-import { describe, expect, it } from 'vitest';
-import { selectReplacementHost } from './collectives';
+import { describe, expect, it, vi, beforeEach } from 'vitest';
+import {
+  selectReplacementHost,
+  planProviderStatuses,
+  hasFullMutualWriteLinks,
+} from './collectives';
+import { getAcceptedLinkBetween } from './queries';
+
+vi.mock('./queries', () => ({ getAcceptedLinkBetween: vi.fn() }));
+const mockGetLink = vi.mocked(getAcceptedLinkBetween);
+
+/** A minimal accepted-link row builder for the write-gate tests. */
+function linkRow(
+  overrides: Partial<{
+    low_grants_calendar: string;
+    high_grants_calendar: string;
+    low_grants_act: string;
+    high_grants_act: string;
+    low_grants_calendar_ids: string[] | null;
+    high_grants_calendar_ids: string[] | null;
+  }> = {},
+) {
+  return {
+    low_grants_calendar: 'full_details',
+    high_grants_calendar: 'full_details',
+    low_grants_act: 'create_edit_cancel',
+    high_grants_act: 'create_edit_cancel',
+    low_grants_calendar_ids: null,
+    high_grants_calendar_ids: null,
+    ...overrides,
+  } as never;
+}
 
 describe('selectReplacementHost', () => {
   it('returns null when there are no survivors', () => {
@@ -55,5 +85,91 @@ describe('selectReplacementHost', () => {
     const snapshot = survivors.map((s) => s.venueId);
     selectReplacementHost(survivors);
     expect(survivors.map((s) => s.venueId)).toEqual(snapshot);
+  });
+});
+
+describe('planProviderStatuses', () => {
+  it('removes providers whose venue was removed from the collective', () => {
+    const changes = planProviderStatuses(
+      [{ id: 'p1', venueId: 'gone', status: 'active' }],
+      ['gone'],
+      {},
+    );
+    expect(changes).toEqual([{ id: 'p1', status: 'removed' }]);
+  });
+
+  it('suspends providers of a member that lost full mutual write', () => {
+    const changes = planProviderStatuses(
+      [{ id: 'p1', venueId: 'v1', status: 'active' }],
+      [],
+      { v1: false },
+    );
+    expect(changes).toEqual([{ id: 'p1', status: 'suspended' }]);
+  });
+
+  it('reactivates a suspended provider once write is restored', () => {
+    const changes = planProviderStatuses(
+      [{ id: 'p1', venueId: 'v1', status: 'suspended' }],
+      [],
+      { v1: true },
+    );
+    expect(changes).toEqual([{ id: 'p1', status: 'active' }]);
+  });
+
+  it('omits providers whose status is unchanged', () => {
+    const changes = planProviderStatuses(
+      [
+        { id: 'p1', venueId: 'v1', status: 'active' },
+        { id: 'p2', venueId: 'v2', status: 'suspended' },
+      ],
+      [],
+      { v1: true, v2: false },
+    );
+    expect(changes).toEqual([]);
+  });
+
+  it('never resurrects an already-removed provider', () => {
+    const changes = planProviderStatuses(
+      [{ id: 'p1', venueId: 'v1', status: 'removed' }],
+      [],
+      { v1: true },
+    );
+    expect(changes).toEqual([]);
+  });
+});
+
+describe('hasFullMutualWriteLinks', () => {
+  const admin = {} as never;
+  beforeEach(() => mockGetLink.mockReset());
+
+  it('is true when every pair holds full mutual create_edit_cancel, unscoped', async () => {
+    mockGetLink.mockResolvedValue(linkRow());
+    await expect(hasFullMutualWriteLinks(admin, 'v1', ['v2', 'v3'])).resolves.toBe(true);
+  });
+
+  it('is false when a link is missing', async () => {
+    mockGetLink.mockResolvedValue(null);
+    await expect(hasFullMutualWriteLinks(admin, 'v1', ['v2'])).resolves.toBe(false);
+  });
+
+  it('is false when one direction is only edit_existing', async () => {
+    mockGetLink.mockResolvedValue(linkRow({ high_grants_act: 'edit_existing' }));
+    await expect(hasFullMutualWriteLinks(admin, 'v1', ['v2'])).resolves.toBe(false);
+  });
+
+  it('is false when calendar visibility is not full_details both ways', async () => {
+    mockGetLink.mockResolvedValue(linkRow({ low_grants_calendar: 'time_only' }));
+    await expect(hasFullMutualWriteLinks(admin, 'v1', ['v2'])).resolves.toBe(false);
+  });
+
+  it('is false when the write grant is §18-scoped to specific calendars', async () => {
+    mockGetLink.mockResolvedValue(linkRow({ low_grants_calendar_ids: ['cal-1'] }));
+    await expect(hasFullMutualWriteLinks(admin, 'v1', ['v2'])).resolves.toBe(false);
+  });
+
+  it('skips the caller venue id in the list', async () => {
+    mockGetLink.mockResolvedValue(linkRow());
+    await hasFullMutualWriteLinks(admin, 'v1', ['v1', 'v2']);
+    expect(mockGetLink).toHaveBeenCalledTimes(1);
   });
 });

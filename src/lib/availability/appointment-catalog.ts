@@ -59,7 +59,7 @@ export interface AppointmentCatalogPractitioner {
   }>;
 }
 
-function variantToCatalog(v: ServiceVariant): AppointmentCatalogVariant {
+export function variantToCatalog(v: ServiceVariant): AppointmentCatalogVariant {
   return {
     id: v.id,
     name: v.name,

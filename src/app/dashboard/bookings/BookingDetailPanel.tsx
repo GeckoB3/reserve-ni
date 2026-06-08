@@ -680,6 +680,27 @@ export function BookingDetailPanel({
     />
   ) : null;
 
+  /**
+   * Sticky close header for the calendar popover — keeps an explicit X in the top-right while the
+   * (scrollable) content is read, which is the only obvious dismiss affordance on mobile. Shared by
+   * the optimistic-hold and hydrated layouts so the button does not flicker out once detail loads.
+   * Omitted for modal/drawer, whose surfaces already render their own close control.
+   */
+  const popoverCloseHeader = isPopover ? (
+    <div className="sticky top-0 z-10 flex items-center justify-end border-b border-slate-100 bg-white/95 px-2 py-1.5 backdrop-blur-sm">
+      <button
+        type="button"
+        aria-label="Close booking detail"
+        onClick={onClose}
+        className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
+      >
+        <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" aria-hidden>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+        </svg>
+      </button>
+    </div>
+  ) : null;
+
   const nestedDetailPanelEl =
     nestedBookingOpen && stackDepth + 1 < BOOKING_DETAIL_MAX_STACK_DEPTH ? (
       <BookingDetailPanel
@@ -821,18 +842,7 @@ export function BookingDetailPanel({
           nestedBookingOpen={nestedBookingOpen != null}
           panelClassName={bookingDetailPanelClassName('popover', 'expanded-popover')}
         >
-            <div className="flex items-center justify-end border-b border-slate-100 bg-white/95 px-2 py-1.5">
-              <button
-                type="button"
-                aria-label="Close booking detail"
-                onClick={onClose}
-                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-              >
-                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
+            {popoverCloseHeader}
             <ExpandedBookingContent
               booking={{
                 id: d.id,
@@ -946,6 +956,7 @@ export function BookingDetailPanel({
           nestedBookingOpen={nestedBookingOpen != null}
           panelClassName={bookingDetailPanelClassName(isModal ? 'modal' : 'popover', isModal ? 'modal' : 'expanded-popover')}
         >
+          {popoverCloseHeader}
           <BookingDetailExpandedContent ctx={expandedCtx} />
         </BookingDetailSurface>
         <ConfirmDialog

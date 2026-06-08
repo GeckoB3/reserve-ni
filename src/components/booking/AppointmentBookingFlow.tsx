@@ -116,6 +116,25 @@ function catalogVariantsForServiceId(catalogStaff: CatalogPractitioner[], servic
   return [];
 }
 
+/**
+ * Variants for a service, scoped to a specific calendar when given. Combined pages
+ * need this because each calendar's source service has its OWN variants; omitting the
+ * id (single venue) falls back to first-match, where all calendars share the same set.
+ */
+function catalogVariantsForServiceFromStaff(
+  catalogStaff: CatalogPractitioner[],
+  serviceId: string,
+  practitionerId?: string | null,
+): CatalogVariant[] {
+  if (practitionerId) {
+    const scoped = catalogStaff
+      .find((p) => p.id === practitionerId)
+      ?.services.find((s) => s.id === serviceId)?.variants;
+    if (scoped) return scoped;
+  }
+  return catalogVariantsForServiceId(catalogStaff, serviceId);
+}
+
 /** Returns the (active, visible-online) add-on groups for a given service id, or an empty list. */
 function catalogAddonGroupsForServiceId(
   catalogStaff: CatalogPractitioner[],
@@ -157,13 +176,22 @@ function addonSelectionDetails(
   catalogStaff: CatalogPractitioner[],
   serviceId: string,
   addonIds: string[],
+  /**
+   * Combined page: add-ons live on the CHOSEN calendar's own source service, so
+   * resolve groups from that calendar. Omitted (single venue) → first-match, where
+   * every calendar offering the service shares the same groups anyway.
+   */
+  practitionerId?: string | null,
 ): {
   filteredIds: string[];
   totalPence: number;
   totalMinutes: number;
   lines: Array<{ id: string; name: string; pricePence: number; durationMinutes: number }>;
 } {
-  const groups = catalogAddonGroupsForServiceId(catalogStaff, serviceId);
+  const scoped = practitionerId
+    ? catalogStaff.find((p) => p.id === practitionerId)?.services.find((s) => s.id === serviceId)?.addon_groups
+    : undefined;
+  const groups = scoped ?? catalogAddonGroupsForServiceId(catalogStaff, serviceId);
   const idSet = new Set(addonIds);
   const lines: Array<{ id: string; name: string; pricePence: number; durationMinutes: number }> = [];
   let totalPence = 0;
@@ -282,6 +310,8 @@ interface CatalogPractitioner {
     variants?: CatalogVariant[];
     /** Add-on groups linked to this service (visible online). Public catalog filters hidden ones. */
     addon_groups?: import('@/types/booking-models').AppointmentCatalogAddonGroup[];
+    /** Combined page only: whether "any available" may be offered (false → pick a calendar). */
+    any_available?: boolean;
   }>;
 }
 
@@ -373,6 +403,8 @@ interface AppointmentBookingFlowProps {
   lockedPractitioner?: { id: string; name: string; bookingSlug: string };
   /** §7.7: set when this flow is mounted inside a venue collective page. */
   collectiveId?: string;
+  /** Combined page: the offering id, so the create call resolves the price/duration override. */
+  collectiveServiceItemId?: string;
   bookingAudience?: BookingFlowAudience;
   onBookingCreated?: () => void;
   initialDate?: string;
@@ -455,6 +487,7 @@ export function AppointmentBookingFlow({
   accentColour,
   lockedPractitioner,
   collectiveId,
+  collectiveServiceItemId,
   bookingAudience = 'public',
   onBookingCreated,
   initialDate,
@@ -1088,6 +1121,8 @@ export function AppointmentBookingFlow({
         !isEdit &&
         tasks.length > 1
       ) {
+        // Combined pages: the any-available pool is only shown when calendars share the
+        // same options; an unused prefetch here is harmless, so we don't gate it.
         tasks.push({
           practitionerId: ANY_AVAILABLE_PRACTITIONER_ID,
           serviceId: selectedServiceId,
@@ -1368,12 +1403,47 @@ export function AppointmentBookingFlow({
   const selectedService = uniqueServices.find((s) => s.id === selectedServiceId);
   const selectedServiceForPractitioner =
     selectedPrac?.services.find((s) => s.id === selectedServiceId) ?? selectedService;
+  /**
+   * Combined booking page (venue collective): variants/add-ons live on the CHOSEN
+   * calendar's own source service, so the flow resolves the calendar before them and
+   * these lookups are practitioner-scoped (empty until a calendar is picked).
+   */
+  const isCombined = Boolean(venue.is_collective);
   /** Variants the customer can pick from for the currently selected service (active only). */
   const variantsForSelectedService = useMemo<CatalogVariant[]>(() => {
     if (!selectedServiceId) return [];
+    if (isCombined) {
+      if (!selectedPractitionerId) return [];
+      const prac = catalogStaff.find((p) => p.id === selectedPractitionerId);
+      return prac?.services.find((s) => s.id === selectedServiceId)?.variants ?? [];
+    }
     return catalogVariantsForServiceId(catalogStaff, selectedServiceId);
-  }, [catalogStaff, selectedServiceId]);
+  }, [catalogStaff, selectedServiceId, isCombined, selectedPractitionerId]);
   const serviceHasVariants = variantsForSelectedService.length > 0;
+  /** Add-on groups for the selected service — practitioner-scoped on a combined page. */
+  const addonGroupsForSelectedService = useMemo<import('@/types/booking-models').AppointmentCatalogAddonGroup[]>(() => {
+    if (!selectedServiceId) return [];
+    if (isCombined) {
+      if (!selectedPractitionerId) return [];
+      const prac = catalogStaff.find((p) => p.id === selectedPractitionerId);
+      return prac?.services.find((s) => s.id === selectedServiceId)?.addon_groups ?? [];
+    }
+    return catalogAddonGroupsForServiceId(catalogStaff, selectedServiceId);
+  }, [catalogStaff, selectedServiceId, isCombined, selectedPractitionerId]);
+  const serviceHasAddons = addonGroupsForSelectedService.length > 0;
+  /**
+   * Combined page: "any available" is only safe when an offering's calendars share the
+   * same options (the merged catalog marks this per offering). Otherwise the customer
+   * must pick a specific calendar to reach its variants/add-ons.
+   */
+  const selectedOfferingAnyAvailable = useMemo(() => {
+    if (!isCombined || !selectedServiceId) return true;
+    for (const p of catalogStaff) {
+      const s = p.services.find((x) => x.id === selectedServiceId);
+      if (s) return s.any_available !== false;
+    }
+    return true;
+  }, [isCombined, selectedServiceId, catalogStaff]);
   const selectedVariant = useMemo<CatalogVariant | null>(() => {
     if (!selectedVariantId) return null;
     return variantsForSelectedService.find((v) => v.id === selectedVariantId) ?? null;
@@ -1475,8 +1545,9 @@ export function AppointmentBookingFlow({
           'Staff member';
       }
       // Fold the current add-on selection into this segment so the chain math,
-      // review card, and server consecutive-slot check all agree.
-      const segmentAddonGroups = catalogAddonGroupsForServiceId(catalogStaff, selectedServiceId);
+      // review card, and server consecutive-slot check all agree. Practitioner-scoped
+      // (= first-match for single venues; the chosen calendar's groups on a combined page).
+      const segmentAddonGroups = addonGroupsForSelectedService;
       const segmentAddonIdSet = new Set(selectedAddonIds);
       let addonTotalPence = 0;
       let addonTotalMinutes = 0;
@@ -1523,6 +1594,7 @@ export function AppointmentBookingFlow({
       pooledSlotsRaw,
       anyAvailableAssignmentConfig,
       catalogStaff,
+      addonGroupsForSelectedService,
     ],
   );
 
@@ -1737,7 +1809,7 @@ export function AppointmentBookingFlow({
       const offer = catalogOfferWithVariant(baseOffer, variantId) ?? baseOffer;
       const firstStart = multiServiceSegments[0]!.startTime;
       const nextOnline = onlineChargeFromCatalogOffer(offer);
-      const addonInfo = addonSelectionDetails(catalogStaff, serviceId, addonIds);
+      const addonInfo = addonSelectionDetails(catalogStaff, serviceId, addonIds, visitPractitioner.id);
       // Full payment rolls add-on price into the online charge; deposits do not.
       const depositWithAddons =
         (nextOnline?.amountPence ?? 0) +
@@ -1784,7 +1856,7 @@ export function AppointmentBookingFlow({
         return 'Unable to update extras.';
       }
       const seg = multiServiceSegments[index]!;
-      const addonInfo = addonSelectionDetails(catalogStaff, seg.serviceId, addonIds);
+      const addonInfo = addonSelectionDetails(catalogStaff, seg.serviceId, addonIds, seg.practitionerId);
       const baseDuration = seg.durationMinutes - (seg.addonTotalMinutes ?? 0);
       const baseDeposit =
         seg.depositPence - (seg.onlineChargeLabel === 'full_payment' ? seg.addonTotalPence ?? 0 : 0);
@@ -1881,6 +1953,7 @@ export function AppointmentBookingFlow({
               })),
               marketing_consent: details.marketing_consent,
               collective_id: collectiveId,
+              collective_service_item_id: collectiveServiceItemId,
             }),
           });
           const data = await res.json();
@@ -1995,6 +2068,7 @@ export function AppointmentBookingFlow({
             occasion: details.occasion,
             marketing_consent: details.marketing_consent,
             collective_id: collectiveId,
+            collective_service_item_id: collectiveServiceItemId,
             ...(singleCreateAddonIds.length > 0
               ? { addons: singleCreateAddonIds.map((id) => ({ addon_id: id })) }
               : {}),
@@ -2042,6 +2116,7 @@ export function AppointmentBookingFlow({
       selectedServiceForPractitioner,
       onBookingCreated,
       collectiveId,
+      collectiveServiceItemId,
       isPublicGuest,
       accountGate,
       publicCreateErrorMessage,
@@ -2496,6 +2571,12 @@ export function AppointmentBookingFlow({
                   setSelectedServiceId(svc.id);
                   setSelectedVariantId(null);
                   setSelectedAddonIds([]);
+                  // Combined page: resolve the calendar (and therefore the venue) BEFORE
+                  // variants/add-ons — those live on the chosen calendar's source service.
+                  if (isCombined) {
+                    setStep('practitioner');
+                    return;
+                  }
                   if (serviceHasVariants) {
                     setStep('variant');
                     return;
@@ -2652,6 +2733,11 @@ export function AppointmentBookingFlow({
               setSelectedVariantId(null);
               setDurationPopoverOpenForKey(null);
               setDurationPopoverServiceId(null);
+              if (isCombined) {
+                // Calendar-first: variant → calendar (the practitioner step).
+                setStep('practitioner');
+                return;
+              }
               if (isLockedPractitionerFlow) {
                 setSelectedServiceId(null);
               }
@@ -2684,6 +2770,19 @@ export function AppointmentBookingFlow({
                     onClick={() => {
                       setSelectedVariantId(variant.id);
                       setSelectedAddonIds([]);
+                      // Combined page: the calendar is already chosen — add-ons next (its
+                      // own), else straight to slots.
+                      if (isCombined) {
+                        if (serviceHasAddons) {
+                          setStep('addons');
+                          return;
+                        }
+                        if (selectedPractitionerId && selectedServiceId) {
+                          primeSelectedAppointmentCalendar(selectedPractitionerId, selectedServiceId, primeDuration, variant.id);
+                        }
+                        setStep('slot');
+                        return;
+                      }
                       const hasAddonGroups =
                         selectedServiceId != null &&
                         catalogAddonGroupsForServiceId(catalogStaff, selectedServiceId).length > 0;
@@ -2929,7 +3028,9 @@ export function AppointmentBookingFlow({
             });
             return;
           }
-          if (isLockedPractitionerFlow && selectedPractitionerId && selectedServiceId) {
+          if ((isLockedPractitionerFlow || isCombined) && selectedPractitionerId && selectedServiceId) {
+            // Combined page: the calendar is already chosen, so prime it (with the
+            // variant/add-on duration) and head straight to slots.
             primeSelectedAppointmentCalendar(
               selectedPractitionerId,
               selectedServiceId,
@@ -2937,7 +3038,7 @@ export function AppointmentBookingFlow({
               selectedVariantId ?? null,
             );
           }
-          setStep(isLockedPractitionerFlow ? 'slot' : 'practitioner');
+          setStep(isLockedPractitionerFlow || isCombined ? 'slot' : 'practitioner');
         }
         return (
           <div>
@@ -2951,6 +3052,11 @@ export function AppointmentBookingFlow({
                   return;
                 }
                 setSelectedAddonIds([]);
+                if (isCombined) {
+                  // Calendar-first: unwind add-ons → variant → calendar (never to service).
+                  setStep(serviceHasVariants ? 'variant' : 'practitioner');
+                  return;
+                }
                 setStep(serviceHasVariants ? 'variant' : 'service');
               }}
               className="mb-3 inline-flex items-center gap-1 text-sm text-brand-600 hover:text-brand-700"
@@ -3065,6 +3171,18 @@ export function AppointmentBookingFlow({
         <div>
           <button
             onClick={() => {
+              if (isCombined) {
+                // Calendar-first: practitioner is reached straight from service, so
+                // Back returns there (variants/add-ons come AFTER the calendar).
+                setSelectedVariantId(null);
+                setSelectedAddonIds([]);
+                setDurationPopoverServiceId(null);
+                setDurationPopoverOpenForKey(null);
+                setSelectedPractitionerId(null);
+                if (!isEdit) setSelectedServiceId(null);
+                setStep('service');
+                return;
+              }
               const hasAddonGroups =
                 selectedServiceId != null &&
                 catalogAddonGroupsForServiceId(catalogStaff, selectedServiceId).length > 0;
@@ -3114,7 +3232,7 @@ export function AppointmentBookingFlow({
             </div>
           ) : (
             <div className="space-y-2">
-              {anyAvailablePractitionerEnabled && practitionersForSelectedService.length > 1 && !isEdit ? (
+              {anyAvailablePractitionerEnabled && practitionersForSelectedService.length > 1 && !isEdit && (!isCombined || selectedOfferingAnyAvailable) ? (
                 <button
                   type="button"
                   onClick={() => {
@@ -3165,6 +3283,19 @@ export function AppointmentBookingFlow({
                         );
                       }
                       setSelectedPractitionerId(prac.id);
+                      // Combined page: now that the calendar (venue) is chosen, collect ITS
+                      // own variants/add-ons before slots.
+                      if (isCombined) {
+                        const pracOffer = prac.services.find((s) => s.id === selectedServiceId);
+                        if ((pracOffer?.variants?.length ?? 0) > 0) {
+                          setStep('variant');
+                          return;
+                        }
+                        if ((pracOffer?.addon_groups?.length ?? 0) > 0) {
+                          setStep('addons');
+                          return;
+                        }
+                      }
                       setStep('slot');
                     }}
                     className={choiceCardClass}
@@ -3194,6 +3325,20 @@ export function AppointmentBookingFlow({
               onClick={() => {
                 setSelectedTime(null);
                 setMultiServiceSegments(null);
+                if (isCombined) {
+                  // Combined page (calendar-first): unwind slot → add-ons → variant → calendar.
+                  if (serviceHasAddons) {
+                    setStep('addons');
+                    return;
+                  }
+                  if (serviceHasVariants) {
+                    setStep('variant');
+                    return;
+                  }
+                  setSelectedPractitionerId(null);
+                  setStep('practitioner');
+                  return;
+                }
                 if (isLockedPractitionerFlow) {
                   if (serviceHasVariants) {
                     setStep('variant');
@@ -3216,6 +3361,20 @@ export function AppointmentBookingFlow({
               onClick={() => {
                 setSelectedTime(null);
                 setMultiServiceSegments(null);
+                if (isCombined) {
+                  // Combined page (calendar-first): unwind slot → add-ons → variant → calendar.
+                  if (serviceHasAddons) {
+                    setStep('addons');
+                    return;
+                  }
+                  if (serviceHasVariants) {
+                    setStep('variant');
+                    return;
+                  }
+                  setSelectedPractitionerId(null);
+                  setStep('practitioner');
+                  return;
+                }
                 if (isLockedPractitionerFlow) {
                   if (serviceHasVariants) {
                     setStep('variant');
@@ -3403,14 +3562,14 @@ export function AppointmentBookingFlow({
             lines={multiServiceSegments.map((s) => ({
               serviceName: s.serviceName,
               variantName: s.serviceVariantId
-                ? catalogVariantsForServiceId(catalogStaff, s.serviceId).find((v) => v.id === s.serviceVariantId)?.name ?? null
+                ? catalogVariantsForServiceFromStaff(catalogStaff, s.serviceId, s.practitionerId).find((v) => v.id === s.serviceVariantId)?.name ?? null
                 : null,
               practitionerName: s.practitionerName,
               startTime: s.startTime,
               durationMinutes: s.durationMinutes,
               pricePence: s.pricePence,
               depositPence: s.depositPence,
-              extras: addonSelectionDetails(catalogStaff, s.serviceId, s.addonIds ?? []).lines.map((l) => ({
+              extras: addonSelectionDetails(catalogStaff, s.serviceId, s.addonIds ?? [], s.practitionerId).lines.map((l) => ({
                 name: l.name,
                 pricePence: l.pricePence,
                 durationMinutes: l.durationMinutes,
@@ -3615,7 +3774,7 @@ export function AppointmentBookingFlow({
                 lines={multiServiceSegments.map((s) => ({
                   serviceName: s.serviceName,
                   variantName: s.serviceVariantId
-                    ? catalogVariantsForServiceId(catalogStaff, s.serviceId).find((v) => v.id === s.serviceVariantId)?.name ?? null
+                    ? catalogVariantsForServiceFromStaff(catalogStaff, s.serviceId, s.practitionerId).find((v) => v.id === s.serviceVariantId)?.name ?? null
                     : null,
                   practitionerName: s.practitionerName,
                   startTime: s.startTime,
@@ -3623,7 +3782,7 @@ export function AppointmentBookingFlow({
                   pricePence: s.pricePence,
                   depositPence: s.depositPence,
                   chargeKind: s.onlineChargeLabel,
-                  extras: addonSelectionDetails(catalogStaff, s.serviceId, s.addonIds ?? []).lines.map((l) => ({
+                  extras: addonSelectionDetails(catalogStaff, s.serviceId, s.addonIds ?? [], s.practitionerId).lines.map((l) => ({
                     name: l.name,
                     pricePence: l.pricePence,
                     durationMinutes: l.durationMinutes,

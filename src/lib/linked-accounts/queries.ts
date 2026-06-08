@@ -94,13 +94,17 @@ export async function getAcceptedLinkBetween(
   venueBId: string,
 ): Promise<AccountLinkRow | null> {
   const { low, high } = orderVenuePair(venueAId, venueBId);
-  const { data } = await admin
+  const { data, error } = await admin
     .from('account_links')
     .select(LINK_COLUMNS)
     .eq('venue_low_id', low)
     .eq('venue_high_id', high)
     .eq('status', 'accepted')
     .maybeSingle();
+  // Surface real read failures instead of swallowing them as "no link" — callers like
+  // reconcileCollective take irreversible action (dissolve) on a null result, so a
+  // transient error must NOT masquerade as a missing link.
+  if (error) throw new Error(`Failed to read account link: ${error.message}`);
   return (data as unknown as AccountLinkRow | null) ?? null;
 }
 

@@ -6,6 +6,8 @@ import { isUnifiedSchedulingVenue, venueUsesUnifiedAppointmentData } from '@/lib
 import { nextResponseIfPublicBookingBlockedForVenue } from '@/lib/booking/light-plan-public-block';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
+import { isCollectiveId } from '@/lib/linked-accounts/collective-booking-bridge';
+import { loadCollectiveAppointmentCatalog } from '@/lib/linked-accounts/collective-venue';
 
 /**
  * GET /api/booking/appointment-catalog?venue_id=uuid
@@ -25,6 +27,15 @@ export async function GET(request: NextRequest) {
     const includeHiddenRequested = url.searchParams.get('include_hidden') === 'true';
 
     const supabase = getSupabaseAdminClient();
+
+    // Combined booking page (plan §22): the venue id is actually a collective —
+    // return the merged "virtual venue" catalogue (offerings as services, the
+    // union of provider calendars as staff).
+    if (await isCollectiveId(supabase, venueId)) {
+      const catalog = await loadCollectiveAppointmentCatalog(supabase, venueId);
+      return NextResponse.json(catalog);
+    }
+
     const blocked = await nextResponseIfPublicBookingBlockedForVenue(supabase, venueId);
     if (blocked) return blocked;
 

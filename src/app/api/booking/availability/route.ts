@@ -47,6 +47,10 @@ import { DEFAULT_ENTITY_BOOKING_WINDOW, loadServiceEntityBookingWindow } from '@
 import { listActiveAreasForVenue } from '@/lib/areas/resolve-default-area';
 import { nextResponseIfPublicBookingBlockedForVenue } from '@/lib/booking/light-plan-public-block';
 import { loadActiveWaitlistOfferForGuestAccess } from '@/lib/booking/validate-waitlist-offer-access';
+import {
+  isCollectiveId,
+  loadCollectiveDayAvailability,
+} from '@/lib/linked-accounts/collective-booking-bridge';
 import type { EngineServiceResult, ServiceAvailableSlot } from '@/types/availability';
 
 /** Public availability can request C/D/E explicitly when the venue primary is another model (multi-tab embed). */
@@ -338,6 +342,16 @@ export async function GET(request: NextRequest) {
     }
 
     const supabase = getSupabaseAdminClient();
+
+    // Combined booking page (plan §22): a collective id is NOT a venue row, so the
+    // `appointmentVenue` gate below (driven by resolveVenueMode) would skip the
+    // appointment path and the day slots would never be computed. Route it explicitly
+    // to the appointment handler (which resolves the merged collective availability),
+    // mirroring how the month/appointment-calendar route checks isCollectiveId first.
+    if (await isCollectiveId(supabase, venueId)) {
+      return handleAppointmentAvailability(supabase, venueId, dateStr, searchParams);
+    }
+
     const blocked = await nextResponseIfPublicBookingBlockedForVenue(supabase, venueId);
     if (blocked) return blocked;
 
@@ -512,6 +526,25 @@ async function handleAppointmentAvailability(
   const serviceId = searchParams.get('service_id') ?? undefined;
   const anyAvailable =
     searchParams.get('any_available') === '1' || searchParams.get('any_available') === 'true';
+
+  // Combined booking page (plan §22): the venue id is a collective — compute the
+  // merged availability (resolving each offering+calendar to its owning venue).
+  if (await isCollectiveId(supabase, venueId)) {
+    if (!serviceId) {
+      return NextResponse.json({ error: 'service_id is required' }, { status: 400 });
+    }
+    const durParam = searchParams.get('duration_minutes');
+    const durParsed = durParam ? parseInt(durParam, 10) : NaN;
+    const result = await loadCollectiveDayAvailability(supabase, {
+      collectiveId: venueId,
+      offeringId: serviceId,
+      calendarId: practitionerId ?? null,
+      anyAvailable,
+      date,
+      durationMinutes: Number.isFinite(durParsed) ? durParsed : null,
+    });
+    return NextResponse.json(result);
+  }
 
   let anyAvailableVenueFlags: ReturnType<typeof parseVenueFeatureFlags> | null = null;
   if (anyAvailable) {

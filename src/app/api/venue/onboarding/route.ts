@@ -9,6 +9,7 @@ import {
 import { isAppointmentPlanTier } from '@/lib/tier-enforcement';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { normalizeWebsiteUrlForStorage } from '@/lib/urls/website-url';
+import { candidateVenueSlugs, firstAvailableVenueSlug } from '@/lib/venue/unique-venue-slug';
 
 const onboardingEmailSchema = z.string().trim().email().max(255);
 
@@ -75,8 +76,18 @@ export async function PATCH(request: Request) {
       updates.website_url = normalizedWebsiteUrl;
     }
 
+    // The client derives this slug from the business name. We don't write it directly: a unique
+    // variant is resolved below so a name that clashes with an existing venue never blocks
+    // onboarding (the URL can be changed later in venue settings).
+    let preferredSlug: string | null = null;
     if (typeof body.slug === 'string' && body.slug.trim()) {
-      updates.slug = body.slug.trim().toLowerCase().replace(/[^a-z0-9-]/g, '-');
+      preferredSlug =
+        body.slug
+          .trim()
+          .toLowerCase()
+          .replace(/[^a-z0-9-]+/g, '-')
+          .replace(/-+/g, '-')
+          .replace(/^-+|-+$/g, '') || null;
     }
 
     if (typeof body.currency === 'string' && ['GBP', 'EUR'].includes(body.currency)) {
@@ -110,32 +121,76 @@ export async function PATCH(request: Request) {
       updates.enabled_models = activeModelsToLegacyEnabledModels(activeModels, bookingModel);
     }
 
-    if (Object.keys(updates).length === 0) {
+    if (Object.keys(updates).length === 0 && !preferredSlug) {
       return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 });
     }
 
-    const { error: updateError } = await admin
-      .from('venues')
-      .update(updates)
-      .eq('id', staff.venue_id);
+    // Resolve a unique booking-page slug, then persist. A clashing business name must never block
+    // onboarding, so we pick the first free variant automatically — preferred slug, then the
+    // de-hyphenated form, then `-2`, `-3`, … — and retry on the rare race where a chosen variant is
+    // taken between the availability check and the write.
+    const slugCandidates = preferredSlug ? candidateVenueSlugs(preferredSlug) : [];
+    let currentSlug: string | null = null;
+    if (preferredSlug) {
+      const { data: current } = await admin
+        .from('venues')
+        .select('slug')
+        .eq('id', staff.venue_id)
+        .single();
+      currentSlug = (current as { slug?: string | null } | null)?.slug ?? null;
+    }
 
-    if (updateError) {
-      if (updateError.code === '23505') {
-        return NextResponse.json(
-          {
-            error:
-              'That booking page address is already taken by another venue. Choose a different slug (lowercase letters, numbers, and hyphens only).',
-          },
-          { status: 409 },
-        );
+    const maxAttempts = preferredSlug ? 4 : 1;
+    let lastError: { code?: string; message: string } | null = null;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      if (preferredSlug) {
+        if (currentSlug && slugCandidates.includes(currentSlug)) {
+          // The venue already holds a valid unique variant of this name — keep it so re-submitting
+          // the profile step doesn't churn the booking URL.
+          updates.slug = currentSlug;
+        } else {
+          const { data: clashes } = await admin
+            .from('venues')
+            .select('slug')
+            .in('slug', slugCandidates)
+            .neq('id', staff.venue_id);
+          const taken = new Set((clashes ?? []).map((row) => (row as { slug: string }).slug));
+          updates.slug =
+            firstAvailableVenueSlug(preferredSlug, (slug) => taken.has(slug)) ??
+            `${preferredSlug}-${Date.now().toString(36)}`;
+        }
       }
+
+      const { error: updateError } = await admin
+        .from('venues')
+        .update(updates)
+        .eq('id', staff.venue_id);
+
+      if (!updateError) {
+        lastError = null;
+        break;
+      }
+      lastError = updateError;
+      // Only a slug-uniqueness race is retryable; the next pass re-queries and skips the taken one.
+      const retryableSlugRace =
+        updateError.code === '23505' &&
+        preferredSlug !== null &&
+        currentSlug !== updates.slug &&
+        attempt < maxAttempts;
+      if (!retryableSlugRace) break;
+    }
+
+    if (lastError) {
       return NextResponse.json(
-        { error: 'Failed to update: ' + updateError.message },
-        { status: 500 }
+        { error: 'Failed to update: ' + lastError.message },
+        { status: 500 },
       );
     }
 
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({
+      ok: true,
+      slug: typeof updates.slug === 'string' ? updates.slug : undefined,
+    });
   } catch (err) {
     console.error('[venue/onboarding] Error:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

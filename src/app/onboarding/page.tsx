@@ -1539,18 +1539,15 @@ export default function OnboardingPage() {
             onboarding_step: nextStep,
           }),
         });
-        const resBody = (await res.json().catch(() => ({}))) as { error?: string };
+        const resBody = (await res.json().catch(() => ({}))) as { error?: string; slug?: string };
         if (!res.ok) {
-          const apiErr = resBody.error ?? 'Failed to save profile';
-          if (res.status === 409 && /slug/i.test(apiErr)) {
-            setError(
-              'That booking page address is already taken (it is generated from your business name). Change your business name slightly—for example add your town or a distinguishing word—then try again.',
-            );
-            setSaving(false);
-            return;
-          }
-          throw new Error(apiErr);
+          throw new Error(resBody.error ?? 'Failed to save profile');
         }
+        // A business name that clashes with another venue no longer errors: the server picks a
+        // unique booking-page URL automatically (e.g. drops the hyphen or appends a number) and
+        // it can be changed later in venue settings. Use whatever slug the server actually saved.
+        const savedSlug =
+          typeof resBody.slug === 'string' && resBody.slug ? resBody.slug : finalSlug;
         setVenue((prev) =>
           prev
             ? {
@@ -1560,7 +1557,7 @@ export default function OnboardingPage() {
                 phone: phone.trim(),
                 email: email || null,
                 website_url: websiteUrl || null,
-                slug: finalSlug,
+                slug: savedSlug,
                 currency,
               }
             : prev

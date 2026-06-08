@@ -1,41 +1,31 @@
 'use client';
 
-import { useMemo } from 'react';
 import { BookPublicLayout } from '@/components/booking/BookPublicLayout';
-import { venueSettingsToPreviewPublic } from '@/lib/booking/venue-settings-to-preview-public';
-import type { BookingPageConfig } from '@/lib/booking/booking-page-theme';
+import type { VenuePublic } from '@/components/booking/types';
 import type { BookingPagePublicService } from '@/lib/booking/booking-page-tabs';
-import type { VenueSettings } from '../types';
 
-interface BookingPageLivePreviewProps {
-  venue: VenueSettings;
-  bookingPageConfig: BookingPageConfig;
-  /** Slug shown in preview (draft input or saved). */
-  previewSlug: string;
+interface InlineBookingPreviewProps {
+  /** Synthetic public venue built from draft branding (no iframe). */
+  previewVenue: VenuePublic;
   device: 'mobile' | 'desktop';
-  /** Bump only when the user clicks “Refresh” in the preview panel. */
+  /** Bump only when the user clicks "Refresh" in the preview panel. */
   remountKey?: number;
   services?: BookingPagePublicService[];
   team?: Array<{ id: string; name: string }>;
 }
 
 /**
- * In-dashboard booking page preview — uses draft branding from form state (no iframe).
+ * In-dashboard live preview of the public booking page. Renders the real
+ * `BookPublicLayout` from a draft `VenuePublic` — no iframe. Shared by the
+ * single-venue editor and the collective combined-page editor.
  */
-export function BookingPageLivePreview({
-  venue,
-  bookingPageConfig,
-  previewSlug,
+export function InlineBookingPreview({
+  previewVenue,
   device,
   remountKey = 0,
   services = [],
   team = [],
-}: BookingPageLivePreviewProps) {
-  const previewVenue = useMemo(
-    () => venueSettingsToPreviewPublic(venue, bookingPageConfig, { slug: previewSlug }),
-    [venue, bookingPageConfig, previewSlug],
-  );
-
+}: InlineBookingPreviewProps) {
   const width = device === 'mobile' ? 390 : '100%';
 
   return (

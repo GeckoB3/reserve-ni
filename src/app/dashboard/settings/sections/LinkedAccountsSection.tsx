@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useRouter } from 'next/navigation';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { Pill } from '@/components/ui/dashboard/Pill';
 import {
@@ -130,6 +131,7 @@ export function LinkedAccountsSection(props: { venueName: string }) {
 
 function LinkedAccountsSectionInner({ venueName }: { venueName: string }) {
   const { addToast } = useToast();
+  const router = useRouter();
   const [data, setData] = useState<ApiData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -263,6 +265,11 @@ function LinkedAccountsSectionInner({ venueName }: { venueName: string }) {
       try {
         await fn();
         addToast(success, 'success');
+        // A link change can dissolve/alter a collective (server reconcile), which
+        // changes the dashboard layout's server-rendered sidebar (combined-page
+        // link) and notification bell. Refresh the server tree so they update
+        // without a hard reload — App Router doesn't re-render the layout on its own.
+        router.refresh();
         return true;
       } catch (err) {
         const msg = err instanceof Error ? err.message : failure;
@@ -273,7 +280,7 @@ function LinkedAccountsSectionInner({ venueName }: { venueName: string }) {
         setBusyLinkId(null);
       }
     },
-    [addToast],
+    [addToast, router],
   );
 
   const performUnlink = async (link: AccountLinkView) => {

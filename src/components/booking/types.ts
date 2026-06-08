@@ -37,6 +37,12 @@ export interface VenuePublic {
   areas?: Array<{ id: string; name: string; colour: string; sort_order: number }>;
   /** Appointments Light: booking page paused when free period ended without payment. */
   booking_paused?: boolean;
+  /**
+   * True when this "venue" is actually a venue collective's combined page. The
+   * appointment flow then resolves the calendar BEFORE variants/add-ons, since those
+   * (and price/duration) live on each member venue's own source service.
+   */
+  is_collective?: boolean;
   /** When true, guests must sign in before completing an online booking. */
   require_account_login_for_bookings?: boolean;
   /** Resolved Phase 1a feature flags for public booking (subset). */

@@ -55,6 +55,10 @@ interface Props {
   lockedPractitioner?: LockedPractitionerBooking | null;
   /** §7.7: set when this flow is mounted inside a venue collective page. */
   collectiveId?: string;
+  /** Combined page: the offering id, so the create call resolves the price/duration override. */
+  collectiveServiceItemId?: string;
+  /** Combined page: pre-select a specific calendar/practitioner by id (no slug needed). */
+  preselectedPractitionerId?: string;
   /** Waitlist offer deep link — pre-fills booking and bypasses min-notice for offered slots. */
   waitlistOfferEntryId?: string;
   preselectedServiceId?: string;
@@ -84,6 +88,8 @@ export function BookingFlowRouter({
   accentColour,
   lockedPractitioner,
   collectiveId,
+  collectiveServiceItemId,
+  preselectedPractitionerId,
   waitlistOfferEntryId,
   preselectedServiceId,
   initialDate,
@@ -104,6 +110,8 @@ export function BookingFlowRouter({
           accentColour={accentColour}
           lockedPractitioner={lockedPractitioner ?? undefined}
           collectiveId={collectiveId}
+          collectiveServiceItemId={collectiveServiceItemId}
+          preselectedPractitionerId={preselectedPractitionerId}
           waitlistOfferEntryId={waitlistOfferEntryId}
           preselectedServiceId={preselectedServiceId}
           initialDate={initialDate}

@@ -70,60 +70,67 @@ export function bookingCalendarBlockCardStyle(
   if (opts.linked) {
     // Linked (other-venue) cards must be instantly distinct from own-venue cards
     // *without relying on colour alone* (§19.1, WCAG 1.4.1): a dashed border, a
-    // subtle diagonal hatch, and a desaturating slate veil read clearly even in
-    // greyscale, while the status hue still shows through underneath.
+    // subtle diagonal hatch, and a light veil read clearly even in greyscale,
+    // while the saturated status hue still shows boldly underneath. The veil is
+    // kept light enough that white bar text stays legible over the fill.
     return {
       color: p.text,
       backgroundColor: p.bg,
       backgroundImage: [
-        'repeating-linear-gradient(45deg, rgba(15,23,42,0.06) 0, rgba(15,23,42,0.06) 1px, rgba(255,255,255,0) 1px, rgba(255,255,255,0) 6px)',
-        'linear-gradient(177deg, rgba(248,250,252,0.72) 0%, rgba(248,250,252,0.46) 42%, rgba(248,250,252,0.34) 100%)',
+        'repeating-linear-gradient(45deg, rgba(255,255,255,0.16) 0, rgba(255,255,255,0.16) 1px, rgba(255,255,255,0) 1px, rgba(255,255,255,0) 7px)',
+        'linear-gradient(176deg, rgba(255,255,255,0.26) 0%, rgba(255,255,255,0.10) 34%, rgba(255,255,255,0) 60%, rgba(0,0,0,0.10) 100%)',
         `linear-gradient(0deg, ${p.bg}, ${p.bg})`,
       ].join(', '),
       borderStyle: 'dashed',
       borderWidth: 1,
       borderColor: p.border,
       boxShadow: [
-        'inset 0 1px 0 rgba(255,255,255,0.7)',
-        '0 1px 2px rgba(15,23,42,0.05)',
-        '0 10px 22px -14px rgba(2,32,71,0.20)',
+        'inset 0 1px 0 rgba(255,255,255,0.28)',
+        '0 1px 2px rgba(15,23,42,0.10)',
+        '0 12px 24px -14px rgba(2,32,71,0.40)',
       ].join(', '),
     };
   }
   return {
     color: p.text,
-    // Frosted-glass surface: a white sheen over the status hue, easing to a faint
-    // shadow at the base for depth. `backgroundColor` stays as a robust fallback.
+    // Bold saturated fill is the hero. A restrained top-light → base-shade sheen
+    // gives the lozenge a crafted, dimensional gloss *without* washing out the
+    // colour, and a soft brand-tinted drop shadow lifts it off the pale grid so
+    // each bar reads boldly. `backgroundColor` stays as a robust fallback.
     backgroundColor: p.bg,
     backgroundImage:
-      'linear-gradient(177deg, rgba(255,255,255,0.62) 0%, rgba(255,255,255,0.14) 32%, rgba(255,255,255,0) 58%, rgba(15,23,42,0.04) 100%)',
+      'linear-gradient(176deg, rgba(255,255,255,0.20) 0%, rgba(255,255,255,0.06) 30%, rgba(255,255,255,0) 55%, rgba(0,0,0,0.12) 100%)',
     borderStyle: 'solid',
     borderWidth: 1,
     borderColor: p.border,
     boxShadow: [
-      'inset 0 1px 0 rgba(255,255,255,0.85)', // crisp top edge
-      'inset 0 -1px 0 rgba(15,23,42,0.05)', // grounded bottom edge
-      '0 1px 2px rgba(15,23,42,0.06)', // tight contact shadow
-      '0 14px 28px -12px rgba(2,32,71,0.26)', // soft brand-tinted lift
+      'inset 0 1px 0 rgba(255,255,255,0.30)', // glossy top edge
+      'inset 0 -1px 0 rgba(0,0,0,0.12)', // grounded base edge
+      '0 1px 2px rgba(15,23,42,0.10)', // tight contact shadow
+      '0 16px 30px -14px rgba(2,32,71,0.42)', // soft brand-tinted lift
     ].join(', '),
   };
 }
 
 /**
- * Status stripe for calendar booking bars. Rendered as the first column so drag handles
- * and inner content cannot cover a CSS border-left on the card shell. A glossy gradient
- * (top-light → base-shade) gives it a polished, dimensional accent rather than a flat bar.
+ * Left highlight for calendar booking bars. Now that the bar's saturated fill carries the
+ * status hue, this column is a purely decorative *glass* edge: a luminous top-light → soft-fade
+ * gloss that catches light along the leading edge, giving each lozenge a crafted, dimensional
+ * finish. Rendered as the first column so drag handles and inner content can't cover it. The
+ * `palette` argument is retained for API stability (and future per-status tuning).
  */
-export function CalendarBookingStatusStripe({ palette }: { palette: BookingBlockPalette }): ReactElement {
+export function CalendarBookingStatusStripe(
+  _props: { palette: BookingBlockPalette },
+): ReactElement {
   return createElement('div', {
     className: 'pointer-events-none z-[3] shrink-0 self-stretch rounded-l-[15px]',
     style: {
-      width: 5,
-      minWidth: 5,
-      backgroundColor: palette.accent,
+      width: 4,
+      minWidth: 4,
+      backgroundColor: 'rgba(255,255,255,0.22)',
       backgroundImage:
-        'linear-gradient(180deg, rgba(255,255,255,0.5) 0%, rgba(255,255,255,0.12) 42%, rgba(0,0,0,0.18) 100%)',
-      boxShadow: 'inset -1px 0 0 rgba(255,255,255,0.35), 1px 0 4px rgba(2,32,71,0.10)',
+        'linear-gradient(180deg, rgba(255,255,255,0.70) 0%, rgba(255,255,255,0.30) 45%, rgba(255,255,255,0.08) 100%)',
+      boxShadow: 'inset -1px 0 0 rgba(255,255,255,0.30), 1px 0 0 rgba(0,0,0,0.06)',
     },
     'aria-hidden': true,
   });

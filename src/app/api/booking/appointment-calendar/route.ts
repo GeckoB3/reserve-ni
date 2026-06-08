@@ -20,6 +20,10 @@ import { loadActiveVariantForService } from '@/lib/venue/service-variants';
 import { loadAddonsForBooking } from '@/lib/addons/addon-resolution';
 import { validateAddonSelections } from '@/lib/addons/addon-selection-validation';
 import { venueUsesUnifiedAppointmentServiceData } from '@/lib/booking/uses-unified-appointment-data';
+import {
+  isCollectiveId,
+  loadCollectiveMonthAvailableDates,
+} from '@/lib/linked-accounts/collective-booking-bridge';
 
 /**
  * GET /api/booking/appointment-calendar?venue_id=&practitioner_id=&service_id=&year=&month=
@@ -68,6 +72,24 @@ export async function GET(request: NextRequest) {
     }
 
     const supabase = getSupabaseAdminClient();
+
+    // Combined booking page (plan §22): the venue id is a collective — union the
+    // provider calendars' month availability for the chosen offering.
+    if (await isCollectiveId(supabase, venueId)) {
+      const result = await loadCollectiveMonthAvailableDates(supabase, {
+        collectiveId: venueId,
+        offeringId: serviceId,
+        calendarId: practitionerId,
+        anyAvailable,
+        year,
+        month,
+        durationMinutes: customDurationMinutes,
+      });
+      return NextResponse.json(result, {
+        headers: { 'Cache-Control': 'public, s-maxage=45, stale-while-revalidate=120' },
+      });
+    }
+
     const blocked = await nextResponseIfPublicBookingBlockedForVenue(supabase, venueId);
     if (blocked) return blocked;
 
