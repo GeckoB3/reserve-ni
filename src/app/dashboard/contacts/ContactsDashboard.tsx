@@ -1079,6 +1079,19 @@ export function ContactsDashboard({
 
   const toolbarDatePlaceholder = isoDateToday();
 
+  /**
+   * Clear the active contact search and show all contacts again. The search popover
+   * unmounts when closed (so its local query resets on reopen); clearing the parent
+   * search + debounced value here reloads the full list immediately, without a page
+   * reload. Surfaced as an "x" on the Search chip and a button in the empty state.
+   */
+  const clearSearch = useCallback(() => {
+    setSearch('');
+    setDebouncedSearch('');
+    setPage(0);
+  }, []);
+  const searchActive = debouncedSearch.trim().length > 0;
+
   const contactsSummaryContent = useMemo(
     () => (
       <div className="flex flex-wrap items-center gap-1 text-[11px] sm:gap-1.5 sm:text-xs" aria-label="Directory overview">
@@ -1111,16 +1124,27 @@ export function ContactsDashboard({
           </span>
         ) : null}
         {debouncedSearch ? (
-          <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-brand-100 bg-brand-50/80 px-1.5 py-0.5 font-medium text-brand-900">
+          <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-brand-100 bg-brand-50/80 py-0.5 pl-1.5 pr-1 font-medium text-brand-900">
             <span className="font-normal text-brand-700/80">Search</span>
             <span className="max-w-full min-w-0 break-all sm:break-words" title={debouncedSearch}>
               {debouncedSearch}
             </span>
+            <button
+              type="button"
+              onClick={clearSearch}
+              aria-label="Clear search and show all contacts"
+              title="Clear search"
+              className="ml-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-brand-700/70 transition-colors hover:bg-brand-100 hover:text-brand-900 focus:outline-none focus:ring-2 focus:ring-brand-300"
+            >
+              <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" aria-hidden>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+              </svg>
+            </button>
           </span>
         ) : null}
       </div>
     ),
-    [totalCount, page, totalPages, segment, segmentTag, filter, debouncedSearch],
+    [totalCount, page, totalPages, segment, segmentTag, filter, debouncedSearch, clearSearch],
   );
 
   const selectRowClass = (selected: boolean) =>
@@ -1688,7 +1712,24 @@ export function ContactsDashboard({
           {loading ? (
             <DashboardListSkeleton rowCount={7} />
           ) : guests.length === 0 && directoryRows.length === 0 ? (
-            <EmptyState title={emptyTitle} description={emptyDescription} />
+            <EmptyState
+              title={emptyTitle}
+              description={emptyDescription}
+              action={
+                searchActive ? (
+                  <button
+                    type="button"
+                    onClick={clearSearch}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 shadow-sm transition-colors hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-brand-300"
+                  >
+                    <svg className="h-4 w-4 text-slate-500" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+                    </svg>
+                    Clear search
+                  </button>
+                ) : undefined
+              }
+            />
           ) : (
             <div className="space-y-3">
               {/* Select-all bar */}
