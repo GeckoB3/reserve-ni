@@ -61,11 +61,12 @@ describe('resolveCollectiveServiceOverride', () => {
     await expect(resolveCollectiveServiceOverride(admin, baseParams)).resolves.toBeNull();
   });
 
-  it('resolves effective price/duration from the provider override', async () => {
+  it('uses the source service price/duration — ignoring any provider override', async () => {
     const admin = makeAdmin({
-      collective_service_items: { id: 'item-1', collective_id: 'col-1', default_price_pence: 6000, default_duration_minutes: 50, status: 'active' },
+      collective_service_items: { id: 'item-1', collective_id: 'col-1', status: 'active' },
       venue_collectives: { id: 'col-1', status: 'active', page_mode: 'unified_catalog' },
       venue_collective_members: { id: 'mem-1' },
+      // Legacy override columns are present but MUST be ignored — each venue owns its terms.
       collective_service_providers: [
         { id: 'prov-1', practitioner_id: null, price_pence_override: 4500, duration_minutes_override: 60 },
       ],
@@ -73,41 +74,42 @@ describe('resolveCollectiveServiceOverride', () => {
     });
     await expect(resolveCollectiveServiceOverride(admin, baseParams)).resolves.toEqual({
       collectiveServiceItemId: 'item-1',
-      pricePence: 4500,
-      durationMinutes: 60,
+      pricePence: 7000, // the venue's own service price
+      durationMinutes: 45,
     });
   });
 
-  it('falls back to item default then source when no provider override is set', async () => {
+  it('uses the source service even if a stale item default exists', async () => {
     const admin = makeAdmin({
-      collective_service_items: { id: 'item-1', collective_id: 'col-1', default_price_pence: 6000, default_duration_minutes: null, status: 'active' },
+      // A legacy default_price_pence is present but no longer consulted.
+      collective_service_items: { id: 'item-1', collective_id: 'col-1', default_price_pence: 6000, status: 'active' },
       venue_collectives: { id: 'col-1', status: 'active', page_mode: 'unified_catalog' },
       venue_collective_members: { id: 'mem-1' },
       collective_service_providers: [
-        { id: 'prov-1', practitioner_id: null, price_pence_override: null, duration_minutes_override: null },
+        { id: 'prov-1', practitioner_id: null },
       ],
       appointment_services: { price_pence: 7000, duration_minutes: 45 },
     });
     await expect(resolveCollectiveServiceOverride(admin, baseParams)).resolves.toEqual({
       collectiveServiceItemId: 'item-1',
-      pricePence: 6000, // item default
-      durationMinutes: 45, // source (no item default duration)
+      pricePence: 7000, // source, not the 6000 item default
+      durationMinutes: 45,
     });
   });
 
-  it('prefers a practitioner-pinned provider over a venue-wide one', async () => {
+  it('still prefers a practitioner-pinned provider, charged at the source price', async () => {
     const admin = makeAdmin({
-      collective_service_items: { id: 'item-1', collective_id: 'col-1', default_price_pence: null, default_duration_minutes: null, status: 'active' },
+      collective_service_items: { id: 'item-1', collective_id: 'col-1', status: 'active' },
       venue_collectives: { id: 'col-1', status: 'active', page_mode: 'unified_catalog' },
       venue_collective_members: { id: 'mem-1' },
       collective_service_providers: [
-        { id: 'all', practitioner_id: null, price_pence_override: 5000, duration_minutes_override: 50 },
-        { id: 'pinned', practitioner_id: 'pr-9', price_pence_override: 4000, duration_minutes_override: 40 },
+        { id: 'all', practitioner_id: null },
+        { id: 'pinned', practitioner_id: 'pr-9' },
       ],
       appointment_services: { price_pence: 9000, duration_minutes: 90 },
     });
     const out = await resolveCollectiveServiceOverride(admin, { ...baseParams, practitionerId: 'pr-9' });
-    expect(out?.pricePence).toBe(4000);
-    expect(out?.durationMinutes).toBe(40);
+    expect(out?.pricePence).toBe(9000);
+    expect(out?.durationMinutes).toBe(90);
   });
 });

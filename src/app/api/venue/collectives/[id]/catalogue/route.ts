@@ -5,14 +5,13 @@ import { catalogueActionSchema, type CatalogueActionInput } from '@/lib/linked-a
 import {
   loadCatalogueForManagement,
   loadVenueCatalogueData,
-  providerApprovalOnCreate,
-  approvalAfterTermsChange,
+  backfillPerCalendarProviders,
 } from '@/lib/linked-accounts/catalogue';
+import { loadCollectiveAccess } from '@/lib/linked-accounts/collective-access';
+import { loadCollectiveMemberImportSources } from '@/lib/linked-accounts/collective-page-config';
+import { ensureServiceForCalendar, loadOfferingTemplate } from '@/lib/linked-accounts/service-duplication';
 import { loadVenueLookup } from '@/lib/linked-accounts/queries';
-import {
-  notifyCombinedProviderProposed,
-  notifyCombinedProviderDecision,
-} from '@/lib/linked-accounts/notifications';
+import { notifyCombinedProviderProposed } from '@/lib/linked-accounts/notifications';
 
 /** Best-effort: notification failures must never fail a catalogue action. */
 async function safeNotify(p: Promise<unknown>): Promise<void> {
@@ -45,44 +44,6 @@ async function offeringName(admin: SupabaseClient, itemId: string): Promise<stri
   return (data?.name as string) ?? 'an offering';
 }
 
-interface CollectiveAccess {
-  id: string;
-  hostVenueId: string;
-  status: string;
-  pageMode: string;
-  isHost: boolean;
-  memberId: string | null;
-}
-
-/** Resolve the caller's relationship to a collective (host / active member). */
-async function loadCollectiveAccess(
-  admin: SupabaseClient,
-  collectiveId: string,
-  venueId: string,
-): Promise<CollectiveAccess | null> {
-  const { data: collective } = await admin
-    .from('venue_collectives')
-    .select('id, host_venue_id, status, page_mode')
-    .eq('id', collectiveId)
-    .maybeSingle();
-  if (!collective) return null;
-  const { data: member } = await admin
-    .from('venue_collective_members')
-    .select('id')
-    .eq('collective_id', collectiveId)
-    .eq('venue_id', venueId)
-    .eq('status', 'active')
-    .maybeSingle();
-  return {
-    id: collective.id as string,
-    hostVenueId: collective.host_venue_id as string,
-    status: collective.status as string,
-    pageMode: collective.page_mode as string,
-    isHost: (collective.host_venue_id as string) === venueId,
-    memberId: (member?.id as string | null) ?? null,
-  };
-}
-
 /** GET /api/venue/collectives/[id]/catalogue — the builder dataset (host + members). */
 export async function GET(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const resolved = await resolveLinkAdmin();
@@ -96,25 +57,22 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
     if (!access.isHost && !access.memberId) {
       return NextResponse.json({ error: 'You are not a member of this collective.' }, { status: 403 });
     }
+    // Self-heal legacy venue-wide providers so the per-calendar checkboxes are accurate.
+    if (access.isHost) await backfillPerCalendarProviders(ctx.admin, id);
     const catalogue = await loadCatalogueForManagement(ctx.admin, id);
-    return NextResponse.json({ catalogue });
+    // Host-only: each active member's saved booking-page settings, so the host can
+    // prefill the combined page from a member venue ("import from", plan §22 / P4).
+    const importSources = access.isHost
+      ? await loadCollectiveMemberImportSources(ctx.admin, id)
+      : [];
+    return NextResponse.json({ catalogue, importSources });
   } catch (err) {
     console.error('GET /api/venue/collectives/[id]/catalogue failed:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
-const HOST_ACTIONS = new Set([
-  'create_item',
-  'update_item',
-  'archive_item',
-  'add_provider',
-  'update_provider',
-  'remove_provider',
-]);
-const MEMBER_ACTIONS = new Set(['approve_provider', 'reject_provider', 'set_provider_terms']);
-
-/** PATCH /api/venue/collectives/[id]/catalogue — host curation + member consent. */
+/** PATCH /api/venue/collectives/[id]/catalogue — host-curated structure (host only). */
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const resolved = await resolveLinkAdmin();
   if (!resolved.ok) return resolved.response;
@@ -145,14 +103,11 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     if (access.status !== 'active') {
       return NextResponse.json({ error: 'This collective has been dissolved.' }, { status: 409 });
     }
-    if (HOST_ACTIONS.has(input.action) && !access.isHost) {
+    if (!access.isHost) {
       return NextResponse.json(
-        { error: 'Only the host venue can curate the catalogue.' },
+        { error: 'Only the host venue can manage the combined page.' },
         { status: 403 },
       );
-    }
-    if (MEMBER_ACTIONS.has(input.action) && !access.memberId && !access.isHost) {
-      return NextResponse.json({ error: 'You are not a member of this collective.' }, { status: 403 });
     }
 
     const result = await applyCatalogueAction(ctx.admin, id, ctx.venueId, ctx.userId, input);
@@ -170,14 +125,25 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
 type ActionResult = { ok: true } | { ok: false; error: string; status: number };
 
-/** Verify a (venue, service, practitioner) triple belongs to an active member and is live. */
-async function validateProviderSource(
+/**
+ * Add provider rows for an offering, PER CALENDAR (plan §23 / R1). A specific
+ * `practitionerId` adds that one calendar (which must offer the carrier service
+ * `sourceServiceId`); a null `practitionerId` expands to every calendar in the
+ * venue that offers the service. Model-agnostic (service_items / unified_calendars
+ * as well as legacy). Re-activates a previously-removed provider; ignores ones
+ * already active. Returns whether anything was added + the member venue id.
+ */
+async function addProvidersForSource(
   admin: SupabaseClient,
   collectiveId: string,
+  itemId: string,
   venueId: string,
   sourceServiceId: string,
   practitionerId: string | null,
-): Promise<{ ok: true; memberId: string } | { ok: false; error: string; status: number }> {
+  actingVenueId: string,
+  userId: string | null,
+  overrides?: { pricePence?: number | null; durationMinutes?: number | null },
+): Promise<{ ok: true; added: number } | { ok: false; error: string; status: number }> {
   const { data: member } = await admin
     .from('venue_collective_members')
     .select('id')
@@ -188,17 +154,140 @@ async function validateProviderSource(
   if (!member) {
     return { ok: false, error: 'That venue is not an active member of this collective.', status: 400 };
   }
-  // Validate the service + calendar MODEL-AGNOSTICALLY (the venue may be on the
-  // legacy practitioner_appointment model OR unified_scheduling — service_items /
-  // unified_calendars). loadVenueCatalogueData normalises both.
   const data = await loadVenueCatalogueData(admin, venueId);
   if (!data.services.has(sourceServiceId)) {
     return { ok: false, error: 'That service is not available at the chosen venue.', status: 400 };
   }
-  if (practitionerId && !data.calendars.has(practitionerId)) {
-    return { ok: false, error: 'That practitioner is not available at the chosen venue.', status: 400 };
+  const offeringCalendars = data.serviceCalendars.get(sourceServiceId) ?? [];
+  let calendarIds: string[];
+  if (practitionerId) {
+    if (!offeringCalendars.includes(practitionerId)) {
+      return { ok: false, error: 'That calendar does not offer the chosen service.', status: 400 };
+    }
+    calendarIds = [practitionerId];
+  } else {
+    calendarIds = offeringCalendars;
   }
-  return { ok: true, memberId: member.id as string };
+  if (calendarIds.length === 0) {
+    return { ok: false, error: 'No calendars offer that service.', status: 400 };
+  }
+
+  // Host-curated: assignments go live immediately (no per-service member consent).
+  const approval = 'approved' as const;
+  const approvedBy = userId;
+  let added = 0;
+  for (const calId of calendarIds) {
+    const { data: existing } = await admin
+      .from('collective_service_providers')
+      .select('id, status')
+      .eq('item_id', itemId)
+      .eq('venue_id', venueId)
+      .eq('source_service_id', sourceServiceId)
+      .eq('practitioner_id', calId)
+      .maybeSingle();
+    if (existing) {
+      if ((existing.status as string) === 'removed') {
+        await admin
+          .from('collective_service_providers')
+          .update({
+            status: 'active',
+            approval_status: approval,
+            approved_by_user_id: approvedBy,
+            price_pence_override: overrides?.pricePence ?? null,
+            duration_minutes_override: overrides?.durationMinutes ?? null,
+          })
+          .eq('id', existing.id);
+        added += 1;
+      }
+      continue;
+    }
+    await admin.from('collective_service_providers').insert({
+      item_id: itemId,
+      member_id: member.id,
+      venue_id: venueId,
+      source_service_id: sourceServiceId,
+      practitioner_id: calId,
+      price_pence_override: overrides?.pricePence ?? null,
+      duration_minutes_override: overrides?.durationMinutes ?? null,
+      approval_status: approval,
+      approved_by_user_id: approvedBy,
+      status: 'active',
+    });
+    added += 1;
+  }
+  return { ok: true, added };
+}
+
+/**
+ * Add a calendar to an offering (the "tick a calendar" path). If the calendar's venue does
+ * not already offer the service, it is DUPLICATED into that venue (a real, same-named service
+ * linked to the calendar) so both venues can book it — replacing the old carrier mechanism.
+ */
+async function addCalendarToOffering(
+  admin: SupabaseClient,
+  collectiveId: string,
+  itemId: string,
+  venueId: string,
+  calendarId: string,
+  actingVenueId: string,
+  userId: string | null,
+): Promise<{ ok: true; added: number } | { ok: false; error: string; status: number }> {
+  const { data: member } = await admin
+    .from('venue_collective_members')
+    .select('id')
+    .eq('collective_id', collectiveId)
+    .eq('venue_id', venueId)
+    .eq('status', 'active')
+    .maybeSingle();
+  if (!member) {
+    return { ok: false, error: 'That venue is not an active member of this collective.', status: 400 };
+  }
+
+  const template = await loadOfferingTemplate(admin, itemId);
+  if (!template) return { ok: false, error: 'Offering not found.', status: 404 };
+
+  const resolved = await ensureServiceForCalendar(admin, {
+    targetVenueId: venueId,
+    targetCalendarId: calendarId,
+    offeringName: template.name,
+    template,
+  });
+  if ('error' in resolved) return { ok: false, error: resolved.error, status: 400 };
+
+  // Host-curated: assignments go live immediately (no per-service member consent).
+  const approval = 'approved' as const;
+  const approvedBy = userId;
+
+  const { data: existing } = await admin
+    .from('collective_service_providers')
+    .select('id, status')
+    .eq('item_id', itemId)
+    .eq('venue_id', venueId)
+    .eq('source_service_id', resolved.sourceServiceId)
+    .eq('practitioner_id', calendarId)
+    .maybeSingle();
+  if (existing) {
+    if ((existing.status as string) === 'removed') {
+      await admin
+        .from('collective_service_providers')
+        .update({ status: 'active', approval_status: approval, approved_by_user_id: approvedBy })
+        .eq('id', existing.id);
+      return { ok: true, added: 1 };
+    }
+    return { ok: true, added: 0 };
+  }
+
+  await admin.from('collective_service_providers').insert({
+    item_id: itemId,
+    member_id: member.id,
+    venue_id: venueId,
+    source_service_id: resolved.sourceServiceId,
+    practitioner_id: calendarId,
+    approval_status: approval,
+    approved_by_user_id: approvedBy,
+    status: 'active',
+  });
+  return { ok: true, added: 1 };
 }
 
 /** Load a provider scoped to this collective (via its item). */
@@ -277,28 +366,21 @@ async function applyCatalogueAction(
         .select('id')
         .single();
       if (error || !item) return { ok: false, error: 'Failed to create the offering.', status: 500 };
-      // Optionally seed providers from a set of source services (e.g. an accepted merge).
+      // Optionally seed providers from a set of source services (e.g. the picker
+      // or an accepted merge) — expanded to one provider per calendar that offers it.
       const seededMemberVenues = new Set<string>();
       for (const src of input.sourceServiceIds ?? []) {
-        const check = await validateProviderSource(
+        const res = await addProvidersForSource(
           admin,
           collectiveId,
+          item.id as string,
           src.venueId,
           src.sourceServiceId,
           null,
+          actingVenueId,
+          userId,
         );
-        if (!check.ok) continue; // skip invalid seeds rather than failing the whole create
-        await admin.from('collective_service_providers').insert({
-          item_id: item.id as string,
-          member_id: check.memberId,
-          venue_id: src.venueId,
-          source_service_id: src.sourceServiceId,
-          practitioner_id: null,
-          approval_status: providerApprovalOnCreate(actingVenueId, src.venueId),
-          approved_by_user_id: actingVenueId === src.venueId ? userId : null,
-          status: 'active',
-        });
-        if (src.venueId !== actingVenueId) seededMemberVenues.add(src.venueId);
+        if (res.ok && res.added > 0 && src.venueId !== actingVenueId) seededMemberVenues.add(src.venueId);
       }
       // Ask each seeded member to approve the terms for its calendars (plan D6).
       if (seededMemberVenues.size > 0) {
@@ -371,35 +453,22 @@ async function applyCatalogueAction(
       if (!input.itemId || !(await itemBelongsToCollective(admin, collectiveId, input.itemId))) {
         return { ok: false, error: 'Offering not found.', status: 404 };
       }
-      if (!input.venueId || !input.sourceServiceId) {
-        return { ok: false, error: 'A venue and service are required.', status: 400 };
+      if (!input.venueId || !input.practitionerId) {
+        return { ok: false, error: 'A venue and calendar are required.', status: 400 };
       }
-      const check = await validateProviderSource(
+      // Ticking a calendar: duplicate the service into the calendar's venue if it lacks it.
+      const res = await addCalendarToOffering(
         admin,
         collectiveId,
+        input.itemId,
         input.venueId,
-        input.sourceServiceId,
-        input.practitionerId ?? null,
+        input.practitionerId,
+        actingVenueId,
+        userId,
       );
-      if (!check.ok) return check;
-      const { error } = await admin.from('collective_service_providers').insert({
-        item_id: input.itemId,
-        member_id: check.memberId,
-        venue_id: input.venueId,
-        source_service_id: input.sourceServiceId,
-        practitioner_id: input.practitionerId ?? null,
-        price_pence_override: input.pricePenceOverride ?? null,
-        duration_minutes_override: input.durationMinutesOverride ?? null,
-        approval_status: providerApprovalOnCreate(actingVenueId, input.venueId),
-        approved_by_user_id: actingVenueId === input.venueId ? userId : null,
-        status: 'active',
-      });
-      if (error) {
-        // Most likely the unique index (this calendar is already a provider).
-        return { ok: false, error: 'That calendar already provides this offering.', status: 409 };
-      }
+      if (!res.ok) return res;
       // Ask the member to approve the terms for its calendar (plan D6).
-      if (input.venueId !== actingVenueId) {
+      if (input.venueId !== actingVenueId && res.added > 0) {
         const [ctx, name, lookup] = await Promise.all([
           collectiveContext(admin, collectiveId),
           offeringName(admin, input.itemId),
@@ -419,36 +488,6 @@ async function applyCatalogueAction(
       return { ok: true };
     }
 
-    case 'update_provider': {
-      if (!input.providerId) return { ok: false, error: 'Provider not found.', status: 404 };
-      const provider = await loadProviderInCollective(admin, collectiveId, input.providerId);
-      if (!provider) return { ok: false, error: 'Provider not found.', status: 404 };
-      const updates: Record<string, unknown> = {};
-      let termsChanged = false;
-      if (input.pricePenceOverride !== undefined) {
-        updates.price_pence_override = input.pricePenceOverride;
-        if (input.pricePenceOverride !== provider.price_pence_override) termsChanged = true;
-      }
-      if (input.durationMinutesOverride !== undefined) {
-        updates.duration_minutes_override = input.durationMinutesOverride;
-        if (input.durationMinutesOverride !== provider.duration_minutes_override) termsChanged = true;
-      }
-      if (input.practitionerId !== undefined) updates.practitioner_id = input.practitionerId;
-      if (Object.keys(updates).length === 0) return { ok: false, error: 'No changes supplied.', status: 400 };
-      // plan D6 — host changing a member's terms resets approval to pending.
-      const nextApproval = approvalAfterTermsChange(actingVenueId, provider.venue_id, termsChanged);
-      if (nextApproval) {
-        updates.approval_status = nextApproval;
-        updates.approved_by_user_id = nextApproval === 'approved' ? userId : null;
-      }
-      const { error } = await admin
-        .from('collective_service_providers')
-        .update(updates)
-        .eq('id', provider.id);
-      if (error) return { ok: false, error: 'Failed to update the provider.', status: 500 };
-      return { ok: true };
-    }
-
     case 'remove_provider': {
       if (!input.providerId) return { ok: false, error: 'Provider not found.', status: 404 };
       const provider = await loadProviderInCollective(admin, collectiveId, input.providerId);
@@ -457,64 +496,6 @@ async function applyCatalogueAction(
         .from('collective_service_providers')
         .update({ status: 'removed' })
         .eq('id', provider.id);
-      return { ok: true };
-    }
-
-    case 'approve_provider':
-    case 'reject_provider':
-    case 'set_provider_terms': {
-      if (!input.providerId) return { ok: false, error: 'Provider not found.', status: 404 };
-      const provider = await loadProviderInCollective(admin, collectiveId, input.providerId);
-      if (!provider) return { ok: false, error: 'Provider not found.', status: 404 };
-      // A member may only act on its OWN calendars' commercial terms (plan D6).
-      if (provider.venue_id !== actingVenueId) {
-        return {
-          ok: false,
-          error: 'You can only manage offerings that use your own calendars.',
-          status: 403,
-        };
-      }
-      const updates: Record<string, unknown> = {};
-      if (input.action === 'approve_provider') {
-        updates.approval_status = 'approved';
-        updates.approved_by_user_id = userId;
-      } else if (input.action === 'reject_provider') {
-        updates.approval_status = 'rejected';
-        updates.approved_by_user_id = null;
-      } else {
-        // set_provider_terms: member adjusts its own price/duration → self-consent.
-        if (input.pricePenceOverride !== undefined)
-          updates.price_pence_override = input.pricePenceOverride;
-        if (input.durationMinutesOverride !== undefined)
-          updates.duration_minutes_override = input.durationMinutesOverride;
-        updates.approval_status = 'approved';
-        updates.approved_by_user_id = userId;
-      }
-      const { error } = await admin
-        .from('collective_service_providers')
-        .update(updates)
-        .eq('id', provider.id);
-      if (error) return { ok: false, error: 'Failed to update the offering.', status: 500 };
-      // Tell the host the member's decision (approve / adjust-and-approve count as
-      // approved; reject as declined) — plan §7.4.
-      const approved = input.action !== 'reject_provider';
-      const [ctx, name, lookup] = await Promise.all([
-        collectiveContext(admin, collectiveId),
-        offeringName(admin, provider.itemId),
-        loadVenueLookup(admin, [actingVenueId]),
-      ]);
-      if (ctx && ctx.hostVenueId !== actingVenueId) {
-        await safeNotify(
-          notifyCombinedProviderDecision(
-            admin,
-            ctx.hostVenueId,
-            lookup[actingVenueId]?.name ?? 'A member venue',
-            name,
-            approved,
-            collectiveId,
-          ),
-        );
-      }
       return { ok: true };
     }
 

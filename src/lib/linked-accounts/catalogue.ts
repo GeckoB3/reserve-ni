@@ -10,12 +10,9 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
-  effectiveProviderDurationMinutes,
-  effectiveProviderPricePence,
   hasFullMutualWriteLinks,
   type PageMode,
   type PricingDisplay,
-  type ProviderApprovalStatus,
   type ProviderStatus,
   type ItemStatus,
   type ServiceGrouping,
@@ -90,32 +87,16 @@ export async function loadVenueCatalogueData(
 }
 
 // ---------------------------------------------------------------------------
-// Merge-suggestion matcher (pure) — surfaces likely-duplicate services across
-// member venues so the host can fold them into one offering (plan §7.3 step 2).
+// Service-name normaliser (pure) — used to match a same-named service when a
+// calendar is assigned cross-venue (D1 duplication reuse in service-duplication.ts)
+// and to avoid duplicate offerings in the "Choose services to offer" picker.
 // ---------------------------------------------------------------------------
 
-export interface SourceServiceForMerge {
-  venueId: string;
-  serviceId: string;
-  name: string;
-  durationMinutes: number | null;
-  pricePence: number | null;
-}
-
-export interface MergeSuggestion {
-  /** Canonical display name (the first source service's name in the group). */
-  canonicalName: string;
-  /** The normalised key the group was matched on. */
-  key: string;
-  /** Source services that look like the same offering. */
-  members: SourceServiceForMerge[];
-}
-
 /**
- * Normalise a service name for duplicate detection: lowercase, strip a trailing
+ * Normalise a service name for same-name matching: lowercase, strip a trailing
  * duration token ("60 min", "(45 mins)", "- 1 hr"), drop punctuation, and
  * collapse whitespace. Pure and deterministic. Two services that normalise to
- * the same key are treated as the same offering for a merge suggestion.
+ * the same key are treated as the same offering.
  */
 export function normaliseServiceNameForMerge(name: string): string {
   return name
@@ -127,30 +108,6 @@ export function normaliseServiceNameForMerge(name: string): string {
     .replace(/[^a-z0-9]+/g, ' ') // punctuation → space
     .replace(/\s+/g, ' ')
     .trim();
-}
-
-/**
- * Group source services that look like the same offering across DIFFERENT
- * venues. Only cross-venue groups (≥2 distinct venues) are returned — merging
- * two services within one venue is not the point of a collective. Deterministic
- * order: by canonical name. Pure.
- */
-export function suggestServiceMerges(services: SourceServiceForMerge[]): MergeSuggestion[] {
-  const groups = new Map<string, SourceServiceForMerge[]>();
-  for (const s of services) {
-    const key = normaliseServiceNameForMerge(s.name);
-    if (!key) continue;
-    const list = groups.get(key) ?? [];
-    list.push(s);
-    groups.set(key, list);
-  }
-  const suggestions: MergeSuggestion[] = [];
-  for (const [key, members] of groups) {
-    const venues = new Set(members.map((m) => m.venueId));
-    if (venues.size < 2) continue;
-    suggestions.push({ key, canonicalName: members[0]!.name, members });
-  }
-  return suggestions.sort((a, b) => a.canonicalName.localeCompare(b.canonicalName));
 }
 
 // ---------------------------------------------------------------------------
@@ -201,39 +158,6 @@ export async function checkCombinedEligibility(
   return { ok: true, reason: null, timezone: [...tzs][0] ?? null };
 }
 
-// ---------------------------------------------------------------------------
-// Consent state machine (plan D6) — pure decisions, unit-testable.
-// ---------------------------------------------------------------------------
-
-/**
- * Approval status for a newly-added provider. A venue curating its OWN calendar
- * is self-consent (approved immediately); adding another member's calendar needs
- * that member's approval first (pending).
- */
-export function providerApprovalOnCreate(
-  actingVenueId: string,
-  providerVenueId: string,
-): ProviderApprovalStatus {
-  return actingVenueId === providerVenueId ? 'approved' : 'pending';
-}
-
-/**
- * Approval status after an existing provider's commercial terms are edited, or
- * `null` to leave it unchanged. The owning member editing its own terms is
- * self-consent (approved); the host changing another member's price/duration
- * resets approval to pending so the member re-consents (plan D6). A host edit
- * that does not touch the member's terms (e.g. re-pinning a practitioner with no
- * price change) leaves approval untouched.
- */
-export function approvalAfterTermsChange(
-  actingVenueId: string,
-  providerVenueId: string,
-  termsChanged: boolean,
-): ProviderApprovalStatus | null {
-  if (actingVenueId === providerVenueId) return 'approved';
-  if (termsChanged) return 'pending';
-  return null;
-}
 
 // ---------------------------------------------------------------------------
 // Management (builder) view of the catalogue
@@ -248,11 +172,9 @@ export interface CatalogueProviderView {
   sourceServiceName: string | null;
   practitionerId: string | null;
   practitionerName: string | null;
-  pricePenceOverride: number | null;
-  durationMinutesOverride: number | null;
+  /** The owning venue's own service price/duration (set on /dashboard/appointment-services). */
   effectivePricePence: number | null;
   effectiveDurationMinutes: number | null;
-  approvalStatus: ProviderApprovalStatus;
   status: ProviderStatus;
   /** Whether the underlying source service (and practitioner, if pinned) is still live. */
   sourceLive: boolean;
@@ -277,7 +199,8 @@ export interface CatalogueMemberSource {
   venueId: string;
   venueName: string;
   services: { id: string; name: string; durationMinutes: number | null; pricePence: number | null }[];
-  practitioners: { id: string; name: string }[];
+  /** Each calendar + the services it offers (for cross-venue carrier-service mapping). */
+  practitioners: { id: string; name: string; services: { id: string; name: string }[] }[];
 }
 
 export interface CatalogueManagementView {
@@ -285,7 +208,6 @@ export interface CatalogueManagementView {
   pageMode: PageMode;
   items: CatalogueItemView[];
   memberSources: CatalogueMemberSource[];
-  mergeSuggestions: MergeSuggestion[];
 }
 
 interface SourceServiceRecord {
@@ -293,6 +215,76 @@ interface SourceServiceRecord {
   durationMinutes: number | null;
   pricePence: number | null;
   active: boolean;
+}
+
+/**
+ * Heal legacy venue-wide providers (`practitioner_id IS NULL`, created before the
+ * per-calendar model) by expanding each into one per-calendar provider for every
+ * calendar that offers its source service, then retiring the null row. This keeps the
+ * management UI's per-calendar checkboxes accurate (a null provider was invisible to
+ * them, so calendars showed unchecked even though the service was bookable). Idempotent
+ * and self-healing: once expanded, repeat runs find nothing and return cheaply.
+ */
+export async function backfillPerCalendarProviders(
+  admin: SupabaseClient,
+  collectiveId: string,
+): Promise<void> {
+  const { data: items } = await admin
+    .from('collective_service_items')
+    .select('id')
+    .eq('collective_id', collectiveId);
+  const itemIds = (items ?? []).map((i) => i.id as string);
+  if (itemIds.length === 0) return;
+
+  const { data: nullProviders } = await admin
+    .from('collective_service_providers')
+    .select(
+      'id, item_id, member_id, venue_id, source_service_id, price_pence_override, duration_minutes_override, approval_status, approved_by_user_id, status',
+    )
+    .in('item_id', itemIds)
+    .is('practitioner_id', null)
+    .neq('status', 'removed');
+  if (!nullProviders || nullProviders.length === 0) return;
+
+  const cache = new Map<string, VenueCatalogueData>();
+  for (const np of nullProviders) {
+    const venueId = np.venue_id as string;
+    let data = cache.get(venueId);
+    if (!data) {
+      data = await loadVenueCatalogueData(admin, venueId);
+      cache.set(venueId, data);
+    }
+    const calIds = data.serviceCalendars.get(np.source_service_id as string) ?? [];
+    if (calIds.length === 0) continue; // nothing offers it — leave the row untouched
+
+    for (const calId of calIds) {
+      const { data: existing } = await admin
+        .from('collective_service_providers')
+        .select('id')
+        .eq('item_id', np.item_id as string)
+        .eq('venue_id', venueId)
+        .eq('source_service_id', np.source_service_id as string)
+        .eq('practitioner_id', calId)
+        .maybeSingle();
+      if (existing) continue;
+      await admin.from('collective_service_providers').insert({
+        item_id: np.item_id,
+        member_id: np.member_id,
+        venue_id: venueId,
+        source_service_id: np.source_service_id,
+        practitioner_id: calId,
+        price_pence_override: np.price_pence_override ?? null,
+        duration_minutes_override: np.duration_minutes_override ?? null,
+        approval_status: np.approval_status,
+        approved_by_user_id: np.approved_by_user_id ?? null,
+        status: np.status,
+      });
+    }
+    await admin
+      .from('collective_service_providers')
+      .update({ status: 'removed' })
+      .eq('id', np.id as string);
+  }
 }
 
 /**
@@ -335,7 +327,6 @@ export async function loadCatalogueForManagement(
   const memberSources: CatalogueMemberSource[] = [];
   const serviceIndex = new Map<string, SourceServiceRecord>(); // `${venueId}:${serviceId}`
   const practitionerNameById = new Map<string, string>(); // `${venueId}:${calendarId}`
-  const allSourceServices: SourceServiceForMerge[] = [];
   for (const venueId of memberVenueIds) {
     const data = await loadVenueCatalogueData(admin, venueId);
     for (const s of data.serviceList) {
@@ -345,20 +336,27 @@ export async function loadCatalogueForManagement(
         pricePence: s.pricePence,
         active: true,
       });
-      allSourceServices.push({
-        venueId,
-        serviceId: s.id,
-        name: s.name,
-        durationMinutes: s.durationMinutes,
-        pricePence: s.pricePence,
-      });
     }
     for (const c of data.calendarList) practitionerNameById.set(`${venueId}:${c.id}`, c.name);
+    // Per-calendar offered services (invert serviceCalendars) for carrier mapping.
+    const calendarServices = new Map<string, { id: string; name: string }[]>();
+    for (const [serviceId, calIds] of data.serviceCalendars) {
+      const svcName = data.services.get(serviceId)?.name ?? 'Service';
+      for (const calId of calIds) {
+        const arr = calendarServices.get(calId) ?? [];
+        arr.push({ id: serviceId, name: svcName });
+        calendarServices.set(calId, arr);
+      }
+    }
     memberSources.push({
       venueId,
       venueName: venueNames[venueId] ?? 'Venue',
       services: data.serviceList,
-      practitioners: data.calendarList,
+      practitioners: data.calendarList.map((c) => ({
+        id: c.id,
+        name: c.name,
+        services: calendarServices.get(c.id) ?? [],
+      })),
     });
   }
 
@@ -377,26 +375,15 @@ export async function loadCatalogueForManagement(
   if (itemIds.length > 0) {
     const { data: providerRows } = await admin
       .from('collective_service_providers')
-      .select(
-        'id, item_id, venue_id, source_service_id, practitioner_id, price_pence_override, duration_minutes_override, approval_status, status',
-      )
+      .select('id, item_id, venue_id, source_service_id, practitioner_id, status')
       .in('item_id', itemIds)
       .neq('status', 'removed');
     for (const raw of providerRows ?? []) {
       const itemId = raw.item_id as string;
-      const item = items.find((i) => i.id === itemId);
       const venueId = raw.venue_id as string;
       const sourceServiceId = raw.source_service_id as string;
       const source = serviceIndex.get(`${venueId}:${sourceServiceId}`);
       const practitionerId = (raw.practitioner_id as string | null) ?? null;
-      const itemDefaults = {
-        default_price_pence: (item?.default_price_pence as number | null) ?? null,
-        default_duration_minutes: (item?.default_duration_minutes as number | null) ?? null,
-      };
-      const overrides = {
-        price_pence_override: (raw.price_pence_override as number | null) ?? null,
-        duration_minutes_override: (raw.duration_minutes_override as number | null) ?? null,
-      };
       const view: CatalogueProviderView = {
         id: raw.id as string,
         itemId,
@@ -408,15 +395,10 @@ export async function loadCatalogueForManagement(
         practitionerName: practitionerId
           ? practitionerNameById.get(`${venueId}:${practitionerId}`) ?? null
           : null,
-        pricePenceOverride: overrides.price_pence_override,
-        durationMinutesOverride: overrides.duration_minutes_override,
-        effectivePricePence: effectiveProviderPricePence(itemDefaults, overrides, source?.pricePence ?? null),
-        effectiveDurationMinutes: effectiveProviderDurationMinutes(
-          itemDefaults,
-          overrides,
-          source?.durationMinutes ?? null,
-        ),
-        approvalStatus: raw.approval_status as ProviderApprovalStatus,
+        // Each venue owns its service's price/duration (set on /dashboard/appointment-services);
+        // the combined page never overrides them — it just maps service names → calendars.
+        effectivePricePence: source?.pricePence ?? null,
+        effectiveDurationMinutes: source?.durationMinutes ?? null,
         status: raw.status as ProviderStatus,
         // Source live = service still active, and (if pinned) practitioner still active.
         sourceLive:
@@ -449,7 +431,6 @@ export async function loadCatalogueForManagement(
     pageMode: (collective.page_mode as PageMode) ?? 'directory',
     items: itemViews,
     memberSources,
-    mergeSuggestions: suggestServiceMerges(allSourceServices),
   };
 }
 
@@ -644,10 +625,11 @@ export async function loadPublicCombinedCatalogue(
   if (itemIds.length > 0) {
     const { data: providerRows } = await admin
       .from('collective_service_providers')
-      .select('id, item_id, venue_id, source_service_id, practitioner_id, price_pence_override, duration_minutes_override')
+      // Host-curated: every active provider is live (no per-service consent step) —
+      // a member consents by joining the collective.
+      .select('id, item_id, venue_id, source_service_id, practitioner_id')
       .in('item_id', itemIds)
       .eq('status', 'active')
-      .eq('approval_status', 'approved')
       .in('venue_id', eligibleVenueIds);
     for (const raw of providerRows ?? []) {
       const venueId = raw.venue_id as string;
@@ -664,11 +646,6 @@ export async function loadPublicCombinedCatalogue(
         practName = pr.name;
       }
       const itemId = raw.item_id as string;
-      const item = items.find((i) => i.id === itemId);
-      const overrides = {
-        price_pence_override: (raw.price_pence_override as number | null) ?? null,
-        duration_minutes_override: (raw.duration_minutes_override as number | null) ?? null,
-      };
       const view: PublicCatalogueProvider = {
         providerId: raw.id as string,
         venueId,
@@ -677,16 +654,10 @@ export async function loadPublicCombinedCatalogue(
         practitionerId,
         practitionerName: practName,
         sourceServiceId,
-        pricePence: effectiveProviderPricePence(
-          { default_price_pence: (item?.default_price_pence as number | null) ?? null },
-          overrides,
-          source.pricePence,
-        ),
-        durationMinutes: effectiveProviderDurationMinutes(
-          { default_duration_minutes: (item?.default_duration_minutes as number | null) ?? null },
-          overrides,
-          source.durationMinutes,
-        ),
+        // Price/duration are the owning venue's own service settings — never a
+        // collective-level override. "from" price = the lowest of these across calendars.
+        pricePence: source.pricePence,
+        durationMinutes: source.durationMinutes,
       };
       const list = providersByItem.get(itemId) ?? [];
       list.push(view);

@@ -17,6 +17,12 @@ import type { VenuePublic } from '@/components/booking/types';
 import type { BookingPageConfig } from '@/lib/booking/booking-page-theme';
 import type { BookingPagePublicService } from '@/lib/booking/booking-page-tabs';
 import { loadPublicCombinedCatalogue, loadVenueCatalogueData } from './catalogue';
+import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
+import { loadVariantsForServices } from '@/lib/venue/service-variants';
+import { variantToCatalog, type AppointmentCatalogVariant } from '@/lib/availability/appointment-catalog';
+import { loadAddonGroupsForServices } from '@/lib/addons/addon-resolution';
+import { parseProcessingTimeBlocksFromDb } from '@/lib/appointments/processing-time';
+import type { AppointmentCatalogAddonGroup, ProcessingTimeBlock } from '@/types/booking-models';
 
 interface CollectiveRow {
   id: string;
@@ -107,6 +113,7 @@ export async function loadCollectiveVenuePublic(
     terminology: (host?.terminology as VenuePublic['terminology']) ?? undefined,
     currency: (host?.currency as string) ?? 'GBP',
     booking_paused: !bookable,
+    is_collective: true,
     feature_flags: { resolved: { any_available_practitioner: true } },
   };
 }
@@ -126,8 +133,16 @@ export interface CollectiveCatalogService {
   deposit_pence: number | null;
   payment_requirement: 'none';
   cancellation_notice_hours: number;
-  variants: [];
-  addon_groups: [];
+  /** This calendar's OWN source-service variants/add-ons (each venue keeps its own). */
+  variants: AppointmentCatalogVariant[];
+  addon_groups: AppointmentCatalogAddonGroup[];
+  processing_time_blocks?: ProcessingTimeBlock[];
+  /**
+   * Whether "any available" is offered for this offering: true only when NO provider
+   * has variants/add-ons (a plain service everywhere), so the customer would get the
+   * same thing regardless of calendar. Otherwise they must pick a specific calendar.
+   */
+  any_available: boolean;
   /** Routing: the real source service id in the owning venue (for booking create). */
   source_service_id: string;
 }
@@ -167,6 +182,68 @@ export async function loadCollectiveAppointmentCatalog(
     }),
   );
 
+  // Each member venue keeps its OWN source-service settings. Load every involved source
+  // service's variants / add-on groups / meta (buffer, deposit, processing) so the merged
+  // catalogue carries the chosen calendar's real options — the calendar-first flow then
+  // resolves them once the customer picks a calendar.
+  const sourceIdsByVenue: Record<string, Set<string>> = {};
+  for (const item of catalogue.items) {
+    for (const p of item.providers) {
+      (sourceIdsByVenue[p.venueId] ??= new Set<string>()).add(p.sourceServiceId);
+    }
+  }
+  const { data: venueModelRows } = await admin.from('venues').select('id, booking_model').in('id', venueIds);
+  const venueIsUnified: Record<string, boolean> = {};
+  for (const v of venueModelRows ?? []) {
+    venueIsUnified[v.id as string] = isUnifiedSchedulingVenue((v.booking_model as string) ?? '');
+  }
+  type VariantMap = Awaited<ReturnType<typeof loadVariantsForServices>>;
+  type AddonMap = Awaited<ReturnType<typeof loadAddonGroupsForServices>>;
+  const variantsByVenue: Record<string, VariantMap> = {};
+  const addonsByVenue: Record<string, AddonMap> = {};
+  const metaByVenue: Record<string, Map<string, { buffer: number; deposit: number | null; processing: ProcessingTimeBlock[] }>> = {};
+  await Promise.all(
+    venueIds.map(async (venueId) => {
+      const ids = [...(sourceIdsByVenue[venueId] ?? [])];
+      variantsByVenue[venueId] = new Map();
+      addonsByVenue[venueId] = new Map();
+      metaByVenue[venueId] = new Map();
+      if (ids.length === 0) return;
+      const schema = venueIsUnified[venueId] ? 'service_item' : 'appointment_service';
+      const [variantMap, addonMap, metaRows] = await Promise.all([
+        loadVariantsForServices({ admin, venueId, schema, parentIds: ids }),
+        loadAddonGroupsForServices({ admin, venueId, schema, parentIds: ids, includeHidden: false, includeInactive: false }),
+        admin
+          .from(venueIsUnified[venueId] ? 'service_items' : 'appointment_services')
+          .select('id, buffer_minutes, deposit_pence, processing_time_blocks')
+          .in('id', ids),
+      ]);
+      variantsByVenue[venueId] = variantMap;
+      addonsByVenue[venueId] = addonMap;
+      for (const r of metaRows.data ?? []) {
+        metaByVenue[venueId].set(r.id as string, {
+          buffer: (r.buffer_minutes as number) ?? 0,
+          deposit: (r.deposit_pence as number | null) ?? null,
+          processing: parseProcessingTimeBlocksFromDb(r.processing_time_blocks),
+        });
+      }
+    }),
+  );
+
+  const activeVariants = (venueId: string, srcId: string) =>
+    (variantsByVenue[venueId]?.get(srcId) ?? []).filter((v) => v.is_active);
+  const addonGroups = (venueId: string, srcId: string) => addonsByVenue[venueId]?.get(srcId) ?? [];
+
+  // "Any available" is offered only when NO provider of an offering has variants/add-ons —
+  // otherwise the configuration is venue-specific and the customer must pick a calendar.
+  const anyAvailableByItem = new Map<string, boolean>();
+  for (const item of catalogue.items) {
+    const uniform = item.providers.every(
+      (p) => activeVariants(p.venueId, p.sourceServiceId).length === 0 && addonGroups(p.venueId, p.sourceServiceId).length === 0,
+    );
+    anyAvailableByItem.set(item.id, uniform);
+  }
+
   // calendarId → practitioner entry (deduped across offerings).
   const byCalendar = new Map<string, CollectiveCatalogPractitioner>();
   const ensure = (calendarId: string, name: string, venueId: string): CollectiveCatalogPractitioner => {
@@ -189,18 +266,21 @@ export async function loadCollectiveAppointmentCatalog(
         const name = data.calendars.get(calendarId)?.name ?? provider.practitionerName ?? 'Staff';
         const entry = ensure(calendarId, name, provider.venueId);
         if (entry.services.some((s) => s.id === item.id)) continue; // calendar already lists this offering
+        const meta = metaByVenue[provider.venueId]?.get(provider.sourceServiceId);
         entry.services.push({
           id: item.id,
           name: item.name,
           description: item.description,
           duration_minutes: provider.durationMinutes ?? 0,
-          buffer_minutes: 0,
+          buffer_minutes: meta?.buffer ?? 0,
           price_pence: provider.pricePence,
-          deposit_pence: null,
+          deposit_pence: meta?.deposit ?? null,
           payment_requirement: 'none',
           cancellation_notice_hours: DEFAULT_CANCELLATION_NOTICE_HOURS,
-          variants: [],
-          addon_groups: [],
+          variants: activeVariants(provider.venueId, provider.sourceServiceId).map(variantToCatalog),
+          addon_groups: addonGroups(provider.venueId, provider.sourceServiceId),
+          processing_time_blocks: meta?.processing ?? [],
+          any_available: anyAvailableByItem.get(item.id) ?? true,
           source_service_id: provider.sourceServiceId,
         });
       }

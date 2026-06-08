@@ -342,6 +342,16 @@ export async function GET(request: NextRequest) {
     }
 
     const supabase = getSupabaseAdminClient();
+
+    // Combined booking page (plan §22): a collective id is NOT a venue row, so the
+    // `appointmentVenue` gate below (driven by resolveVenueMode) would skip the
+    // appointment path and the day slots would never be computed. Route it explicitly
+    // to the appointment handler (which resolves the merged collective availability),
+    // mirroring how the month/appointment-calendar route checks isCollectiveId first.
+    if (await isCollectiveId(supabase, venueId)) {
+      return handleAppointmentAvailability(supabase, venueId, dateStr, searchParams);
+    }
+
     const blocked = await nextResponseIfPublicBookingBlockedForVenue(supabase, venueId);
     if (blocked) return blocked;
 
@@ -523,12 +533,15 @@ async function handleAppointmentAvailability(
     if (!serviceId) {
       return NextResponse.json({ error: 'service_id is required' }, { status: 400 });
     }
+    const durParam = searchParams.get('duration_minutes');
+    const durParsed = durParam ? parseInt(durParam, 10) : NaN;
     const result = await loadCollectiveDayAvailability(supabase, {
       collectiveId: venueId,
       offeringId: serviceId,
       calendarId: practitionerId ?? null,
       anyAvailable,
       date,
+      durationMinutes: Number.isFinite(durParsed) ? durParsed : null,
     });
     return NextResponse.json(result);
   }

@@ -10,6 +10,16 @@ import {
 } from './notifications';
 
 export type CollectiveStatus = 'active' | 'dissolved';
+
+/**
+ * Tombstone slug applied when a collective is dissolved, so its public booking-page
+ * address (`venue_collectives.slug` is globally UNIQUE) is freed for reuse immediately.
+ * Derived from the collective id → guaranteed unique; the dead row keeps no claim on the
+ * original slug. (The adopted-venue index is already partial on `status='active'`.)
+ */
+export function dissolvedCollectiveSlug(collectiveId: string): string {
+  return `dissolved-${collectiveId}`;
+}
 export type CollectiveMemberStatus = 'invited' | 'active' | 'left' | 'removed';
 export type ServiceGrouping = 'by_practitioner' | 'by_service_type';
 /** Combined booking page (plan §1.3). `directory` = the Phase 2 list-of-venues page. */
@@ -194,36 +204,6 @@ export async function hasFullMutualWriteLinks(
 }
 
 /**
- * Effective price a customer is shown/charged for a provider on the combined
- * page (plan §4.4): the provider override, else the item default, else the
- * venue's own source-service price. Pure — `null` means "no price set".
- */
-export function effectiveProviderPricePence(
-  item: { default_price_pence: number | null },
-  provider: { price_pence_override: number | null },
-  sourcePricePence: number | null,
-): number | null {
-  if (provider.price_pence_override != null) return provider.price_pence_override;
-  if (item.default_price_pence != null) return item.default_price_pence;
-  return sourcePricePence;
-}
-
-/**
- * Effective duration (minutes) the slot must occupy in the owning venue's
- * calendar (plan §4.4 / §6.3): provider override, else item default, else the
- * venue's own source-service duration. Pure.
- */
-export function effectiveProviderDurationMinutes(
-  item: { default_duration_minutes: number | null },
-  provider: { duration_minutes_override: number | null },
-  sourceDurationMinutes: number | null,
-): number | null {
-  if (provider.duration_minutes_override != null) return provider.duration_minutes_override;
-  if (item.default_duration_minutes != null) return item.default_duration_minutes;
-  return sourceDurationMinutes;
-}
-
-/**
  * Decide each provider's link/eligibility-driven `status` after a reconcile
  * (plan §8). Pure so the split logic is unit-testable:
  *   - a provider whose venue was removed from the collective → `removed`;
@@ -402,23 +382,35 @@ export async function reconcileCollective(
   }));
 
   // Each active member must still hold full mutual links with all other actives.
-  for (const member of active) {
-    const others = active.filter((m) => m.venueId !== member.venueId).map((m) => m.venueId);
-    const ok = await hasFullMutualLinks(admin, member.venueId, others);
-    if (!ok) {
-      await admin
-        .from('venue_collective_members')
-        .update({ status: 'removed', left_at: new Date().toISOString() })
-        .eq('id', member.id);
-      removedVenueIds.push(member.venueId);
+  // Read every member's link state FIRST. If any read fails, the membership state is
+  // UNCERTAIN — abort with zero changes rather than risk an irreversible wrongful
+  // dissolve. (getAcceptedLinkBetween now throws on a real read error instead of
+  // returning a null that looks like "no link".) A later reconcile retries cleanly.
+  const toRemove: typeof active = [];
+  try {
+    for (const member of active) {
+      const others = active.filter((m) => m.venueId !== member.venueId).map((m) => m.venueId);
+      const ok = await hasFullMutualLinks(admin, member.venueId, others);
+      if (!ok) toRemove.push(member);
     }
+  } catch (err) {
+    console.warn('[reconcileCollective] aborting without changes — link read failed:', err);
+    return { removedVenueIds: [], dissolved: false, hostTransferredTo: null };
+  }
+
+  for (const member of toRemove) {
+    await admin
+      .from('venue_collective_members')
+      .update({ status: 'removed', left_at: new Date().toISOString() })
+      .eq('id', member.id);
+    removedVenueIds.push(member.venueId);
   }
 
   const survivors = active.filter((m) => !removedVenueIds.includes(m.venueId));
   if (survivors.length < 2) {
     await admin
       .from('venue_collectives')
-      .update({ status: 'dissolved' })
+      .update({ status: 'dissolved', slug: dissolvedCollectiveSlug(collectiveId) })
       .eq('id', collectiveId);
     // No catalogue cleanup needed on dissolve: `status='dissolved'` takes the
     // page offline, and the overrides are collective-scoped so every venue's own
@@ -449,12 +441,18 @@ export async function reconcileCollective(
   // full mutual write with all others, reactivate those that regained it, and
   // mark removed-member providers `removed`. Never touches member consent.
   if (collective.page_mode === 'unified_catalog') {
-    await suspendOrRemoveCollectiveProviders(
-      admin,
-      collectiveId,
-      survivors.map((m) => m.venueId),
-      removedVenueIds,
-    );
+    // Best-effort + reversible: suspend/reactivate is recoverable on the next run, so a
+    // transient link-read failure here must not propagate or change the dissolve outcome.
+    try {
+      await suspendOrRemoveCollectiveProviders(
+        admin,
+        collectiveId,
+        survivors.map((m) => m.venueId),
+        removedVenueIds,
+      );
+    } catch (err) {
+      console.warn('[reconcileCollective] provider suspend ladder skipped — link read failed:', err);
+    }
   }
 
   return { removedVenueIds, dissolved: false, hostTransferredTo };
@@ -612,13 +610,20 @@ export async function loadCollectiveBrandingBySlug(
 ): Promise<{ name: string; branding: CollectiveBranding; status: CollectiveStatus } | null> {
   const { data } = await admin
     .from('venue_collectives')
-    .select('name, branding, status')
+    .select('name, branding, status, booking_page_config')
     .eq('slug', slug.toLowerCase())
     .maybeSingle();
   if (!data) return null;
+  const branding = (data.branding as CollectiveBranding) ?? {};
+  // Unified colour source (plan §23): prefer the page config's brand colour so the
+  // branded "unavailable" state matches the live page.
+  const brandPrimary =
+    ((data.booking_page_config as { brand_primary?: string | null } | null)?.brand_primary) ??
+    branding.primary_colour ??
+    null;
   return {
     name: (data.name as string) ?? 'Venue collective',
-    branding: (data.branding as CollectiveBranding) ?? {},
+    branding: { ...branding, primary_colour: brandPrimary },
     status: data.status as CollectiveStatus,
   };
 }
@@ -681,6 +686,51 @@ export async function loadActiveCollectiveForVenue(
     }
   }
   return null;
+}
+
+/**
+ * Combined-page booking links to show in the dashboard sidebar (plan §23): for
+ * each active `unified_catalog` collective the venue actively belongs to, the
+ * public URL of the combined page. Dedicated-address collectives link to
+ * `/book/c/{slug}`; an adopt-a-member-slug collective links to that member's
+ * `/book/{slug}` — except when it adopted THIS venue's own slug, which the
+ * sidebar already shows as "Your Booking Page" (skipped to avoid a duplicate).
+ */
+export async function loadCollectiveBookingLinksForVenue(
+  admin: SupabaseClient,
+  venueId: string,
+): Promise<{ id: string; name: string; url: string }[]> {
+  const { data: memberRows } = await admin
+    .from('venue_collective_members')
+    .select('collective_id')
+    .eq('venue_id', venueId)
+    .eq('status', 'active');
+  const ids = [...new Set((memberRows ?? []).map((m) => m.collective_id as string))];
+  if (ids.length === 0) return [];
+
+  const { data: cols } = await admin
+    .from('venue_collectives')
+    .select('id, name, slug, slug_strategy, adopted_venue_id')
+    .in('id', ids)
+    .eq('status', 'active')
+    .eq('page_mode', 'unified_catalog');
+
+  const out: { id: string; name: string; url: string }[] = [];
+  for (const c of cols ?? []) {
+    const name = (c.name as string) ?? 'Combined booking page';
+    if ((c.slug_strategy as string) === 'adopt_member' && c.adopted_venue_id) {
+      if ((c.adopted_venue_id as string) === venueId) continue; // already shown as the venue's own page
+      const { data: adopted } = await admin
+        .from('venues')
+        .select('slug')
+        .eq('id', c.adopted_venue_id as string)
+        .maybeSingle();
+      if (adopted?.slug) out.push({ id: c.id as string, name, url: `/book/${adopted.slug as string}` });
+    } else {
+      out.push({ id: c.id as string, name, url: `/book/c/${c.slug as string}` });
+    }
+  }
+  return out;
 }
 
 /**

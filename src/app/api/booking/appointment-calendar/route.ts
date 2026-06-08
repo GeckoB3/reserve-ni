@@ -83,6 +83,7 @@ export async function GET(request: NextRequest) {
         anyAvailable,
         year,
         month,
+        durationMinutes: customDurationMinutes,
       });
       return NextResponse.json(result, {
         headers: { 'Cache-Control': 'public, s-maxage=45, stale-while-revalidate=120' },

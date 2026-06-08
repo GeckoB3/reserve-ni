@@ -49,6 +49,21 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    // One collective per venue: refuse a second when this venue already hosts or
+    // belongs to a live (non-dissolved) collective. The UI hides the create button
+    // in this case; this guards a stale client or a direct API call. Further members
+    // are added from the combined page's Members tab; end it via Dissolve.
+    const existingViews = await loadCollectiveViewsForVenue(ctx.admin, ctx.venueId);
+    if (existingViews.some((c) => c.status !== 'dissolved')) {
+      return NextResponse.json(
+        {
+          error:
+            'Your venue is already in a collective. Add members from the combined page’s Members tab, or dissolve it first.',
+        },
+        { status: 409 },
+      );
+    }
+
     const slug = parsed.data.slug.toLowerCase();
     const inviteVenueIds = [...new Set(parsed.data.inviteVenueIds)].filter(
       (id) => id !== ctx.venueId,

@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { resolveLinkAdmin } from '@/lib/linked-accounts/route-helpers';
 import { updateCollectiveSchema } from '@/lib/linked-accounts/validation';
-import { loadCollectiveViewsForVenue } from '@/lib/linked-accounts/collectives';
+import { loadCollectiveViewsForVenue, dissolvedCollectiveSlug } from '@/lib/linked-accounts/collectives';
+import {
+  mergeCollectiveBookingPageConfigPatch,
+  sanitizeCollectiveBookingPageConfig,
+} from '@/lib/linked-accounts/collective-page-config';
 import { notifyCollectiveDissolved } from '@/lib/linked-accounts/notifications';
 
 async function loadHostedCollective(
@@ -10,7 +14,7 @@ async function loadHostedCollective(
 ) {
   const { data } = await admin
     .from('venue_collectives')
-    .select('id, host_venue_id, status, name, page_mode')
+    .select('id, host_venue_id, status, name, page_mode, booking_page_config, branding')
     .eq('id', collectiveId)
     .maybeSingle();
   return data as {
@@ -19,6 +23,8 @@ async function loadHostedCollective(
     status: string;
     name: string;
     page_mode: string;
+    booking_page_config: Record<string, unknown> | null;
+    branding: Record<string, unknown> | null;
   } | null;
 }
 
@@ -106,9 +112,42 @@ export async function PATCH(
     if (parsed.data.allowAnyPractitioner !== undefined) {
       updates.allow_any_practitioner = parsed.data.allowAnyPractitioner;
     }
-    // Single-venue-grade page customisation (plan §22 / G6) — host-curated.
+    // Single-venue-grade page customisation (plan §22 / P-phases) — host-curated.
+    // Non-destructive merge: the editor's branding save omits `cover_photo_url` (a separate
+    // slot), so the merge preserves it. Brand colour is mirrored into branding.primary_colour,
+    // which the public "unavailable" page and the dashboard row swatch read.
     if (parsed.data.bookingPageConfig !== undefined) {
-      updates.booking_page_config = parsed.data.bookingPageConfig;
+      const existingConfig = (collective.booking_page_config ?? {}) as Record<string, unknown>;
+      const mergedConfig = mergeCollectiveBookingPageConfigPatch(
+        existingConfig,
+        parsed.data.bookingPageConfig as Record<string, unknown>,
+      );
+      updates.booking_page_config = mergedConfig;
+      const baseBranding =
+        (updates.branding as Record<string, unknown> | undefined) ??
+        ((collective.branding ?? {}) as Record<string, unknown>);
+      updates.branding = { ...baseBranding, primary_colour: mergedConfig.brand_primary ?? null };
+    }
+
+    // Isolated logo save (branding.logo_url) — preserves other branding fields.
+    if (parsed.data.logoUrl !== undefined) {
+      const base =
+        (updates.branding as Record<string, unknown> | undefined) ??
+        ((collective.branding ?? {}) as Record<string, unknown>);
+      const url = (parsed.data.logoUrl ?? '').trim();
+      updates.branding = { ...base, logo_url: url || null };
+    }
+
+    // Isolated cover save (booking_page_config.cover_photo_url) — preserves managed config keys.
+    if (parsed.data.coverPhotoUrl !== undefined) {
+      const base =
+        (updates.booking_page_config as Record<string, unknown> | undefined) ??
+        ((collective.booking_page_config ?? {}) as Record<string, unknown>);
+      const next: Record<string, unknown> = { ...base };
+      const url = (parsed.data.coverPhotoUrl ?? '').trim();
+      if (url) next.cover_photo_url = url;
+      else delete next.cover_photo_url;
+      updates.booking_page_config = sanitizeCollectiveBookingPageConfig(next);
     }
 
     // Combined booking page — where it is served (plan D1).
@@ -207,9 +246,11 @@ export async function DELETE(
       .eq('collective_id', id)
       .in('status', ['invited', 'active']);
 
+    // Dissolving frees the booking-page slug for reuse: `slug` is globally UNIQUE, so a
+    // dead row holding it would block a new collective from claiming the same address.
     await ctx.admin
       .from('venue_collectives')
-      .update({ status: 'dissolved' })
+      .update({ status: 'dissolved', slug: dissolvedCollectiveSlug(id) })
       .eq('id', id);
     await ctx.admin
       .from('venue_collective_members')

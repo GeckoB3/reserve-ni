@@ -112,12 +112,32 @@ const hexColour = z
   .nullable()
   .optional();
 
-/** Single-venue-grade public-page config for the combined page (plan §22 / G6). */
+/** Image framing (logo/cover) — ranges are re-clamped by the server sanitiser. */
+const imageFramingSchema = z
+  .object({
+    x: z.number(),
+    y: z.number(),
+    zoom: z.number(),
+  })
+  .nullable()
+  .optional();
+
+/** Social link — lenient (any string); the sanitiser trims/caps. Matches single-venue behaviour. */
+const socialLinkValue = z.string().max(500).nullable().optional();
+
+/**
+ * Single-venue-grade public-page config for the combined page (plan §22 / P-phases).
+ * Full parity with the single-venue `BookingPageConfig` so the shared editor's serialized
+ * config is accepted rather than stripped. The server sanitiser
+ * (`sanitizeCollectiveBookingPageConfig`) re-cleans everything and drops `service_photos`.
+ */
 export const collectiveBookingPageConfigSchema = z
   .object({
     brand_primary: hexColour,
     brand_accent: hexColour,
     font_preset: z.string().max(40).nullable().optional(),
+    logo_crop: imageFramingSchema,
+    cover_crop: imageFramingSchema,
     about: z.string().max(2000).nullable().optional(),
     announcement: z.string().max(300).nullable().optional(),
     cover_photo_url: z.union([z.literal(''), z.string().url().max(500)]).nullable().optional(),
@@ -125,12 +145,23 @@ export const collectiveBookingPageConfigSchema = z
     show_services_tab: z.boolean().optional(),
     show_team_tab: z.boolean().optional(),
     show_about_tab: z.boolean().optional(),
+    social_links: z
+      .object({
+        instagram: socialLinkValue,
+        facebook: socialLinkValue,
+        tiktok: socialLinkValue,
+        x: socialLinkValue,
+      })
+      .nullable()
+      .optional(),
+    gallery: z.array(z.string().max(2000)).max(50).nullable().optional(),
     /** Host overrides over inherited staff bios, keyed by calendar id (D-V2). */
     team_profiles: z
       .record(
         z.string().uuid(),
         z.object({
           bio: z.string().max(600).nullable().optional(),
+          photo: z.string().max(2000).nullable().optional(),
           specialties: z.string().max(200).nullable().optional(),
           hidden: z.boolean().optional(),
         }),
@@ -138,6 +169,8 @@ export const collectiveBookingPageConfigSchema = z
       .optional(),
   })
   .strip();
+
+const imageUrlValue = z.union([z.literal(''), z.string().url().max(500)]).nullable().optional();
 
 export const updateCollectiveSchema = z.object({
   name: z.string().min(2).max(120).optional(),
@@ -148,8 +181,18 @@ export const updateCollectiveSchema = z.object({
   slugStrategy: z.enum(['dedicated', 'adopt_member']).optional(),
   /** Required when slugStrategy = 'adopt_member': the member venue whose /book/{slug} hosts the page. */
   adoptedVenueId: z.string().uuid().nullable().optional(),
-  /** Single-venue-grade page customisation (plan §22 / G6). */
+  /** Single-venue-grade page customisation (plan §22 / P-phases). */
   bookingPageConfig: collectiveBookingPageConfigSchema.optional(),
+  /**
+   * Isolated logo save (branding.logo_url): a server-side read-modify-write that preserves
+   * other branding fields, so it never races the debounced config save. '' / null clears.
+   */
+  logoUrl: imageUrlValue,
+  /**
+   * Isolated cover save (booking_page_config.cover_photo_url): preserves the managed config
+   * keys, so it composes order-independently with the config save's cover-preserving merge.
+   */
+  coverPhotoUrl: imageUrlValue,
 });
 
 export const collectiveMemberActionSchema = z.object({
@@ -179,18 +222,14 @@ export const collectiveMemberActionSchema = z.object({
 const PRICE_PENCE_MAX = 1_000_000; // £10,000
 
 export const catalogueActionSchema = z.object({
+  // Host-curated structure only — adding a calendar makes it live immediately
+  // (a member consents by joining the collective; no per-service approval).
   action: z.enum([
-    // Host (structure):
     'create_item',
     'update_item',
     'archive_item',
     'add_provider',
-    'update_provider',
     'remove_provider',
-    // Member (consent over its own calendars, plan D6):
-    'approve_provider',
-    'reject_provider',
-    'set_provider_terms',
   ]),
   // Item fields.
   itemId: z.string().uuid().optional(),
@@ -209,13 +248,11 @@ export const catalogueActionSchema = z.object({
     .array(z.object({ venueId: z.string().uuid(), sourceServiceId: z.string().uuid() }))
     .max(50)
     .optional(),
-  // Provider fields.
+  // Provider fields (add_provider / remove_provider).
   providerId: z.string().uuid().optional(),
   venueId: z.string().uuid().optional(),
   sourceServiceId: z.string().uuid().optional(),
   practitionerId: z.string().uuid().nullable().optional(),
-  pricePenceOverride: z.number().int().min(0).max(PRICE_PENCE_MAX).nullable().optional(),
-  durationMinutesOverride: z.number().int().min(1).max(1440).nullable().optional(),
 });
 
 export type CatalogueActionInput = z.infer<typeof catalogueActionSchema>;

@@ -76,9 +76,12 @@ export interface BookingCardInfoProps {
 }
 
 function metaTextClass(micro: boolean): string {
+  // Colour is inherited from the bar's palette (`color: p.text` on the card shell) so meta
+  // reads white on saturated fills and dark on the light amber/cancelled fills. Slight opacity
+  // gives the secondary hierarchy beneath the full-strength contact name.
   return micro
-    ? 'text-[10px] font-medium leading-snug text-slate-600/90'
-    : 'text-[11px] font-medium leading-snug text-slate-600/90';
+    ? 'text-[10px] font-medium leading-snug opacity-[0.85]'
+    : 'text-[11px] font-medium leading-snug opacity-[0.85]';
 }
 
 export function groupInfoRows(
@@ -236,9 +239,19 @@ export function BookingCardInfo({
       return (
         <div
           key="name"
-          className={`flex min-w-0 items-center gap-1.5 ${dedicated ? 'w-full' : 'max-w-full shrink'}`}
+          // With an accessory (e.g. the compliance icon) the name must NOT grow to fill the row —
+          // otherwise it pushes the icon flush against the action-button column, where the row's
+          // overflow clips its ring. A small right inset keeps the icon's ring clear of that edge
+          // even when a long name truncates. Bars without an accessory keep the classic grow-to-fill.
+          className={`flex min-w-0 items-center gap-1.5 ${dedicated ? 'w-full' : 'max-w-full shrink'} ${
+            nameAccessory ? 'pr-1' : ''
+          }`}
         >
-          <span className="min-w-0 flex-1 truncate text-[13px] font-extrabold tracking-tight text-slate-900">
+          <span
+            className={`min-w-0 truncate text-[13px] font-extrabold tracking-tight ${
+              nameAccessory ? '' : 'flex-1'
+            }`}
+          >
             {name}
           </span>
           {nameAccessory ? <div className="flex shrink-0 items-center gap-1">{nameAccessory}</div> : null}

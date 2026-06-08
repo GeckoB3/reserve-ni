@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { VENUE_CATALOG_CACHE_CONTROL } from '@/lib/realtime/dashboard-sync-constants';
 import { createClient } from '@/lib/supabase/server';
+import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import {
   getVenueStaff,
   requireAdmin,
@@ -201,7 +202,8 @@ const OWNER_VENUE_UUID_RE =
 
 export async function GET(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    // Bearer (mobile) + cookie (web) auth — see createVenueRouteClient.
+    const supabase = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabase);
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
 

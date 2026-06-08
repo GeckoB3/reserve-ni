@@ -11,10 +11,16 @@ import {
  * **Pending** — warm amber/orange · **Booked** — cyan-leaning sky · **Confirmed** — brand navy (hue split from Booked) · **Seated** — emerald · **Arrived** — amber · **Completed / Cancelled** — slate.
  */
 export interface BookingStatusCalendarBlock {
+  /**
+   * Calendar booking bars use **bold, saturated fills** (`bg`) so they pop against the pale grid,
+   * with `text` set to white on dark fills (or a deep hue on the two light fills, Arrived/Cancelled)
+   * for maximum legibility. `accent` is the deep status hue used for the status dot and the frosted
+   * status pill's label (both sit on a near-white chip, so it must stay legible on white).
+   */
   bg: string;
   text: string;
   border: string;
-  /** Left stripe on practitioner calendar booking bars. */
+  /** Status dot + frosted status-pill label on the booking bar (deep hue, legible on white). */
   accent: string;
 }
 
@@ -31,10 +37,10 @@ export interface BookingStatusVisual {
 }
 
 const DEFAULT_CALENDAR_BLOCK: BookingStatusCalendarBlock = {
-  bg: '#F1F5F9',
-  text: '#1E293B',
-  border: '#CBD5E1',
-  accent: '#94A3B8',
+  bg: '#64748B',
+  text: '#FFFFFF',
+  border: '#475569',
+  accent: '#475569',
 };
 
 const DEFAULT_BOOKING_STATUS_VISUAL: BookingStatusVisual = {
@@ -51,35 +57,37 @@ const BOOKING_STATUS_VISUAL_MAP: Record<string, BookingStatusVisual> = {
     pill: 'border-[#FDBA74] bg-[#FFEDD5] text-[#9A3412]',
     dot: 'bg-[#EA580C]',
     listBorderLeft: 'border-l-[#EA580C]',
-    calendarBlock: { bg: '#FFEDD5', text: '#9A3412', border: '#FDBA74', accent: '#EA580C' },
+    calendarBlock: { bg: '#EA580C', text: '#FFFFFF', border: '#C2410C', accent: '#C2410C' },
   },
   Booked: {
     timeline: 'bg-[#E0F2FE] border-[#38BDF8] border-l-[#0369A1] text-[#0C4A6E]',
     pill: 'border-[#38BDF8] bg-[#E0F2FE] text-[#0C4A6E]',
     dot: 'bg-[#0369A1]',
     listBorderLeft: 'border-l-[#0369A1]',
-    calendarBlock: { bg: '#E0F2FE', text: '#0C4A6E', border: '#38BDF8', accent: '#0369A1' },
+    calendarBlock: { bg: '#0369A1', text: '#FFFFFF', border: '#075985', accent: '#0369A1' },
   },
   Confirmed: {
     timeline: 'bg-[#C6D8E9] border-[#003B6F] border-l-[#003B6F] text-[#00264A]',
     pill: 'border-[#003B6F] bg-[#C6D8E9] text-[#00264A]',
     dot: 'bg-[#003B6F]',
     listBorderLeft: 'border-l-[#003B6F]',
-    calendarBlock: { bg: '#C6D8E9', text: '#00264A', border: '#003B6F', accent: '#003B6F' },
+    calendarBlock: { bg: '#003B6F', text: '#FFFFFF', border: '#00284B', accent: '#003B6F' },
   },
   Seated: {
     timeline: 'bg-[#D1FAE5] border-[#34D399] border-l-[#047857] text-[#064E3B]',
     pill: 'border-[#34D399] bg-[#D1FAE5] text-[#064E3B]',
     dot: 'bg-[#047857]',
     listBorderLeft: 'border-l-[#047857]',
-    calendarBlock: { bg: '#D1FAE5', text: '#064E3B', border: '#34D399', accent: '#047857' },
+    // Started / in-progress (Seated) bars use a brighter, more vibrant emerald-600 fill so the
+    // active bookings pop; the deeper emerald-700 stays as the edge + dot/pill hue (legible on white).
+    calendarBlock: { bg: '#059669', text: '#FFFFFF', border: '#047857', accent: '#047857' },
   },
   Arrived: {
     timeline: 'bg-[#FEF3C7] border-[#FBBF24] border-l-[#D97706] text-[#78350F]',
     pill: 'border-[#FBBF24] bg-[#FEF3C7] text-[#78350F]',
     dot: 'bg-[#D97706]',
     listBorderLeft: 'border-l-[#D97706]',
-    calendarBlock: { bg: '#FEF3C7', text: '#78350F', border: '#FBBF24', accent: '#D97706' },
+    calendarBlock: { bg: '#F59E0B', text: '#451A03', border: '#D97706', accent: '#B45309' },
   },
   Completed: {
     timeline:
@@ -87,28 +95,30 @@ const BOOKING_STATUS_VISUAL_MAP: Record<string, BookingStatusVisual> = {
     pill: 'border-[#9CA3AF] bg-[#E5E7EB] text-[#374151] ring-1 ring-inset ring-slate-300/70',
     dot: 'bg-[#4B5563]',
     listBorderLeft: 'border-l-[#4B5563]',
-    calendarBlock: { bg: '#E5E7EB', text: '#374151', border: '#9CA3AF', accent: '#4B5563' },
+    calendarBlock: { bg: '#475569', text: '#FFFFFF', border: '#334155', accent: '#4B5563' },
   },
   'No-Show': {
     timeline: 'bg-[#FEE2E2] border-[#F87171] border-l-[#DC2626] text-[#991B1B]',
     pill: 'border-[#F87171] bg-[#FEE2E2] text-[#991B1B]',
     dot: 'bg-[#DC2626]',
     listBorderLeft: 'border-l-[#DC2626]',
-    calendarBlock: { bg: '#FEE2E2', text: '#991B1B', border: '#F87171', accent: '#DC2626' },
+    calendarBlock: { bg: '#DC2626', text: '#FFFFFF', border: '#B91C1C', accent: '#DC2626' },
   },
   Cancelled: {
     timeline: 'bg-[#E5E7EB] border-[#D1D5DB] border-l-[#4B5563] text-[#4B5563]',
     pill: 'border-[#D1D5DB] bg-[#E5E7EB] text-[#4B5563]',
     dot: 'bg-[#4B5563]',
     listBorderLeft: 'border-l-[#4B5563]',
-    calendarBlock: { bg: '#E5E7EB', text: '#4B5563', border: '#D1D5DB', accent: '#4B5563' },
+    // Cancelled is excluded from the calendar grid, so this stays intentionally recessive
+    // (a pale ghost) rather than a bold fill — a cancelled booking should never shout.
+    calendarBlock: { bg: '#E2E8F0', text: '#475569', border: '#CBD5E1', accent: '#475569' },
   },
   'Deposit Pending': {
     timeline: 'bg-[#FFEDD5] border-[#FB923C] text-[#9A3412]',
     pill: 'border-[#FB923C] bg-[#FFEDD5] text-[#9A3412]',
     dot: 'bg-[#EA580C]',
     listBorderLeft: 'border-l-[#EA580C]',
-    calendarBlock: { bg: '#FFEDD5', text: '#9A3412', border: '#FB923C', accent: '#EA580C' },
+    calendarBlock: { bg: '#EA580C', text: '#FFFFFF', border: '#C2410C', accent: '#C2410C' },
   },
 };
 

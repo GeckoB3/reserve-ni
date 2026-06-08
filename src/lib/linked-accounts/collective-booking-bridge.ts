@@ -109,6 +109,8 @@ export async function loadCollectiveDayAvailability(
     calendarId: string | null; // null/ANY → any-available pool
     anyAvailable: boolean;
     date: string;
+    /** Total duration (base + chosen variant + add-ons) from the calendar-first flow. */
+    durationMinutes?: number | null;
   },
 ): Promise<{ date: string; venue_id: string; practitioners: Array<{ id: string; name: string; slots: DaySlot[] }>; any_available?: boolean }> {
   const { collectiveId, offeringId, date } = params;
@@ -137,6 +139,9 @@ export async function loadCollectiveDayAvailability(
     targets.map(async (t): Promise<DaySlot[]> => {
       const clock = clocks[t.venueId];
       if (!clock) return [];
+      // Honour the variant/add-on-adjusted duration when the flow supplied one (a
+      // specific calendar was chosen), else the offering's effective duration.
+      const dur = params.durationMinutes ?? t.durationMinutes;
       try {
         const input = await fetchAppointmentInput({
           supabase: admin,
@@ -145,9 +150,9 @@ export async function loadCollectiveDayAvailability(
           practitionerId: t.calendarId,
           serviceId: t.sourceServiceId,
         });
-        if (t.durationMinutes != null) {
+        if (dur != null) {
           const idx = input.services.findIndex((s) => s.id === t.sourceServiceId);
-          if (idx >= 0) input.services[idx] = { ...input.services[idx]!, duration_minutes: t.durationMinutes };
+          if (idx >= 0) input.services[idx] = { ...input.services[idx]!, duration_minutes: dur };
         }
         attachVenueClockToAppointmentInput(input, clock, null);
         const result = computeAppointmentAvailability(input);
@@ -158,7 +163,7 @@ export async function loadCollectiveDayAvailability(
             slots.push({
               start_time: slot.start_time,
               service_id: offeringId,
-              duration_minutes: t.durationMinutes ?? slot.duration_minutes,
+              duration_minutes: dur ?? slot.duration_minutes,
               price_pence: t.pricePence,
               practitioner_id: t.calendarId,
               practitioner_name: t.name,
@@ -212,6 +217,8 @@ export async function loadCollectiveMonthAvailableDates(
     anyAvailable: boolean;
     year: number;
     month: number;
+    /** Total duration (base + chosen variant + add-ons) from the calendar-first flow. */
+    durationMinutes?: number | null;
   },
 ): Promise<{ venue_id: string; practitioner_id: string; service_id: string; year: number; month: number; available_dates: string[]; any_available?: boolean }> {
   const { collectiveId, offeringId, year, month } = params;
@@ -227,7 +234,7 @@ export async function loadCollectiveMonthAvailableDates(
       try {
         return await computeAppointmentAvailableDatesInMonth(admin, t.venueId, t.calendarId, t.sourceServiceId, year, month, {
           audience: 'public',
-          customDurationMinutes: t.durationMinutes ?? undefined,
+          customDurationMinutes: params.durationMinutes ?? t.durationMinutes ?? undefined,
         });
       } catch {
         return [] as string[];

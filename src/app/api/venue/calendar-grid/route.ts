@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { getCalendarGrid } from '@/lib/unified-availability';
@@ -17,7 +17,8 @@ const querySchema = z.object({
  */
 export async function GET(request: NextRequest) {
   try {
-    const supabaseAuth = await createClient();
+    // Bearer (mobile) + cookie (web) auth — see createVenueRouteClient.
+    const supabaseAuth = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabaseAuth);
     if (!staff) {
       return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });

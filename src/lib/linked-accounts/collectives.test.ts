@@ -1,8 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import {
   selectReplacementHost,
-  effectiveProviderPricePence,
-  effectiveProviderDurationMinutes,
   planProviderStatuses,
   hasFullMutualWriteLinks,
 } from './collectives';
@@ -87,51 +85,6 @@ describe('selectReplacementHost', () => {
     const snapshot = survivors.map((s) => s.venueId);
     selectReplacementHost(survivors);
     expect(survivors.map((s) => s.venueId)).toEqual(snapshot);
-  });
-});
-
-describe('effectiveProviderPricePence', () => {
-  it('prefers the provider override', () => {
-    expect(
-      effectiveProviderPricePence({ default_price_pence: 5000 }, { price_pence_override: 4500 }, 6000),
-    ).toBe(4500);
-  });
-  it('falls back to the item default when there is no override', () => {
-    expect(
-      effectiveProviderPricePence({ default_price_pence: 5000 }, { price_pence_override: null }, 6000),
-    ).toBe(5000);
-  });
-  it('falls back to the source price when neither override nor item default is set', () => {
-    expect(
-      effectiveProviderPricePence({ default_price_pence: null }, { price_pence_override: null }, 6000),
-    ).toBe(6000);
-  });
-  it('returns null when nothing is priced', () => {
-    expect(
-      effectiveProviderPricePence({ default_price_pence: null }, { price_pence_override: null }, null),
-    ).toBeNull();
-  });
-  it('treats a zero override as an explicit free price (not a fallback)', () => {
-    expect(
-      effectiveProviderPricePence({ default_price_pence: 5000 }, { price_pence_override: 0 }, 6000),
-    ).toBe(0);
-  });
-});
-
-describe('effectiveProviderDurationMinutes', () => {
-  it('prefers override, then item default, then source', () => {
-    expect(
-      effectiveProviderDurationMinutes({ default_duration_minutes: 60 }, { duration_minutes_override: 45 }, 30),
-    ).toBe(45);
-    expect(
-      effectiveProviderDurationMinutes({ default_duration_minutes: 60 }, { duration_minutes_override: null }, 30),
-    ).toBe(60);
-    expect(
-      effectiveProviderDurationMinutes({ default_duration_minutes: null }, { duration_minutes_override: null }, 30),
-    ).toBe(30);
-    expect(
-      effectiveProviderDurationMinutes({ default_duration_minutes: null }, { duration_minutes_override: null }, null),
-    ).toBeNull();
   });
 });
 

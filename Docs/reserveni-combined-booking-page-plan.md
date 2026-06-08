@@ -668,3 +668,67 @@ Phase D's `CombinedBookingFlow` and the standalone `/api/public/collective-avail
 become **internal/secondary**: the in-flow experience is the standard stack (G2–G5). The Phase-A/B
 data model (offerings + providers + overrides + consent) and the Phase-C slug routing are unchanged
 and underpin the virtual venue. The Phase-F notifications/consent loop are unchanged.
+
+---
+
+## 23. Venue-collective setup UX review & world-class redesign (2026-06-07)
+
+Full review of the three host/member forms in `/dashboard/settings?tab=linked-accounts`
+→ Venue collectives: **Manage combined page** (`CombinedPageManager`), **Edit settings**
+(`EditCollectiveModal`), **Configure my listing** (`ConfigureVisibilityModal`).
+
+### 23.1 Broken / unneeded / vestigial (remove)
+
+- **"Configure my listing" is obsolete + doubly broken.** It edits `visible_practitioner_ids`
+  / `visible_service_ids` / `display_order` — the **directory-era** per-member visibility model
+  the combined page no longer uses (the page is driven by the host-curated offerings+providers).
+  It also fetches `/api/venue/practitioners` + `/api/venue/appointment-services` which are **empty
+  for unified venues**. Net effect: zero. **Remove it**; the member's real controls (approve/adjust
+  provider terms + solo-page behaviour) already live in Manage combined page's member view.
+- **"Edit settings" → Service grouping** (`by_practitioner`/`by_service_type`): vestigial — the
+  standard `BookPublicLayout` doesn't use it. **Remove.**
+- **"Edit settings" → "Any available practitioner (coming soon)"**: stale + misleading — any-available
+  IS built (per-offering `allow_any_available`). **Remove.**
+- **Redundant/conflicting branding.** `branding.primary_colour` + `branding.description` overlap
+  `booking_page_config.brand_primary` + `about`. The live page reads `booking_page_config`; the
+  unavailable state + row colour-dot read `branding.primary_colour` → two sources of truth.
+  **Unify on `booking_page_config`** (+ `branding.logo_url` for the logo), and have the
+  unavailable/row read it too.
+
+### 23.2 Too narrow / scattered (consolidate)
+
+Setup is spread across 5 surfaces (panel row + 4 modals). **Consolidate into ONE tabbed
+"Manage combined page"**: **Page** (name, logo/cover upload, brand colour/accent, font, about,
+announcement, tab toggles, address, live preview) · **Services & calendars** (picker + offerings +
+cross-venue calendar assignment, reorder, rename/description, price/duration/photo) · **Members**
+(invite/remove/make-host/transfer — moved out of the row) · **My listing & approvals** (member view:
+approve/adjust/reject provider terms + solo-page). Retire **Edit settings** + **Configure my listing**.
+
+### 23.3 Missing (add)
+
+- **Cross-venue calendar assignment (the headline gap).** Today providers are added one at a time,
+  service-first (`venue → service → practitioner`). Replace with a **calendar-centric** per-offering
+  control: "Which calendars offer this?" → all member calendars grouped by venue, multi-select.
+  A calendar whose venue lacks the offering still books via a **carrier service** in its own venue
+  (same-named auto-mapped; else host picks). So "offer Haircut on calendars from venue A *and* B"
+  even when B has no Haircut. The offering's name/price/duration apply.
+- **Host edit of provider price/duration** after adding (API `update_provider` exists; no UI; re-consent on change).
+- **Offering rename + description edit**, **reorder offerings** (display_order has no UI), explain `pricing_display`.
+- **Image uploads** for logo/cover/offering photos (reuse the venue `BookingPageSection` upload components) instead of URL paste.
+- **Inline live preview pane** (not just a "Preview ↗" link), mirroring the single-venue booking-page editor.
+- **Sidebar link.** Show the collective's dedicated booking-page link in `DashboardSidebar` (below
+  "Your Booking Page", lines 552–562), when the venue is an active member of an active collective with
+  a dedicated address (or that adopted this venue's slug). Link → `/book/c/{slug}` (or `/book/{adopted}`).
+
+### 23.4 Build order
+
+1. **Cross-venue calendar assignment** + carrier-service resolution (data flow already supports it).
+2. **Sidebar collective link** (server-passed collective links → DashboardSidebar).
+3. **Consolidation**: fold Edit settings + Configure my listing into the tabbed Manage combined page;
+   remove vestigial fields; unify branding on `booking_page_config`.
+4. **Polish**: reorder, rename/description, host provider edit, uploads, inline preview.
+
+### 23.5 Decisions to confirm
+- IA: consolidate the three forms into one tabbed surface (recommended) vs fix-in-place.
+- Carrier service for a cross-venue calendar with no matching service: host picks the carrier
+  (same-name auto-default) — recommended — vs auto-any vs restrict to same-named only.

@@ -10,10 +10,6 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import {
-  effectiveProviderPricePence,
-  effectiveProviderDurationMinutes,
-} from './collectives';
 
 export interface CollectiveServiceOverride {
   /** The collective offering id, to record on the booking for attribution. */
@@ -49,7 +45,7 @@ export async function resolveCollectiveServiceOverride(
   // The item must belong to a live combined collective the venue is active in.
   const { data: item } = await admin
     .from('collective_service_items')
-    .select('id, collective_id, default_price_pence, default_duration_minutes, status')
+    .select('id, collective_id, status')
     .eq('id', collectiveServiceItemId)
     .eq('collective_id', collectiveId)
     .eq('status', 'active')
@@ -78,7 +74,7 @@ export async function resolveCollectiveServiceOverride(
   // pinned to the chosen practitioner; fall back to a venue-wide ("all") row.
   const { data: providers } = await admin
     .from('collective_service_providers')
-    .select('id, practitioner_id, price_pence_override, duration_minutes_override')
+    .select('id, practitioner_id')
     .eq('item_id', collectiveServiceItemId)
     .eq('venue_id', venueId)
     .eq('source_service_id', sourceServiceId)
@@ -113,21 +109,11 @@ export async function resolveCollectiveServiceOverride(
     source = (legacy as { price_pence: number | null; duration_minutes: number | null } | null) ?? null;
   }
 
-  const overrides = {
-    price_pence_override: (provider.price_pence_override as number | null) ?? null,
-    duration_minutes_override: (provider.duration_minutes_override as number | null) ?? null,
-  };
+  // Each venue owns its service's price/duration; the combined page never overrides
+  // them. The booking occupies — and is charged at — the source service's own terms.
   return {
     collectiveServiceItemId,
-    pricePence: effectiveProviderPricePence(
-      { default_price_pence: (item.default_price_pence as number | null) ?? null },
-      overrides,
-      (source?.price_pence as number | null) ?? null,
-    ),
-    durationMinutes: effectiveProviderDurationMinutes(
-      { default_duration_minutes: (item.default_duration_minutes as number | null) ?? null },
-      overrides,
-      (source?.duration_minutes as number | null) ?? null,
-    ),
+    pricePence: (source?.price_pence as number | null) ?? null,
+    durationMinutes: (source?.duration_minutes as number | null) ?? null,
   };
 }

@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { resolveAuthNextPath, isPublicBookingAuthReturnPath } from '@/lib/safe-auth-redirect';
 import { SET_PASSWORD_PATH } from '@/lib/auth-link';
+import { resolveVenueSubscriptionEntitlement } from '@/lib/billing/subscription-entitlement';
 
 export interface PostLoginDestinationInput {
   admin: SupabaseClient;
@@ -60,29 +61,38 @@ export async function resolvePostLoginDestination(
     admin.from('user_profiles').select('default_login_destination').eq('id', userId).maybeSingle(),
     admin
       .from('staff')
-      .select('id')
+      .select('id, venue_id')
       .eq('user_id', userId)
       .is('revoked_at', null)
       .limit(5),
     admin
       .from('staff')
-      .select('id')
+      .select('id, venue_id')
       .ilike('email', emailNorm)
       .is('revoked_at', null)
       .limit(5),
   ]);
 
   const staffIdSet = new Set<string>();
+  const venueIdSet = new Set<string>();
   for (const r of [...(staffByUser ?? []), ...(staffByEmail ?? [])]) {
     staffIdSet.add(r.id);
+    const venueId = (r as { venue_id?: string | null }).venue_id;
+    if (venueId) venueIdSet.add(venueId);
   }
   const hasStaff = staffIdSet.size > 0;
+  const venueIds = [...venueIdSet];
 
   // Detect guests by user_id OR by email — the claim_user_account RPC backfills
   // unlinked guest rows on every login, but we belt-and-brace here so a brand-
   // new login (where the claim hasn't fully propagated yet, or where the user
   // changed email) still routes through the dual-role chooser.
-  const [guestByUser, guestByEmail] = await Promise.all([
+  //
+  // In the same round-trip, load billing state for any venue the user staffs so we can
+  // detect an active (paying / trialing / past-due / complimentary) subscription. This is
+  // what lets a user who just paid — but hasn't finished onboarding — reach their venue on
+  // the next login instead of being stranded on the customer dashboard.
+  const [guestByUser, guestByEmail, venueBillingRes] = await Promise.all([
     admin
       .from('guests')
       .select('id', { count: 'exact', head: true })
@@ -93,13 +103,54 @@ export async function resolvePostLoginDestination(
           .select('id', { count: 'exact', head: true })
           .ilike('email', emailNorm)
       : Promise.resolve({ count: 0 }),
+    venueIds.length
+      ? admin
+          .from('venues')
+          .select(
+            'id, plan_status, billing_access_source, subscription_current_period_end, pricing_tier',
+          )
+          .in('id', venueIds)
+      : Promise.resolve({ data: [] }),
   ]);
 
   const hasGuest =
     ((guestByUser.count ?? 0) > 0) || ((guestByEmail.count ?? 0) > 0);
 
+  type VenueBillingRow = {
+    plan_status?: string | null;
+    billing_access_source?: string | null;
+    subscription_current_period_end?: string | null;
+    pricing_tier?: string | null;
+  };
+  const venueBillingRows = ((venueBillingRes as { data?: VenueBillingRow[] | null }).data ?? []);
+  // "Active subscription" = anything other than a fully expired/cancelled subscription
+  // (active, trialing, scheduled-cancel-in-paid-window, past_due, or superuser-complimentary).
+  const hasActiveSubscription = venueBillingRows.some(
+    (v) =>
+      resolveVenueSubscriptionEntitlement({
+        plan_status: v.plan_status,
+        billing_access_source: v.billing_access_source,
+        subscription_current_period_end: v.subscription_current_period_end,
+        pricing_tier: v.pricing_tier,
+      }).kind !== 'expired_cancelled',
+  );
+
   const pref = (profile as { default_login_destination?: string | null } | null)
     ?.default_login_destination;
+
+  // An active subscription routes the user to their venue surface. We send them to /dashboard,
+  // which the dashboard layout forwards to /onboarding (or /signup/booking-models) while
+  // onboarding is incomplete — so "onboarding flow or venue dashboard, as appropriate" is
+  // handled by the existing entry guards. The exception is a user who is ALSO a venue customer:
+  // they keep the dual-role chooser, honouring an explicit profile preference when one is set.
+  if (hasActiveSubscription) {
+    if (hasGuest) {
+      if (pref === 'account') return '/account';
+      if (pref === 'dashboard') return '/dashboard';
+      return '/auth/choose-destination';
+    }
+    return '/dashboard';
+  }
 
   if (pref === 'account') return '/account';
   if (pref === 'dashboard' && hasStaff) return '/dashboard';

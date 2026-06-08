@@ -88,6 +88,8 @@ export interface DashboardSidebarProps {
   complianceRecordsEnabled?: boolean;
   /** Venue has at least one accepted link — gates the notification bell in the footer. */
   hasLinkedAccounts?: boolean;
+  /** Combined booking pages (venue collectives) this venue belongs to (plan §23). */
+  collectiveBookingLinks?: { id: string; name: string; url: string }[];
 }
 
 const ADMIN_ONLY_HREFS = new Set(['/dashboard/settings']);
@@ -181,6 +183,7 @@ export function DashboardSidebar({
   appointmentWaitlistEnabled = false,
   complianceRecordsEnabled = false,
   hasLinkedAccounts = false,
+  collectiveBookingLinks = [],
 }: DashboardSidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
@@ -560,6 +563,19 @@ export function DashboardSidebar({
               external
             />
           )}
+
+          {/* Combined booking page(s) — venue collectives (plan §23) */}
+          {collectiveBookingLinks.map((link) => (
+            <NavLinkItem
+              key={link.id}
+              href={link.url}
+              label={`${link.name} (combined)`}
+              icon={ExternalLinkIcon}
+              active={false}
+              onNavigate={closeMobile}
+              external
+            />
+          ))}
         </nav>
 
         {/* Footer */}

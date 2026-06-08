@@ -597,8 +597,10 @@ function CalendarBookingStatusBadge({
   const p = palette ?? bookingCalendarBlockPalette(b);
   return (
     <span
-      className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-white/85 px-2 py-[3px] text-[10px] font-bold leading-none shadow-[0_1px_3px_rgba(15,23,42,0.13)] ring-1 ring-black/[0.06] backdrop-blur-md"
-      style={{ color: p.text }}
+      className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-white/92 px-2 py-[3px] text-[10px] font-bold leading-none shadow-[0_1px_3px_rgba(15,23,42,0.18)] ring-1 ring-black/[0.06] backdrop-blur-md"
+      // Frosted near-white chip on a saturated bar → label uses the deep status hue (accent),
+      // not the bar's (now white) text colour, so it stays legible on the chip.
+      style={{ color: p.accent }}
       title={calendarStatusLabel(b)}
     >
       <span className="h-1.5 w-1.5 rounded-full ring-2 ring-white/70" style={{ backgroundColor: p.accent }} aria-hidden />
@@ -1097,7 +1099,9 @@ function bookingCornerActionLayout(
   const stackHeightPx =
     actionCount * buttonMinHeightPx + gapTotal + BOOKING_CORNER_TRAY_PAD_Y_PX;
   const compact = buttonMinHeightPx < BOOKING_CORNER_BUTTON_COMFORT_HEIGHT_PX;
-  const fontSizePx = buttonMinHeightPx < 22 ? 9 : 10;
+  // Font size stays constant so a button's WIDTH never changes as the bar gets shorter —
+  // only its height compresses (via tighter vertical padding in the button style below).
+  const fontSizePx = 10;
 
   return {
     compact,
@@ -1167,14 +1171,19 @@ function collectBookingRightColumnActionNodes({
 
   const arrived = Boolean(b.client_arrived_at);
 
-  const buttonStyle =
+  // On very short bars the button compresses its HEIGHT via tighter top/bottom padding
+  // (overriding the base `py-1`) while its width is left untouched — a short bar must never
+  // make the action buttons narrower.
+  const tightVertical = buttonMinHeightPx > 0 && buttonMinHeightPx < 22;
+  const buttonStyle: CSSProperties =
     buttonMinHeightPx > 0
-      ? ({
+      ? {
           minHeight: `${buttonMinHeightPx}px`,
           fontSize: `${fontSizePx}px`,
           lineHeight: 1.2,
-        } as const)
-      : ({ fontSize: `${fontSizePx}px`, lineHeight: 1.2 } as const);
+          ...(tightVertical ? { paddingTop: '2px', paddingBottom: '2px' } : {}),
+        }
+      : { fontSize: `${fontSizePx}px`, lineHeight: 1.2 };
 
   const out: ReactElement[] = [];
 
@@ -1205,7 +1214,7 @@ function collectBookingRightColumnActionNodes({
             disabled={busy}
             style={buttonStyle}
             onClick={() => onArrived(b.id, true)}
-            className={`${baseClass} rounded-lg border-2 border-[#F59E0B] bg-[#F59E0B]/20 font-semibold text-amber-950 shadow-sm transition hover:bg-[#F59E0B]/30 disabled:opacity-50`}
+            className={`${baseClass} rounded-lg border border-[#D97706] bg-[#FEF3C7] font-semibold text-[#78350F] shadow-sm transition hover:bg-[#FDE68A] disabled:opacity-50`}
           >
             Arrived
           </button>,
@@ -1862,9 +1871,9 @@ const LinkedBookingCalendarBar = memo(function LinkedBookingCalendarBar({
         <div className="min-w-0">
           <div className="truncate font-bold">{content.name}</div>
           {content.service ? (
-            <div className="truncate text-[10px] font-medium text-slate-600">{content.service}</div>
+            <div className="truncate text-[10px] font-medium opacity-80">{content.service}</div>
           ) : null}
-          <div className="mt-0.5 text-[10px] font-medium text-slate-600">{content.start}</div>
+          <div className="mt-0.5 text-[10px] font-medium opacity-80">{content.start}</div>
         </div>
         {statusPill}
       </div>
@@ -5438,11 +5447,11 @@ export function PractitionerCalendarView({
                                     <div className="min-w-0">
                                       <div className="truncate font-bold">{b.guest_name}</div>
                                       {serviceLine ? (
-                                        <div className="truncate text-[10px] font-medium text-slate-600">
+                                        <div className="truncate text-[10px] font-medium opacity-80">
                                           {serviceLine}
                                         </div>
                                       ) : null}
-                                      <div className="mt-0.5 text-[10px] font-medium text-slate-600">
+                                      <div className="mt-0.5 text-[10px] font-medium opacity-80">
                                         {b.booking_time.slice(0, 5)}
                                       </div>
                                     </div>
@@ -6400,7 +6409,7 @@ export function PractitionerCalendarView({
                                                 }
                                               />
                                               {showPillsRow ? (
-                                                <div className="mt-1.5 flex w-full min-w-0 shrink-0 flex-col gap-1 border-t border-black/[0.06] pt-1.5">
+                                                <div className="mt-1.5 flex w-full min-w-0 shrink-0 flex-col gap-1 border-t border-white/25 pt-1.5">
                                                   <div className="flex flex-wrap content-start gap-x-1 gap-y-1">
                                                     <BookingBlockPills b={b} />
                                                   </div>
@@ -6448,11 +6457,14 @@ export function PractitionerCalendarView({
                                                 : 'Confirm or undo this move'
                                             }
                                             className="flex items-center gap-1 rounded-xl border px-2 py-1 shadow-[0_12px_28px_rgba(15,23,42,0.08),inset_0_1px_0_rgba(255,255,255,0.72)] ring-1 ring-black/[0.05] backdrop-blur-sm"
+                                            // Near-white frosted surface with a faint status wash (10% of the
+                                            // saturated hue) — keeps the dark control labels legible while still
+                                            // nodding to the booking's status colour.
                                             style={{
-                                              backgroundColor: palette.bg,
-                                              backgroundImage: `linear-gradient(135deg, ${palette.bg} 0%, rgba(255,255,255,0.94) 100%)`,
+                                              backgroundColor: '#FFFFFF',
+                                              backgroundImage: `linear-gradient(135deg, ${palette.bg}1A 0%, rgba(255,255,255,0.96) 62%)`,
                                               borderColor: palette.border,
-                                              color: palette.text,
+                                              color: '#334155',
                                             }}
                                           >
                                             <span
@@ -6617,7 +6629,7 @@ export function PractitionerCalendarView({
                                                   }
                                                 />
                                                 {!isOverlapLane && showSegPills ? (
-                                                  <div className="mt-1 flex w-full min-w-0 shrink-0 flex-col gap-1 border-t border-black/[0.06] pt-1">
+                                                  <div className="mt-1 flex w-full min-w-0 shrink-0 flex-col gap-1 border-t border-white/25 pt-1">
                                                     <div className="flex flex-wrap content-start gap-x-1 gap-y-1">
                                                       <BookingBlockPills b={b} />
                                                     </div>

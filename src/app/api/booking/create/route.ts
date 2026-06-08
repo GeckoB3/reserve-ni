@@ -71,7 +71,7 @@ import { sumAvailableClassCreditsForClassType } from '@/lib/class-commerce/avail
 import { consumeClassCreditsForBooking } from '@/lib/class-commerce/consume-class-credits';
 import { formatGuestDisplayName, normaliseGuestNamePart } from '@/lib/guests/name';
 import { resolveCollectiveServiceOverride } from '@/lib/linked-accounts/collective-booking-override';
-import { resolveCombinedBookingTarget } from '@/lib/linked-accounts/collective-booking-bridge';
+import { isCollectiveId, resolveCombinedBookingTarget } from '@/lib/linked-accounts/collective-booking-bridge';
 import {
   completeWaitlistEntryAfterGuestBooking,
   loadActiveWaitlistOfferForGuestAccess,
@@ -158,31 +158,30 @@ export async function POST(request: NextRequest) {
     venueIdForLog = parsed.data.venue_id;
 
     // Combined booking page (plan §22): the customer flow targets the synthetic
-    // collective venue (venue_id === collective_id). Resolve the chosen
-    // (offering, calendar) to the real owning venue + source service so the
-    // booking is created normally and the effective price/duration override is
-    // applied via collective_service_item_id.
-    if (
-      parsed.data.collective_id &&
-      parsed.data.venue_id === parsed.data.collective_id &&
-      parsed.data.practitioner_id &&
-      parsed.data.appointment_service_id
-    ) {
-      const target = await resolveCombinedBookingTarget(getSupabaseAdminClient(), {
-        collectiveId: parsed.data.collective_id,
-        offeringId: parsed.data.appointment_service_id,
-        calendarId: parsed.data.practitioner_id,
-      });
-      if (!target) {
-        return NextResponse.json(
-          { error: 'This booking option is no longer available.' },
-          { status: 409 },
-        );
+    // collective venue (its id IS the collective id). Detect it SERVER-SIDE via
+    // isCollectiveId — the standard flow doesn't send a separate collective_id —
+    // and resolve the chosen (offering, calendar) to the real owning venue + source
+    // service so the booking is created normally and the effective price/duration
+    // override is applied via collective_service_item_id.
+    if (parsed.data.practitioner_id && parsed.data.appointment_service_id) {
+      const adminForCollective = getSupabaseAdminClient();
+      if (await isCollectiveId(adminForCollective, parsed.data.venue_id)) {
+        const target = await resolveCombinedBookingTarget(adminForCollective, {
+          collectiveId: parsed.data.venue_id,
+          offeringId: parsed.data.appointment_service_id,
+          calendarId: parsed.data.practitioner_id,
+        });
+        if (!target) {
+          return NextResponse.json(
+            { error: 'This booking option is no longer available.' },
+            { status: 409 },
+          );
+        }
+        parsed.data.collective_service_item_id = parsed.data.appointment_service_id;
+        parsed.data.venue_id = target.venueId;
+        parsed.data.appointment_service_id = target.sourceServiceId;
+        venueIdForLog = target.venueId;
       }
-      parsed.data.collective_service_item_id = parsed.data.appointment_service_id;
-      parsed.data.venue_id = target.venueId;
-      parsed.data.appointment_service_id = target.sourceServiceId;
-      venueIdForLog = target.venueId;
     }
 
     const {
