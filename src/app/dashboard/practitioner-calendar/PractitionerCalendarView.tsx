@@ -986,6 +986,38 @@ const BOOKING_RESIZE_HANDLE_HEIGHT_PX = 18;
 /** Space kept between interactive booking chrome and resize gestures (paint + cushion so actions never butt the slider). */
 const BOOKING_RESERVE_ABOVE_RESIZE_PX = BOOKING_RESIZE_HANDLE_HEIGHT_PX + 1;
 
+/**
+ * A duration resize must be deliberately *armed* by pressing and holding the slider
+ * for this long before height drags take effect. Without it a stray touch — typically
+ * brushing the thin handle while scrolling the calendar on mobile — could nudge a
+ * booking's end time. Keep in sync with the `animate-resize-hold` keyframe duration
+ * in globals.css (the press-and-hold progress fill).
+ */
+const BOOKING_RESIZE_HOLD_MS = 1000;
+/** Pointer travel (px) during the hold that aborts arming — i.e. the press was really a scroll/scrub, not a deliberate resize. */
+const BOOKING_RESIZE_HOLD_TOLERANCE_PX = 10;
+
+/**
+ * Press-and-hold affordance shown over a duration slider while it is arming (before
+ * {@link BOOKING_RESIZE_HOLD_MS} elapses). The filling bar mirrors the hold timer so the
+ * user learns the handle must be held ~1s before it will resize the bar — the cue that
+ * makes the accidental-resize guard ({@link withResizeHold}) discoverable.
+ */
+function ResizeHoldHint({ label }: { label: string }) {
+  return (
+    <span
+      role="status"
+      className="pointer-events-none absolute left-1/2 z-[44] flex -translate-x-1/2 select-none flex-col items-center gap-1 whitespace-nowrap rounded-md bg-slate-900/95 px-2 py-1 text-[10px] font-semibold leading-none text-white shadow-md"
+      style={{ bottom: BOOKING_RESERVE_ABOVE_RESIZE_PX }}
+    >
+      <span>{label}</span>
+      <span className="h-[3px] w-12 overflow-hidden rounded-full bg-white/25" aria-hidden>
+        <span className="animate-resize-hold block h-full w-full origin-left rounded-full bg-white" />
+      </span>
+    </span>
+  );
+}
+
 /** Deferred guest modification notify after calendar drag: Confirm or timer end. */
 const BOOKING_MODIFY_NOTIFY_DEFER_MS = 60_000;
 
@@ -2311,6 +2343,12 @@ export function PractitionerCalendarView({
   const [blockResizePreviewEnd, setBlockResizePreviewEnd] = useState<{ blockId: string; endHm: string } | null>(
     null,
   );
+  /**
+   * Which slider is mid press-and-hold, before {@link BOOKING_RESIZE_HOLD_MS} elapses and the
+   * resize arms. Drives the "Hold to adjust" hint so the user knows the handle must be held
+   * (and so a stray scroll-touch does not silently change a duration). Cleared on arm/cancel.
+   */
+  const [resizeArming, setResizeArming] = useState<{ kind: 'booking' | 'block'; id: string } | null>(null);
   const justResizedBookingIdRef = useRef<string | null>(null);
   const justResizedBlockIdRef = useRef<string | null>(null);
   const [flashIds, setFlashIds] = useState<Set<string>>(() => new Set());
@@ -4525,181 +4563,268 @@ export function PractitionerCalendarView({
     void patchBookingMove(b, dateStr, newTime, pracId, { allowOutsideHours: movedOutsideHours });
   }
 
-  const beginAppointmentResize = useCallback(
-    (booking: Booking) => (downEvent: ReactPointerEvent<HTMLSpanElement>) => {
-      if (!['Pending', 'Booked', 'Confirmed', 'Seated'].includes(booking.status) || booking.resource_id) return;
-      downEvent.stopPropagation();
-      downEvent.preventDefault();
+  /**
+   * Wraps a duration-resize drag in a deliberate press-and-hold gate. On pointer down we
+   * only *arm* — showing the "Hold to adjust" hint — and start a {@link BOOKING_RESIZE_HOLD_MS}
+   * timer. The real `startDrag` fires only if the pointer stays roughly still for the whole
+   * window; any travel past {@link BOOKING_RESIZE_HOLD_TOLERANCE_PX}, or an early release,
+   * cancels it. Crucially we do NOT preventDefault on touch during the hold, so a scroll that
+   * merely grazes the thin handle still pans the page (and that movement cancels the arm) —
+   * fixing accidental duration changes while scrolling the calendar on mobile.
+   */
+  const withResizeHold = useCallback(
+    (opts: {
+      kind: 'booking' | 'block';
+      id: string;
+      eligible: boolean;
+      startDrag: (startY: number, target: HTMLElement, pointerId: number) => void;
+    }) =>
+    (downEvent: ReactPointerEvent<HTMLSpanElement>) => {
+      const { kind, id, eligible, startDrag } = opts;
+      if (!eligible) return;
       if (downEvent.pointerType === 'mouse' && downEvent.button !== 0) return;
+      downEvent.stopPropagation();
+      // Leave touch unprevented so native scrolling stays live during the hold; for mouse/pen
+      // suppress the default so the press doesn't begin a text selection over the booking.
+      if (downEvent.pointerType !== 'touch') downEvent.preventDefault();
 
       const pointerId = downEvent.pointerId;
-      const startY = downEvent.clientY;
-      const startM = timeToMinutes(booking.booking_time.slice(0, 5));
-      const dur0 = bookingDurationMinutes(booking, serviceMapForBooking(booking));
-      const endM0 = startM + dur0;
-      const minEnd = startM + SLOT_MINUTES;
-      // The booking may be extended past the grid's close (staff can run past
-      // opening hours) — allow up to ~2h beyond, capped at midnight. The portion
-      // beyond `gridCloseMin` counts as outside opening hours.
-      const gridCloseMin = endHour * 60;
-      const gridEndMax = Math.min(24 * 60, gridCloseMin + 120);
       const target = downEvent.currentTarget;
+      const startX = downEvent.clientX;
+      const startY = downEvent.clientY;
+      const state = { lastY: startY, done: false, holdTimer: 0 };
 
-      setResizeVisual({ bookingId: booking.id, deltaYPx: 0 });
-      setResizePreviewEnd({ bookingId: booking.id, endHm: minutesToTime(endM0) });
+      setResizeArming({ kind, id });
 
-      /** Max / min pointer delta (px) so implied end stays in [minEnd, gridEndMax]. */
-      const deltaYMin = ((minEnd - endM0) / SLOT_MINUTES) * SLOT_HEIGHT;
-      const deltaYMax = ((gridEndMax - endM0) / SLOT_MINUTES) * SLOT_HEIGHT;
-
-      const clampDeltaY = (clientY: number) => {
-        const raw = clientY - startY;
-        return Math.max(deltaYMin, Math.min(deltaYMax, raw));
+      const cleanup = () => {
+        window.clearTimeout(state.holdTimer);
+        window.removeEventListener('pointermove', onPreMove);
+        window.removeEventListener('pointerup', onPreEnd);
+        window.removeEventListener('pointercancel', onPreEnd);
       };
-
-      /** Continuous end (minutes); used while dragging for smooth height. */
-      const endMinutesFromClientY = (clientY: number) => {
-        const dY = clampDeltaY(clientY);
-        return endM0 + (dY / SLOT_HEIGHT) * SLOT_MINUTES;
+      const settle = (activate: boolean) => {
+        if (state.done) return;
+        state.done = true;
+        cleanup();
+        setResizeArming((cur) => (cur && cur.kind === kind && cur.id === id ? null : cur));
+        if (activate) {
+          try {
+            if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+              navigator.vibrate(12);
+            }
+          } catch {
+            /* ignore */
+          }
+          startDrag(state.lastY, target, pointerId);
+        }
       };
-
-      const applyFromClientY = (clientY: number) => {
-        const dY = clampDeltaY(clientY);
-        const endFloat = endM0 + (dY / SLOT_HEIGHT) * SLOT_MINUTES;
-        setResizeVisual({ bookingId: booking.id, deltaYPx: dY });
-        setResizePreviewEnd({
-          bookingId: booking.id,
-          endHm: minutesToTime(Math.round(endFloat)),
-        });
-      };
-
-      try {
-        target.setPointerCapture(pointerId);
-      } catch {
-        /* ignore */
+      function onPreMove(ev: globalThis.PointerEvent) {
+        if (ev.pointerId !== pointerId) return;
+        state.lastY = ev.clientY;
+        if (Math.hypot(ev.clientX - startX, ev.clientY - startY) > BOOKING_RESIZE_HOLD_TOLERANCE_PX) {
+          settle(false);
+        }
+      }
+      function onPreEnd(ev: globalThis.PointerEvent) {
+        if (ev.pointerId !== pointerId) return;
+        settle(false);
       }
 
-      const onMove = (ev: globalThis.PointerEvent) => {
-        if (ev.pointerId !== pointerId) return;
-        ev.preventDefault();
-        applyFromClientY(ev.clientY);
-      };
+      state.holdTimer = window.setTimeout(() => settle(true), BOOKING_RESIZE_HOLD_MS);
+      window.addEventListener('pointermove', onPreMove, { passive: true });
+      window.addEventListener('pointerup', onPreEnd);
+      window.addEventListener('pointercancel', onPreEnd);
+    },
+    [],
+  );
 
-      const finish = (ev: globalThis.PointerEvent) => {
-        if (ev.pointerId !== pointerId) return;
-        window.removeEventListener('pointermove', onMove);
-        window.removeEventListener('pointerup', finish);
-        window.removeEventListener('pointercancel', finish);
+  const beginAppointmentResize = useCallback(
+    (booking: Booking) => {
+      const eligible =
+        ['Pending', 'Booked', 'Confirmed', 'Seated'].includes(booking.status) && !booking.resource_id;
+
+      /** The actual height-drag, run only after the press-and-hold gate arms (see {@link withResizeHold}). */
+      const startDrag = (startY: number, target: HTMLElement, pointerId: number) => {
+        const startM = timeToMinutes(booking.booking_time.slice(0, 5));
+        const dur0 = bookingDurationMinutes(booking, serviceMapForBooking(booking));
+        const endM0 = startM + dur0;
+        const minEnd = startM + SLOT_MINUTES;
+        // The booking may be extended past the grid's close (staff can run past
+        // opening hours) — allow up to ~2h beyond, capped at midnight. The portion
+        // beyond `gridCloseMin` counts as outside opening hours.
+        const gridCloseMin = endHour * 60;
+        const gridEndMax = Math.min(24 * 60, gridCloseMin + 120);
+
+        setResizeVisual({ bookingId: booking.id, deltaYPx: 0 });
+        setResizePreviewEnd({ bookingId: booking.id, endHm: minutesToTime(endM0) });
+
+        /** Max / min pointer delta (px) so implied end stays in [minEnd, gridEndMax]. */
+        const deltaYMin = ((minEnd - endM0) / SLOT_MINUTES) * SLOT_HEIGHT;
+        const deltaYMax = ((gridEndMax - endM0) / SLOT_MINUTES) * SLOT_HEIGHT;
+
+        const clampDeltaY = (clientY: number) => {
+          const raw = clientY - startY;
+          return Math.max(deltaYMin, Math.min(deltaYMax, raw));
+        };
+
+        /** Continuous end (minutes); used while dragging for smooth height. */
+        const endMinutesFromClientY = (clientY: number) => {
+          const dY = clampDeltaY(clientY);
+          return endM0 + (dY / SLOT_HEIGHT) * SLOT_MINUTES;
+        };
+
+        const applyFromClientY = (clientY: number) => {
+          const dY = clampDeltaY(clientY);
+          const endFloat = endM0 + (dY / SLOT_HEIGHT) * SLOT_MINUTES;
+          setResizeVisual({ bookingId: booking.id, deltaYPx: dY });
+          setResizePreviewEnd({
+            bookingId: booking.id,
+            endHm: minutesToTime(Math.round(endFloat)),
+          });
+        };
+
         try {
-          target.releasePointerCapture(pointerId);
+          target.setPointerCapture(pointerId);
         } catch {
           /* ignore */
         }
-        const endFloat = endMinutesFromClientY(ev.clientY);
-        const committedEndMin = Math.min(gridEndMax, Math.max(minEnd, Math.round(endFloat)));
-        const endStr = minutesToTime(committedEndMin);
-        setResizeVisual(null);
-        setResizePreviewEnd(null);
-        if (committedEndMin === endM0) return;
-        const extendedOutsideHours = committedEndMin > gridCloseMin;
-        if (extendedOutsideHours) {
-          addToast('Extended outside opening hours.', 'info');
-        }
-        justResizedBookingIdRef.current = booking.id;
-        window.setTimeout(() => {
-          if (justResizedBookingIdRef.current === booking.id) justResizedBookingIdRef.current = null;
-        }, 220);
-        void patchBookingResize(booking, endStr, { allowOutsideHours: extendedOutsideHours });
+
+        // The hold has armed: now this is a deliberate resize, so block native scroll for the
+        // duration of the drag (touch-action stays pannable at rest so scrolls that only graze
+        // the handle still work). Removed in `finish`.
+        const blockTouchScroll = (e: TouchEvent) => e.preventDefault();
+        document.addEventListener('touchmove', blockTouchScroll, { passive: false });
+
+        const onMove = (ev: globalThis.PointerEvent) => {
+          if (ev.pointerId !== pointerId) return;
+          ev.preventDefault();
+          applyFromClientY(ev.clientY);
+        };
+
+        const finish = (ev: globalThis.PointerEvent) => {
+          if (ev.pointerId !== pointerId) return;
+          window.removeEventListener('pointermove', onMove);
+          window.removeEventListener('pointerup', finish);
+          window.removeEventListener('pointercancel', finish);
+          document.removeEventListener('touchmove', blockTouchScroll);
+          try {
+            target.releasePointerCapture(pointerId);
+          } catch {
+            /* ignore */
+          }
+          const endFloat = endMinutesFromClientY(ev.clientY);
+          const committedEndMin = Math.min(gridEndMax, Math.max(minEnd, Math.round(endFloat)));
+          const endStr = minutesToTime(committedEndMin);
+          setResizeVisual(null);
+          setResizePreviewEnd(null);
+          if (committedEndMin === endM0) return;
+          const extendedOutsideHours = committedEndMin > gridCloseMin;
+          if (extendedOutsideHours) {
+            addToast('Extended outside opening hours.', 'info');
+          }
+          justResizedBookingIdRef.current = booking.id;
+          window.setTimeout(() => {
+            if (justResizedBookingIdRef.current === booking.id) justResizedBookingIdRef.current = null;
+          }, 220);
+          void patchBookingResize(booking, endStr, { allowOutsideHours: extendedOutsideHours });
+        };
+
+        window.addEventListener('pointermove', onMove, { passive: false });
+        window.addEventListener('pointerup', finish);
+        window.addEventListener('pointercancel', finish);
       };
 
-      window.addEventListener('pointermove', onMove, { passive: false });
-      window.addEventListener('pointerup', finish);
-      window.addEventListener('pointercancel', finish);
+      return withResizeHold({ kind: 'booking', id: booking.id, eligible, startDrag });
     },
-    [addToast, endHour, patchBookingResize, serviceMapForBooking],
+    [addToast, endHour, patchBookingResize, serviceMapForBooking, withResizeHold],
   );
 
   const beginBlockResize = useCallback(
-    (block: CalendarBlock) => (downEvent: ReactPointerEvent<HTMLSpanElement>) => {
-      if (!isManualEditableBlock(block)) return;
-      downEvent.stopPropagation();
-      downEvent.preventDefault();
-      if (downEvent.pointerType === 'mouse' && downEvent.button !== 0) return;
+    (block: CalendarBlock) => {
+      const eligible = isManualEditableBlock(block);
 
-      const pointerId = downEvent.pointerId;
-      const startY = downEvent.clientY;
-      const startM = timeToMinutes(block.start_time.slice(0, 5));
-      const endM0 = startM + blockDurationMinutes(block);
-      const minEnd = startM + SLOT_MINUTES;
-      const gridEndMax = endHour * 60;
-      const target = downEvent.currentTarget;
+      /** The actual height-drag, run only after the press-and-hold gate arms (see {@link withResizeHold}). */
+      const startDrag = (startY: number, target: HTMLElement, pointerId: number) => {
+        const startM = timeToMinutes(block.start_time.slice(0, 5));
+        const endM0 = startM + blockDurationMinutes(block);
+        const minEnd = startM + SLOT_MINUTES;
+        const gridEndMax = endHour * 60;
 
-      setBlockResizeVisual({ blockId: block.id, deltaYPx: 0 });
-      setBlockResizePreviewEnd({ blockId: block.id, endHm: minutesToTime(endM0) });
+        setBlockResizeVisual({ blockId: block.id, deltaYPx: 0 });
+        setBlockResizePreviewEnd({ blockId: block.id, endHm: minutesToTime(endM0) });
 
-      const deltaYMin = ((minEnd - endM0) / SLOT_MINUTES) * SLOT_HEIGHT;
-      const deltaYMax = ((gridEndMax - endM0) / SLOT_MINUTES) * SLOT_HEIGHT;
+        const deltaYMin = ((minEnd - endM0) / SLOT_MINUTES) * SLOT_HEIGHT;
+        const deltaYMax = ((gridEndMax - endM0) / SLOT_MINUTES) * SLOT_HEIGHT;
 
-      const clampDeltaY = (clientY: number) => {
-        const raw = clientY - startY;
-        return Math.max(deltaYMin, Math.min(deltaYMax, raw));
-      };
+        const clampDeltaY = (clientY: number) => {
+          const raw = clientY - startY;
+          return Math.max(deltaYMin, Math.min(deltaYMax, raw));
+        };
 
-      const endMinutesFromClientY = (clientY: number) => {
-        const dY = clampDeltaY(clientY);
-        return endM0 + (dY / SLOT_HEIGHT) * SLOT_MINUTES;
-      };
+        const endMinutesFromClientY = (clientY: number) => {
+          const dY = clampDeltaY(clientY);
+          return endM0 + (dY / SLOT_HEIGHT) * SLOT_MINUTES;
+        };
 
-      const applyFromClientY = (clientY: number) => {
-        const dY = clampDeltaY(clientY);
-        const endFloat = endM0 + (dY / SLOT_HEIGHT) * SLOT_MINUTES;
-        setBlockResizeVisual({ blockId: block.id, deltaYPx: dY });
-        setBlockResizePreviewEnd({
-          blockId: block.id,
-          endHm: minutesToTime(Math.round(endFloat)),
-        });
-      };
+        const applyFromClientY = (clientY: number) => {
+          const dY = clampDeltaY(clientY);
+          const endFloat = endM0 + (dY / SLOT_HEIGHT) * SLOT_MINUTES;
+          setBlockResizeVisual({ blockId: block.id, deltaYPx: dY });
+          setBlockResizePreviewEnd({
+            blockId: block.id,
+            endHm: minutesToTime(Math.round(endFloat)),
+          });
+        };
 
-      try {
-        target.setPointerCapture(pointerId);
-      } catch {
-        /* ignore */
-      }
-
-      const onMove = (ev: globalThis.PointerEvent) => {
-        if (ev.pointerId !== pointerId) return;
-        ev.preventDefault();
-        applyFromClientY(ev.clientY);
-      };
-
-      const finish = (ev: globalThis.PointerEvent) => {
-        if (ev.pointerId !== pointerId) return;
-        window.removeEventListener('pointermove', onMove);
-        window.removeEventListener('pointerup', finish);
-        window.removeEventListener('pointercancel', finish);
         try {
-          target.releasePointerCapture(pointerId);
+          target.setPointerCapture(pointerId);
         } catch {
           /* ignore */
         }
-        const endFloat = endMinutesFromClientY(ev.clientY);
-        const committedEndMin = Math.min(gridEndMax, Math.max(minEnd, Math.round(endFloat)));
-        const endStr = minutesToTime(committedEndMin);
-        setBlockResizeVisual(null);
-        setBlockResizePreviewEnd(null);
-        if (committedEndMin === endM0) return;
-        justResizedBlockIdRef.current = block.id;
-        window.setTimeout(() => {
-          if (justResizedBlockIdRef.current === block.id) justResizedBlockIdRef.current = null;
-        }, 220);
-        void patchBlockResize(block, endStr);
+
+        // The hold has armed: block native scroll for the duration of the drag (see the
+        // booking resize for rationale). Removed in `finish`.
+        const blockTouchScroll = (e: TouchEvent) => e.preventDefault();
+        document.addEventListener('touchmove', blockTouchScroll, { passive: false });
+
+        const onMove = (ev: globalThis.PointerEvent) => {
+          if (ev.pointerId !== pointerId) return;
+          ev.preventDefault();
+          applyFromClientY(ev.clientY);
+        };
+
+        const finish = (ev: globalThis.PointerEvent) => {
+          if (ev.pointerId !== pointerId) return;
+          window.removeEventListener('pointermove', onMove);
+          window.removeEventListener('pointerup', finish);
+          window.removeEventListener('pointercancel', finish);
+          document.removeEventListener('touchmove', blockTouchScroll);
+          try {
+            target.releasePointerCapture(pointerId);
+          } catch {
+            /* ignore */
+          }
+          const endFloat = endMinutesFromClientY(ev.clientY);
+          const committedEndMin = Math.min(gridEndMax, Math.max(minEnd, Math.round(endFloat)));
+          const endStr = minutesToTime(committedEndMin);
+          setBlockResizeVisual(null);
+          setBlockResizePreviewEnd(null);
+          if (committedEndMin === endM0) return;
+          justResizedBlockIdRef.current = block.id;
+          window.setTimeout(() => {
+            if (justResizedBlockIdRef.current === block.id) justResizedBlockIdRef.current = null;
+          }, 220);
+          void patchBlockResize(block, endStr);
+        };
+
+        window.addEventListener('pointermove', onMove, { passive: false });
+        window.addEventListener('pointerup', finish);
+        window.addEventListener('pointercancel', finish);
       };
 
-      window.addEventListener('pointermove', onMove, { passive: false });
-      window.addEventListener('pointerup', finish);
-      window.addEventListener('pointercancel', finish);
+      return withResizeHold({ kind: 'block', id: block.id, eligible, startDrag });
     },
-    [endHour, patchBlockResize],
+    [endHour, patchBlockResize, withResizeHold],
   );
 
   const timeLabels = Array.from({ length: TOTAL_SLOTS + 1 }, (_, i) => {
@@ -6052,6 +6177,8 @@ export function PractitionerCalendarView({
                         const blockShellClass = calendarBlockShellClass(bl);
                         const resizeExtra =
                           blockResizeVisual?.blockId === bl.id ? blockResizeVisual.deltaYPx : 0;
+                        const resizeArmingThis =
+                          resizeArming?.kind === 'block' && resizeArming.id === bl.id;
                         const displayEndHm =
                           blockResizePreviewEnd?.blockId === bl.id
                             ? blockResizePreviewEnd.endHm
@@ -6135,18 +6262,28 @@ export function PractitionerCalendarView({
                                         Until {blockResizePreviewEnd.endHm}
                                       </span>
                                     ) : null}
+                                    {resizeArmingThis ? <ResizeHoldHint label="Hold to adjust" /> : null}
+                                    {/* See booking handle: pannable touch-action + ~1s hold gate. */}
                                     <span
                                       role="separator"
                                       aria-orientation="horizontal"
-                                      aria-label="Drag to change block duration"
+                                      aria-label="Press and hold, then drag to change block duration"
                                       data-no-calendar-pan="true"
-                                      className="group/resize absolute bottom-0 left-0 right-0 z-40 flex cursor-ns-resize touch-none items-center justify-center rounded-b-lg bg-black/0 transition-colors duration-150 hover:bg-black/[0.06] active:bg-black/[0.12]"
+                                      className={`group/resize absolute bottom-0 left-0 right-0 z-40 flex cursor-ns-resize [touch-action:pan-x_pan-y] items-center justify-center rounded-b-lg transition-colors duration-150 ${
+                                        resizeArmingThis
+                                          ? 'bg-black/[0.12]'
+                                          : 'bg-black/0 hover:bg-black/[0.06] active:bg-black/[0.12]'
+                                      }`}
                                       style={{ height: BOOKING_RESIZE_HANDLE_HEIGHT_PX }}
                                       onPointerDown={beginBlockResize(bl)}
                                       onMouseDown={(e) => e.stopPropagation()}
                                     >
                                       <span
-                                        className="h-[3px] w-7 rounded-full bg-current opacity-0 transition-opacity duration-150 group-hover:opacity-25 group-hover/resize:opacity-50"
+                                        className={`h-[3px] w-7 rounded-full bg-current transition-opacity duration-150 ${
+                                          resizeArmingThis
+                                            ? 'opacity-70'
+                                            : 'opacity-0 group-hover:opacity-25 group-hover/resize:opacity-50'
+                                        }`}
                                         aria-hidden
                                       />
                                     </span>
@@ -6283,6 +6420,8 @@ export function PractitionerCalendarView({
                           const resName = b.resource_id ? resourceNameById.get(b.resource_id) : null;
                           const resizeExtra =
                             resizeVisual?.bookingId === b.id ? resizeVisual.deltaYPx : 0;
+                          const resizeArmingThis =
+                            resizeArming?.kind === 'booking' && resizeArming.id === b.id;
                           const displayEndHm =
                             resizePreviewEnd?.bookingId === b.id
                               ? resizePreviewEnd.endHm
@@ -6504,18 +6643,30 @@ export function PractitionerCalendarView({
                                           </div>
                                         </div>
                                       ) : null}
+                                      {resizeArmingThis ? <ResizeHoldHint label="Hold to adjust" /> : null}
+                                      {/* touch-action stays pannable so a scroll that merely grazes this thin
+                                          handle still pans the page; a deliberate ~1s hold (withResizeHold) is
+                                          required before a height drag changes the duration. */}
                                       <span
                                         role="separator"
                                         aria-orientation="horizontal"
-                                        aria-label="Drag to change duration"
+                                        aria-label="Press and hold, then drag to change duration"
                                         data-no-calendar-pan="true"
-                                        className="group/resize absolute bottom-0 left-0 right-0 z-40 flex cursor-ns-resize touch-none items-center justify-center rounded-b-2xl bg-black/0 transition-colors duration-150 hover:bg-black/[0.06] active:bg-black/[0.12]"
+                                        className={`group/resize absolute bottom-0 left-0 right-0 z-40 flex cursor-ns-resize [touch-action:pan-x_pan-y] items-center justify-center rounded-b-2xl transition-colors duration-150 ${
+                                          resizeArmingThis
+                                            ? 'bg-black/[0.12]'
+                                            : 'bg-black/0 hover:bg-black/[0.06] active:bg-black/[0.12]'
+                                        }`}
                                         style={{ height: BOOKING_RESIZE_HANDLE_HEIGHT_PX }}
                                         onPointerDown={beginAppointmentResize(b)}
                                         onMouseDown={(e) => e.stopPropagation()}
                                       >
                                         <span
-                                          className="h-[3px] w-7 rounded-full bg-current opacity-0 transition-opacity duration-150 group-hover:opacity-25 group-hover/resize:opacity-50"
+                                          className={`h-[3px] w-7 rounded-full bg-current transition-opacity duration-150 ${
+                                            resizeArmingThis
+                                              ? 'opacity-70'
+                                              : 'opacity-0 group-hover:opacity-25 group-hover/resize:opacity-50'
+                                          }`}
                                           aria-hidden
                                         />
                                       </span>
