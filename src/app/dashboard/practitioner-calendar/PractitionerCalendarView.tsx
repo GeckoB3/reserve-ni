@@ -5494,6 +5494,7 @@ export function PractitionerCalendarView({
               onBookingCreated={() => {
                 void fetchData();
               }}
+              onBookingSubmitted={() => void refetchBookingsList()}
             />
           )}
         />
@@ -7276,6 +7277,7 @@ export function PractitionerCalendarView({
             clearStaffBookingPrefill();
             void refetchBookingsList();
           }}
+          onBookingSubmitted={() => void refetchBookingsList()}
           venueId={eventBookPrefill?.linkedOwnerVenueId ?? venueId}
           currency={currency}
           bookingModel={bookingModel}
@@ -7362,6 +7364,7 @@ export function PractitionerCalendarView({
             setLinkedCreating(null);
             void loadLinkedData();
           }}
+          onBookingSubmitted={() => void loadLinkedData()}
           venueId={linkedCreating.venue.venueId}
           currency={currency}
           bookingModel={bookingModel}
