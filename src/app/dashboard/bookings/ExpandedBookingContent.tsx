@@ -165,6 +165,12 @@ export interface BookingRow {
   /** Practitioner calendar / day-sheet "Arrived" indicator; PATCH via `client_arrived`. */
   client_arrived_at?: string | null;
   inferred_booking_model?: BookingModel;
+  /** Service delivery location snapshot; null/omitted = business venue (legacy rows). */
+  location_type?: string | null;
+  client_address_line1?: string | null;
+  client_address_line2?: string | null;
+  client_address_city?: string | null;
+  client_address_postcode?: string | null;
 }
 
 export interface BookingDetailLite {
@@ -1106,6 +1112,39 @@ export function ExpandedBookingContent({
       <span className="inline-flex max-w-full flex-wrap items-baseline gap-x-1">
         <span className="font-medium text-slate-500">Checked in</span>
         <span className="font-semibold text-slate-800">{formatRelative(activeDetail.checked_in_at)}</span>
+      </span>
+      ),
+    });
+  }
+
+  if (effectiveBooking.location_type === 'online') {
+    bookingMetaSegments.push({
+      key: 'location',
+      node: (
+      <span className="inline-flex max-w-full flex-wrap items-baseline gap-x-1">
+        <span className="font-medium text-slate-500">Location</span>
+        <span className="rounded bg-sky-50 px-1.5 py-0.5 font-semibold text-sky-800 ring-1 ring-sky-200/80">Online</span>
+      </span>
+      ),
+    });
+  } else if (effectiveBooking.location_type === 'client_address') {
+    const clientAddress = [
+      effectiveBooking.client_address_line1,
+      effectiveBooking.client_address_line2,
+      effectiveBooking.client_address_city,
+      effectiveBooking.client_address_postcode,
+    ]
+      .map((p) => (p ?? '').trim())
+      .filter(Boolean)
+      .join(', ');
+    bookingMetaSegments.push({
+      key: 'location',
+      node: (
+      <span className="inline-flex max-w-full flex-wrap items-baseline gap-x-1">
+        <span className="font-medium text-slate-500">Location</span>
+        <span className="break-words font-semibold text-emerald-800 [overflow-wrap:anywhere]">
+          Client&apos;s address{clientAddress ? ` — ${clientAddress}` : ' (not recorded)'}
+        </span>
       </span>
       ),
     });

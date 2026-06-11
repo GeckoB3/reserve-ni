@@ -128,6 +128,11 @@ export interface GuestDetails {
   marketing_consent?: boolean;
   /** Staff flow: guest picked from saved contacts autocomplete. */
   returning_guest?: boolean;
+  /** Client-address services: where the staff member travels to for this booking. */
+  address_line1?: string;
+  address_line2?: string;
+  address_city?: string;
+  address_postcode?: string;
 }
 
 export type BookingStep = 'date' | 'slot' | 'details' | 'payment' | 'confirmation';

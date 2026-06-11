@@ -1083,6 +1083,34 @@ export function AppointmentAvailabilitySettings({
                       )}
                   </div>
 
+                  {tab === 'hours' && (
+                    <div className="mb-4 flex gap-3 rounded-2xl border border-brand-100 bg-brand-50/50 p-4">
+                      <InfoIcon className="mt-0.5 h-5 w-5 shrink-0 text-brand-600" aria-hidden />
+                      <div className="space-y-1.5 text-sm leading-relaxed text-slate-700">
+                        <p className="font-semibold text-slate-900">
+                          How calendar hours and business hours work together
+                        </p>
+                        <p>
+                          The hours you set below are when this calendar can take bookings, but a time is only
+                          bookable where it also falls{' '}
+                          <strong className="font-semibold">inside your venue&apos;s business hours</strong>. If you
+                          set calendar hours wider than your business hours, the extra time outside them won&apos;t be
+                          bookable, and days your venue is closed stay closed here too.
+                        </p>
+                        <p>
+                          To open bookings earlier or later, widen your{' '}
+                          <Link
+                            href="/dashboard/settings?tab=business-hours"
+                            className="font-semibold text-brand-600 underline decoration-brand-300 underline-offset-2 hover:text-brand-800"
+                          >
+                            Settings → Business hours
+                          </Link>{' '}
+                          as well. If you haven&apos;t set business hours, the calendar hours below apply on their own.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
                   {selectedPrac && tab === 'hours' && (
                     <WorkingHoursEditor
                       hours={selectedPrac.working_hours ?? {}}
@@ -1155,6 +1183,18 @@ export function AppointmentAvailabilitySettings({
         ) : null}
       </Dialog>
     </div>
+  );
+}
+
+function InfoIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" aria-hidden>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z"
+      />
+    </svg>
   );
 }
 

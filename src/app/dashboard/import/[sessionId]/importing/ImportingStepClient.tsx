@@ -57,12 +57,35 @@ export function ImportingStepClient({ sessionId }: { sessionId: string }) {
   const [progress, setProgress] = useState<ProgressPayload | null>(null);
   const [pollFailureCount, setPollFailureCount] = useState(0);
   const [pollError, setPollError] = useState<string | null>(null);
+  const [qaReport, setQaReport] = useState<{
+    checked: number;
+    matched: number;
+    mismatches: unknown[];
+    summary: string;
+  } | null>(null);
+  const qaRequested = useRef(false);
 
   useEffect(() => {
     if (progress?.status !== 'importing' && !executingBatch) return undefined;
     const id = window.setInterval(() => forceTimeTick(), 1000);
     return () => clearInterval(id);
   }, [progress?.status, executingBatch]);
+
+  /** Post-import QA spot-check: runs once when the import reaches complete. */
+  useEffect(() => {
+    if (progress?.status !== 'complete' || qaRequested.current) return;
+    qaRequested.current = true;
+    void (async () => {
+      try {
+        const res = await fetch(`/api/import/sessions/${sessionId}/qa`, { method: 'POST' });
+        if (!res.ok) return;
+        const j = await readResponseJson<{ report?: typeof qaReport }>(res);
+        if (j.report) setQaReport(j.report);
+      } catch {
+        /* QA is advisory; never block the completion screen */
+      }
+    })();
+  }, [progress?.status, sessionId]);
 
   /**
    * No `didRun` ref: React 18 Strict Mode runs effects as mount → cleanup → mount. A ref “run once”
@@ -303,6 +326,17 @@ export function ImportingStepClient({ sessionId }: { sessionId: string }) {
               <p>
                 Bookings: {progress.imported_bookings ?? 0} · Skipped rows: {progress.skipped_rows ?? 0}
               </p>
+              {qaReport && qaReport.checked > 0 && (
+                <p
+                  className={`rounded-lg border px-2.5 py-1.5 text-xs ${
+                    qaReport.mismatches.length === 0
+                      ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
+                      : 'border-amber-200 bg-amber-50 text-amber-950'
+                  }`}
+                >
+                  {qaReport.summary}
+                </p>
+              )}
               <a
                 href={`/api/import/sessions/${sessionId}/report`}
                 className="inline-block font-medium text-emerald-800 hover:text-emerald-900"

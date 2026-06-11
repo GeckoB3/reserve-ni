@@ -7,7 +7,7 @@ import {
   venueFeatureFlagsForStorage,
 } from '@/lib/feature-flags/resolve';
 import { venueFeatureFlagsSchema } from '@/lib/feature-flags/types';
-import { createClient } from '@/lib/supabase/server';
+import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { listVenueCalendarSortOrder } from '@/lib/availability/appointment-any-practitioner';
 import { parseAnyAvailablePractitionerConfig } from '@/lib/feature-flags/any-available-practitioner-config';
@@ -63,9 +63,9 @@ async function loadVenueCalendarsForSettings(
 }
 
 /** GET /api/venue/feature-flags — resolved flags for the authenticated venue. */
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    const supabase = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabase);
     if (!staff) {
       return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
@@ -101,7 +101,7 @@ export async function GET() {
 /** PATCH /api/venue/feature-flags — admin-only per-venue overrides. */
 export async function PATCH(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    const supabase = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabase);
     if (!staff) {
       return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });

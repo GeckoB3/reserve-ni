@@ -38,6 +38,16 @@ export interface GuestInput {
   phone: string | null;
   /** When set (public online flows), updates `guests.marketing_consent` / `marketing_consent_at`. */
   marketing_consent?: boolean;
+  /**
+   * When set (client-address service bookings), stores/refreshes the address on the
+   * contact record. The latest provided address wins; omitted = leave unchanged.
+   */
+  address?: {
+    line1: string;
+    line2?: string | null;
+    city?: string | null;
+    postcode?: string | null;
+  };
 }
 
 export interface FindOrCreateGuestOptions {
@@ -69,6 +79,18 @@ function marketingPayloadFromConsent(consented: boolean): {
   return {
     marketing_consent: consented,
     marketing_consent_at: consented ? new Date().toISOString() : null,
+  };
+}
+
+/** Address columns patch when the booking captured one; {} otherwise (leave unchanged). */
+function addressPatchFromInput(input: GuestInput): Record<string, string | null> {
+  const a = input.address;
+  if (!a || !a.line1.trim()) return {};
+  return {
+    address_line1: a.line1.trim(),
+    address_line2: a.line2?.trim() || null,
+    address_city: a.city?.trim() || null,
+    address_postcode: a.postcode?.trim() || null,
   };
 }
 
@@ -173,6 +195,7 @@ export async function findOrCreateGuest(
           user_id: nextUserId,
           updated_at: new Date().toISOString(),
           ...(marketingPatch ?? {}),
+          ...addressPatchFromInput(input),
         })
         .eq('id', byEmail.id);
 
@@ -231,6 +254,7 @@ export async function findOrCreateGuest(
           user_id: nextUserId,
           updated_at: new Date().toISOString(),
           ...(marketingPatchPhone ?? {}),
+          ...addressPatchFromInput(input),
         })
         .eq('id', byPhone.id);
 
@@ -276,6 +300,7 @@ export async function findOrCreateGuest(
       visit_count: 0,
       source: silentAuthSignup ? 'self_booked' : null,
       ...marketingInsert,
+      ...addressPatchFromInput(input),
     })
     .select(guestSelect)
     .single();

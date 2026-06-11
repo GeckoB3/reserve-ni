@@ -1,5 +1,9 @@
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import type { BookingEmailData, VenueEmailData } from '@/lib/emails/types';
+import {
+  resolveBookingLocationForEmail,
+  type BookingAnchorRow,
+} from '@/lib/emails/booking-email-enrichment';
 import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
 import { sendPolicyMessage } from './outbound';
 import type { MessageType, Recipient, TemplateVariables } from './types';
@@ -120,7 +124,7 @@ async function buildGuestBookingContext(
     ? await admin
         .from('bookings')
         .select(
-          'id, venue_id, guest_id, guest_email, booking_date, booking_time, party_size, special_requests, dietary_notes, deposit_amount_pence, deposit_status, cancellation_deadline, experience_event_id, class_instance_id, resource_id',
+          'id, venue_id, guest_id, guest_email, booking_date, booking_time, party_size, special_requests, dietary_notes, deposit_amount_pence, deposit_status, cancellation_deadline, experience_event_id, class_instance_id, resource_id, booking_model, practitioner_id, appointment_service_id, calendar_id, service_item_id, service_variant_id, group_booking_id, person_label, location_type, client_address_line1, client_address_line2, client_address_city, client_address_postcode',
         )
         .eq('id', ctx.booking_id)
         .maybeSingle()
@@ -194,6 +198,17 @@ async function buildGuestBookingContext(
           ? 'resource_booking'
           : (venue.booking_model ?? 'table_reservation');
 
+  // Service delivery location (client address / online) replaces the venue address in
+  // location blocks. Resolved from the booking snapshot when present.
+  const locationRow = bookingRow?.data as
+    | (BookingAnchorRow & { location_type?: string | null })
+    | null
+    | undefined;
+  const bookingLocation =
+    locationRow && locationRow.location_type
+      ? await resolveBookingLocationForEmail(admin, locationRow as BookingAnchorRow)
+      : undefined;
+
   return {
     booking: {
       id: ctx.booking_id ?? bookingData?.id ?? crypto.randomUUID(),
@@ -254,6 +269,7 @@ async function buildGuestBookingContext(
           : null) ??
         null,
       booking_model: bookingModel as BookingModel,
+      ...(bookingLocation ? { booking_location: bookingLocation } : {}),
     },
     venue: venueRowToEmailData({
       name: venue.name,

@@ -21,6 +21,7 @@ import type {
   ServiceVariant,
   WorkingHours,
 } from '@/types/booking-models';
+import { parseServiceLocationType } from '@/types/booking-models';
 import { parseProcessingTimeBlocksFromDb } from '@/lib/appointments/processing-time';
 import {
   DEFAULT_APPOINTMENT_SERVICE_FORM_VALUES,
@@ -80,6 +81,10 @@ interface Service {
   /** Linked add-on groups, returned from the dashboard API. */
   addon_groups?: AppointmentCatalogAddonGroup[];
   processing_time_blocks?: ProcessingTimeBlock[];
+  /** Where the service is delivered; omitted/null = business venue (legacy rows). */
+  location_type?: string | null;
+  online_meeting_url?: string | null;
+  online_meeting_info?: string | null;
 }
 
 
@@ -438,6 +443,9 @@ export function AppointmentServicesView({
       addon_group_links: (svc as { addon_groups?: unknown }).addon_groups
         ? ((svc as { addon_groups: AppointmentCatalogAddonGroup[] }).addon_groups)
         : [],
+      location_type: parseServiceLocationType(svc.location_type),
+      online_meeting_url: svc.online_meeting_url ?? '',
+      online_meeting_info: svc.online_meeting_info ?? '',
     });
     setEditingId(svc.id);
     setError(null);
@@ -546,6 +554,22 @@ export function AppointmentServicesView({
       return;
     }
 
+    if (isAdmin && form.location_type === 'online' && form.online_meeting_url.trim()) {
+      const raw = form.online_meeting_url.trim();
+      const candidate = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+      let valid = false;
+      try {
+        const u = new URL(candidate);
+        valid = (u.protocol === 'http:' || u.protocol === 'https:') && Boolean(u.hostname);
+      } catch {
+        valid = false;
+      }
+      if (!valid) {
+        setError('Enter a valid link for the online service (e.g. https://zoom.us/j/123).');
+        return;
+      }
+    }
+
     if (isAdmin && form.variants.length > 0) {
       if (activeVariants.length === 0) {
         setError('Turn on at least one bookable option, or switch back to a single offering.');
@@ -642,6 +666,16 @@ export function AppointmentServicesView({
           addon_group_id: link.group.id,
           sort_order: idx,
         }));
+        payload.location_type = form.location_type;
+        const meetingUrlRaw = form.online_meeting_url.trim();
+        payload.online_meeting_url =
+          form.location_type === 'online' && meetingUrlRaw
+            ? (/^https?:\/\//i.test(meetingUrlRaw) ? meetingUrlRaw : `https://${meetingUrlRaw}`)
+            : null;
+        payload.online_meeting_info =
+          form.location_type === 'online' && form.online_meeting_info.trim()
+            ? form.online_meeting_info.trim()
+            : null;
       }
 
       const res = await fetch('/api/venue/appointment-services', {

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { requireCompliancePlan } from '@/lib/compliance/auth';
 import { complianceRecordNotesPatchSchema } from '@/lib/compliance/zod-schemas';
@@ -10,9 +10,9 @@ interface RouteCtx {
 }
 
 /** GET /api/venue/compliance/records/[id] — record + version snapshot; writes record.viewed audit (§13.1). */
-export async function GET(_request: NextRequest, ctx: RouteCtx) {
+export async function GET(request: NextRequest, ctx: RouteCtx) {
   try {
-    const supabase = await createClient();
+    const supabase = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabase);
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
     const gate = await requireCompliancePlan(staff);
@@ -54,7 +54,7 @@ export async function GET(_request: NextRequest, ctx: RouteCtx) {
 /** PATCH /api/venue/compliance/records/[id] — edit notes only (responses are immutable). */
 export async function PATCH(request: NextRequest, ctx: RouteCtx) {
   try {
-    const supabase = await createClient();
+    const supabase = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabase);
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
     const gate = await requireCompliancePlan(staff);

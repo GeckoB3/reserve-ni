@@ -126,6 +126,26 @@ export interface PractitionerLeavePeriod {
   unavailable_end_time?: string | null;
 }
 
+/**
+ * Where an appointment service is delivered.
+ * - `business_venue`: at the venue (default; emails show the venue address).
+ * - `client_address`: staff travel to the client; booking collects a mandatory address
+ *   that is snapshotted on the booking and kept on the contact record.
+ * - `online`: remote; the service's meeting link + joining info replace the venue
+ *   address in confirmation/reminder emails.
+ */
+export type ServiceLocationType = 'business_venue' | 'client_address' | 'online';
+
+export const SERVICE_LOCATION_TYPES: readonly ServiceLocationType[] = [
+  'business_venue',
+  'client_address',
+  'online',
+] as const;
+
+export function parseServiceLocationType(raw: unknown): ServiceLocationType {
+  return raw === 'client_address' || raw === 'online' ? raw : 'business_venue';
+}
+
 export interface AppointmentService {
   id: string;
   venue_id: string;
@@ -182,6 +202,12 @@ export interface AppointmentService {
    * stack on top of variant/parent duration & price at booking time.
    */
   addon_groups?: AppointmentCatalogAddonGroup[];
+  /** Where the service is delivered; omitted = business_venue (legacy rows). */
+  location_type?: ServiceLocationType;
+  /** Online services: join link sent in confirmation/reminder emails (never in the public catalog). */
+  online_meeting_url?: string | null;
+  /** Online services: joining instructions shown alongside the link in emails. */
+  online_meeting_info?: string | null;
 }
 
 export interface PractitionerService {

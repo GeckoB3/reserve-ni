@@ -1,7 +1,8 @@
-import OpenAI from 'openai';
+import { runImportAiJson } from '@/lib/import/openai-client';
+import { fuzzyNameScore } from '@/lib/import/fuzzy-match';
 
-const SYSTEM = `You are matching external booking export strings to Resneo catalogue entities.
-Return ONLY valid JSON, no markdown.`;
+const SYSTEM = `You are matching external booking export strings (service names, staff names, etc.)
+to a venue's existing catalogue entities on Resneo, a booking platform.`;
 
 export type AiRefSuggestion = {
   reference_id: string;
@@ -11,71 +12,128 @@ export type AiRefSuggestion = {
   reasoning: string;
 };
 
+const SUGGESTION_SCHEMA: Record<string, unknown> = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['suggestions'],
+  properties: {
+    suggestions: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: [
+          'reference_id',
+          'suggested_entity_id',
+          'suggested_entity_label',
+          'confidence',
+          'reasoning',
+        ],
+        properties: {
+          reference_id: { type: 'string' },
+          suggested_entity_id: { type: ['string', 'null'] },
+          suggested_entity_label: { type: ['string', 'null'] },
+          confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
+          reasoning: { type: 'string' },
+        },
+      },
+    },
+  },
+};
+
+export interface RefCandidate {
+  id: string;
+  name: string;
+  kind: string;
+}
+
+export interface RefToMatch {
+  id: string;
+  reference_type: string;
+  raw_value: string;
+}
+
+/** Kinds compatible with each reference type (mirrors the route's entity-type mapping). */
+export const REF_COMPATIBLE_KINDS: Record<string, string[]> = {
+  service: ['service_item', 'appointment_service'],
+  staff: ['calendar', 'practitioner'],
+  event: ['event_session'],
+  class: ['class_instance'],
+  resource: ['resource_calendar'],
+};
+
+const BATCH_SIZE = 50;
+const SHORTLIST_SIZE = 12;
+
+/**
+ * Match references to catalogue entities. References are batched, and each
+ * reference gets a fuzzy-ranked shortlist of compatible candidates rather than
+ * the whole catalogue — better accuracy and bounded prompt size.
+ */
 export async function runAiMapReferences(params: {
-  references: Array<{ id: string; reference_type: string; raw_value: string }>;
-  candidates: Array<{ id: string; name: string; kind: string }>;
+  references: RefToMatch[];
+  candidates: RefCandidate[];
 }): Promise<{ suggestions: AiRefSuggestion[]; model: string } | null> {
-  const apiKey = process.env.OPENAI_API_KEY?.trim();
-  if (!apiKey) {
-    console.warn('[ai-map-references] OPENAI_API_KEY not set');
-    return null;
-  }
-
-  const model = process.env.OPENAI_IMPORT_MODEL?.trim() || 'gpt-5.4-nano';
-
   if (!params.references.length) {
-    return { suggestions: [], model };
+    return { suggestions: [], model: 'none' };
   }
 
-  const userPrompt = `
-Candidates (pick by id only if confident; service/staff types are independent):
-${JSON.stringify(params.candidates, null, 2)}
+  const all: AiRefSuggestion[] = [];
+  let model = 'unknown';
 
-References to match:
-${JSON.stringify(
-    params.references.map((r) => ({
-      reference_id: r.id,
-      reference_type: r.reference_type,
-      raw_value: r.raw_value,
-    })),
-    null,
-    2,
-  )}
-
-Return JSON: { "suggestions": [
-  {
-    "reference_id": "uuid",
-    "suggested_entity_id": "uuid or null",
-    "suggested_entity_label": "human label or null",
-    "confidence": "high" | "medium" | "low",
-    "reasoning": "short"
-  }
-]}
-
-Rules:
-- Match each reference to at most one candidate id of a compatible kind (service -> service_item candidate, staff -> calendar or practitioner candidate as provided).
-- If no good match, use nulls for ids and low confidence.
-`;
-
-  try {
-    const openai = new OpenAI({ apiKey });
-    const completion = await openai.chat.completions.create({
-      model,
-      messages: [
-        { role: 'system', content: SYSTEM },
-        { role: 'user', content: userPrompt },
-      ],
-      response_format: { type: 'json_object' },
-      temperature: 0,
+  for (let i = 0; i < params.references.length; i += BATCH_SIZE) {
+    const batch = params.references.slice(i, i + BATCH_SIZE);
+    const entries = batch.map((r) => {
+      const compatible = REF_COMPATIBLE_KINDS[r.reference_type] ?? [];
+      const shortlist = params.candidates
+        .filter((c) => compatible.includes(c.kind))
+        .map((c) => ({ c, score: fuzzyNameScore(r.raw_value, c.name) }))
+        .sort((a, b) => b.score - a.score)
+        .slice(0, SHORTLIST_SIZE)
+        .map(({ c }) => ({ id: c.id, name: c.name, kind: c.kind }));
+      return {
+        reference_id: r.id,
+        reference_type: r.reference_type,
+        raw_value: r.raw_value,
+        candidates: shortlist,
+      };
     });
 
-    const raw = completion.choices[0]?.message?.content;
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as { suggestions?: AiRefSuggestion[] };
-    const suggestions = Array.isArray(parsed.suggestions) ? parsed.suggestions : [];
-    return { suggestions, model };
-  } catch (e) {
-    console.error('[ai-map-references] OpenAI error:', e);
-    return null;
+    const userPrompt = `
+Each reference below is a raw string from another platform's export. For each one,
+pick the best-matching candidate from ITS OWN "candidates" list (these are already
+filtered to compatible types and ranked by name similarity), or null if none is a
+genuine match for the same real-world service/person/thing.
+
+References with their candidates:
+${JSON.stringify(entries, null, 1)}
+
+Rules:
+- suggested_entity_id must be one of that reference's candidate ids, or null.
+- "Gents Cut" vs "Men's Haircut" is a plausible high/medium match; "Haircut" vs "Massage" is not.
+- Abbreviations, plurals, punctuation and reordering are fine ("Jo Smith" ~ "Joanne Smith" medium).
+- If no candidate is plausibly the same thing, return null with low confidence.
+- Return one suggestion per reference, in any order.
+`;
+
+    const result = await runImportAiJson<{ suggestions: AiRefSuggestion[] }>({
+      callSite: 'ai-map-references',
+      system: SYSTEM,
+      user: userPrompt,
+      schemaName: 'reference_suggestions',
+      schema: SUGGESTION_SCHEMA,
+    });
+
+    if (!result) {
+      // Partial batches are still useful; fail fully only when nothing succeeded.
+      if (all.length === 0) return null;
+      break;
+    }
+    model = result.model;
+    if (Array.isArray(result.data.suggestions)) {
+      all.push(...result.data.suggestions);
+    }
   }
+
+  return { suggestions: all, model };
 }

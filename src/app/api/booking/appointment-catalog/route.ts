@@ -4,7 +4,7 @@ import { fetchAppointmentCatalog } from '@/lib/availability/appointment-catalog'
 import { resolveVenueMode } from '@/lib/venue-mode';
 import { isUnifiedSchedulingVenue, venueUsesUnifiedAppointmentData } from '@/lib/booking/unified-scheduling';
 import { nextResponseIfPublicBookingBlockedForVenue } from '@/lib/booking/light-plan-public-block';
-import { createClient } from '@/lib/supabase/server';
+import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { isCollectiveId } from '@/lib/linked-accounts/collective-booking-bridge';
 import { loadCollectiveAppointmentCatalog } from '@/lib/linked-accounts/collective-venue';
@@ -49,7 +49,7 @@ export async function GET(request: NextRequest) {
 
     let includeHiddenAddons = false;
     if (includeHiddenRequested) {
-      const authClient = await createClient();
+      const authClient = await createVenueRouteClient(request);
       const staff = await getVenueStaff(authClient);
       if (staff && staff.venue_id === venueId) {
         includeHiddenAddons = true;

@@ -5,6 +5,11 @@ import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { downloadAndParseCsv } from '@/lib/import/parse-storage-csv';
 import { applyMappingsToDataRow, slugCustomFieldKey, type DbMappingRow } from '@/lib/import/apply-mappings';
 import {
+  parseDateWithRepairs,
+  parseTimeWithRepairs,
+  readValueRepairs,
+} from '@/lib/import/value-repair';
+import {
   durationMinutesBetweenTimes,
   mapImportBookingStatus,
   normaliseBoolean,
@@ -217,8 +222,9 @@ export async function runImportExecuteBatch(
 
   const settings = (session.session_settings ?? {}) as {
     ambiguous_date_format?: 'dd/MM/yyyy' | 'MM/dd/yyyy' | null;
-  };
+  } & Record<string, unknown>;
   const datePref = settings.ambiguous_date_format ?? null;
+  const valueRepairs = readValueRepairs(settings);
   const sendImportReminders = parseSendImportRemindersFromSession(
     session.session_settings as Record<string, unknown> | null,
   );
@@ -423,6 +429,11 @@ export async function runImportExecuteBatch(
       }
 
       const customFields: Record<string, unknown> = { ...custom };
+      // Source-row breadcrumbs: power the post-import QA spot-check (compare
+      // imported guests against the exact file row they came from).
+      customFields.import_session_id = sessionId;
+      customFields.import_file_id = f.id;
+      customFields.import_row_number = rowNum;
       if (targets.notes?.trim()) customFields.import_client_notes = targets.notes.trim();
       if (targets.gender?.trim()) customFields.gender = targets.gender.trim();
       if (targets.address?.trim()) customFields.address = targets.address.trim();
@@ -1079,8 +1090,14 @@ export async function runImportExecuteBatch(
         }),
       );
 
-      const { data: booking, error: bErr } = await admin.from('bookings').insert(insert).select('id').single();
-      if (bErr || !booking) {
+      // Booking + undo-audit row insert atomically (one transaction, no
+      // partial states): see migration 20261218120000_import_booking_tx.
+      const { data: bookingId, error: bErr } = await admin.rpc('import_insert_booking_with_audit', {
+        p_session_id: sessionId,
+        p_venue_id: venueId,
+        p_booking: insert,
+      });
+      if (bErr || !bookingId) {
         console.error('[import execute] staged booking insert', bErr);
         await recordExecuteSkip(admin, sessionId, {
           fileId: row.file_id,
@@ -1093,29 +1110,7 @@ export async function runImportExecuteBatch(
         await bumpProgress();
         continue;
       }
-
-      const { error: recErr } = await admin.from('import_records').insert({
-        session_id: sessionId,
-        venue_id: venueId,
-        record_type: 'booking',
-        record_id: booking.id,
-        action: 'created',
-        previous_data: null,
-      });
-      if (recErr) {
-        console.error('[import execute] import_records after staged booking', recErr);
-        await admin.from('bookings').delete().eq('id', booking.id);
-        await recordExecuteSkip(admin, sessionId, {
-          fileId: row.file_id,
-          rowNumber: row.row_number,
-          code: 'audit_insert_failed',
-          message: `Booking was inserted then rolled back because the audit record could not be written: ${recErr.message}`,
-        });
-        skipped += 1;
-        st.stagedRowIndex += 1;
-        await bumpProgress();
-        continue;
-      }
+      const booking = { id: bookingId as string };
 
       if (sendImportReminders && !insert.suppress_import_comms) {
         try {
@@ -1205,8 +1200,8 @@ export async function runImportExecuteBatch(
       const ph = normalisePhoneUk(targets.client_phone ?? null);
       const bdRaw = targets.booking_date?.trim() ?? '';
       const btRaw = targets.booking_time?.trim() ?? '';
-      const { iso: dateIso } = parseDateString(bdRaw, datePref ?? undefined);
-      const bt = parseTimeString(btRaw);
+      const { iso: dateIso } = parseDateWithRepairs(bdRaw, datePref, valueRepairs);
+      const { time: bt } = parseTimeWithRepairs(btRaw, valueRepairs);
       if (!dateIso || !bt) {
         await recordExecuteSkip(admin, sessionId, {
           fileId: f.id,
@@ -1485,8 +1480,14 @@ export async function runImportExecuteBatch(
         }),
       );
 
-      const { data: booking, error: bErr } = await admin.from('bookings').insert(insert).select('id').single();
-      if (bErr || !booking) {
+      // Booking + undo-audit row insert atomically (one transaction, no
+      // partial states): see migration 20261218120000_import_booking_tx.
+      const { data: bookingId, error: bErr } = await admin.rpc('import_insert_booking_with_audit', {
+        p_session_id: sessionId,
+        p_venue_id: venueId,
+        p_booking: insert,
+      });
+      if (bErr || !bookingId) {
         console.error('[import execute] booking insert', bErr);
         await recordExecuteSkip(admin, sessionId, {
           fileId: f.id,
@@ -1499,29 +1500,7 @@ export async function runImportExecuteBatch(
         await bumpProgress();
         continue;
       }
-
-      const { error: recErr } = await admin.from('import_records').insert({
-        session_id: sessionId,
-        venue_id: venueId,
-        record_type: 'booking',
-        record_id: booking.id,
-        action: 'created',
-        previous_data: null,
-      });
-      if (recErr) {
-        console.error('[import execute] import_records after booking', recErr);
-        await admin.from('bookings').delete().eq('id', booking.id);
-        await recordExecuteSkip(admin, sessionId, {
-          fileId: f.id,
-          rowNumber: rowNum,
-          code: 'audit_insert_failed',
-          message: `Booking was inserted then rolled back because the audit record could not be written: ${recErr.message}`,
-        });
-        skipped += 1;
-        st.bookingRowIndex += 1;
-        await bumpProgress();
-        continue;
-      }
+      const booking = { id: bookingId as string };
 
       if (sendImportReminders && !insert.suppress_import_comms) {
         try {

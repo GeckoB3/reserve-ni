@@ -5,6 +5,8 @@ import { z } from 'zod';
 import { requireImportAdmin } from '@/lib/import/auth';
 import { SEND_IMPORT_REMINDERS_SESSION_KEY } from '@/lib/import/booking-import-comms';
 import { runImportValidation } from '@/lib/import/run-validation';
+import { importAiAvailable } from '@/lib/import/openai-client';
+import { readValueRepairs, runAiValueRepair } from '@/lib/import/value-repair';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 
 const bodySchema = z.object({
@@ -141,7 +143,56 @@ export async function POST(
       .update({ validation_job_status: 'running', updated_at: new Date().toISOString() })
       .eq('id', sessionId);
     try {
-      await runImportValidation(admin, sessionId, venueId);
+      const first = await runImportValidation(admin, sessionId, venueId);
+
+      // Stage 3 value repair: try to rescue date/time strings the parser
+      // couldn't read, then validate once more so repaired rows pass. The
+      // repair map stores "tried, unrepairable" as null, so this never loops.
+      if (
+        importAiAvailable() &&
+        (first.unparseableDates.length > 0 || first.unparseableTimes.length > 0)
+      ) {
+        const { data: sessRow } = await admin
+          .from('import_sessions')
+          .select('session_settings')
+          .eq('id', sessionId)
+          .single();
+        const settingsNow =
+          ((sessRow as { session_settings?: Record<string, unknown> | null } | null)
+            ?.session_settings ?? {}) as Record<string, unknown>;
+        const existing = readValueRepairs(settingsNow);
+        const dateHint =
+          (settingsNow.ambiguous_date_format as 'dd/MM/yyyy' | 'MM/dd/yyyy' | undefined) ?? null;
+
+        const [dateRepairs, timeRepairs] = await Promise.all([
+          first.unparseableDates.length
+            ? runAiValueRepair({ kind: 'date', values: first.unparseableDates, dateFormatHint: dateHint })
+            : Promise.resolve({}),
+          first.unparseableTimes.length
+            ? runAiValueRepair({ kind: 'time', values: first.unparseableTimes })
+            : Promise.resolve({}),
+        ]);
+
+        const mergedRepairs = {
+          dates: { ...existing.dates, ...(dateRepairs ?? {}) },
+          times: { ...existing.times, ...(timeRepairs ?? {}) },
+        };
+        const repairedCount =
+          Object.values(dateRepairs ?? {}).filter(Boolean).length +
+          Object.values(timeRepairs ?? {}).filter(Boolean).length;
+
+        await admin
+          .from('import_sessions')
+          .update({
+            session_settings: { ...settingsNow, value_repairs: mergedRepairs },
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', sessionId);
+
+        if (repairedCount > 0) {
+          await runImportValidation(admin, sessionId, venueId);
+        }
+      }
     } catch (e) {
       console.error('[validate]', e);
       await admin

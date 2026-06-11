@@ -4,6 +4,13 @@ import { checkRateLimit, getClientIp } from '@/lib/rate-limit';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { stripe } from '@/lib/stripe';
 import { findOrCreateGuest } from '@/lib/guests';
+import {
+  CLIENT_ADDRESS_REQUIRED_ERROR,
+  bookingLocationInsertFields,
+  clientAddressRequestFields,
+  hasCompleteClientAddress,
+  resolveServiceLocation,
+} from '@/lib/booking/service-location';
 import { nextResponseIfVenueRequiresAccountLoginForBooking } from '@/lib/booking/require-account-login-for-public-booking';
 import { sendBookingConfirmationNotifications } from '@/lib/communications/send-templated';
 import { computeAvailability, fetchEngineInput } from '@/lib/availability';
@@ -127,6 +134,8 @@ const createBookingSchema = z.object({
   waitlist_offer_id: z.string().uuid().optional(),
   /** Optional add-ons stacked on the service at booking time. */
   addons: bookingAddonSelectionArraySchema.optional(),
+  /** Client-address services: where staff travel to (mandatory for public sources). */
+  ...clientAddressRequestFields,
 });
 
 /**
@@ -1262,6 +1271,38 @@ async function handleNonTableBooking(
     );
   }
 
+  // Where the booked appointment service is delivered (Model B / USE only; other
+  // models have no service anchor and resolve to business_venue).
+  const appointmentServiceItemId =
+    effectiveModel === 'unified_scheduling'
+      ? (event_session_id ? unifiedSessionAnchor?.service_item_id ?? null : appointment_service_id ?? null)
+      : null;
+  const appointmentLegacyServiceId =
+    effectiveModel !== 'unified_scheduling' ? appointment_service_id ?? null : null;
+  const hasAppointmentServiceAnchor = Boolean(appointmentServiceItemId || appointmentLegacyServiceId);
+
+  const serviceLocation = hasAppointmentServiceAnchor
+    ? await resolveServiceLocation(supabase, venue_id, {
+        serviceItemId: appointmentServiceItemId,
+        appointmentServiceId: appointmentLegacyServiceId,
+      })
+    : null;
+
+  const clientAddressInput = {
+    client_address_line1: data.client_address_line1,
+    client_address_line2: data.client_address_line2,
+    client_address_city: data.client_address_city,
+    client_address_postcode: data.client_address_postcode,
+  };
+
+  if (
+    serviceLocation?.locationType === 'client_address' &&
+    isOnlineLikeSource &&
+    !hasCompleteClientAddress(clientAddressInput)
+  ) {
+    return NextResponse.json({ error: CLIENT_ADDRESS_REQUIRED_ERROR }, { status: 400 });
+  }
+
   const guestFirst = normaliseGuestNamePart(first_name);
   const guestLast = normaliseGuestNamePart(last_name);
 
@@ -1274,6 +1315,16 @@ async function handleNonTableBooking(
       email: email || null,
       phone: phoneE164,
       marketing_consent: marketingConsentForGuest,
+      ...(serviceLocation?.locationType === 'client_address' && clientAddressInput.client_address_line1?.trim()
+        ? {
+            address: {
+              line1: clientAddressInput.client_address_line1,
+              line2: clientAddressInput.client_address_line2 ?? null,
+              city: clientAddressInput.client_address_city ?? null,
+              postcode: clientAddressInput.client_address_postcode ?? null,
+            },
+          }
+        : {}),
     },
     guestLinkOptions,
   );
@@ -1333,6 +1384,9 @@ async function handleNonTableBooking(
     capacity_used: capacity_used ?? party_size,
     addons_total_price_pence: chosenAddonTotals.total_price_pence,
     addons_total_duration_minutes: chosenAddonTotals.total_duration_minutes,
+    ...(serviceLocation
+      ? bookingLocationInsertFields(serviceLocation.locationType, clientAddressInput)
+      : {}),
   };
 
   if (effectiveModel === 'unified_scheduling') {

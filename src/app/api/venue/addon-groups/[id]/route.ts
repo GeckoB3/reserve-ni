@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { createClient } from '@/lib/supabase/server';
+import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { addonGroupInputSchema } from '@/lib/addons/zod-schemas';
@@ -19,7 +19,7 @@ async function resolveParams(ctx: RouteCtx): Promise<{ id: string }> {
 
 export async function PATCH(request: NextRequest, ctx: RouteCtx) {
   try {
-    const supabase = await createClient();
+    const supabase = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabase);
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
     if (!requireAdmin(staff)) {
@@ -70,9 +70,9 @@ export async function PATCH(request: NextRequest, ctx: RouteCtx) {
  * otherwise soft-deactivate (`is_active = false`). The dashboard handles the
  * 409 by offering the "archive" path automatically.
  */
-export async function DELETE(_request: NextRequest, ctx: RouteCtx) {
+export async function DELETE(request: NextRequest, ctx: RouteCtx) {
   try {
-    const supabase = await createClient();
+    const supabase = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabase);
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
     if (!requireAdmin(staff)) {

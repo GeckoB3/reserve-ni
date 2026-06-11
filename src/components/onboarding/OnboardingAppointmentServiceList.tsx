@@ -15,6 +15,7 @@ import { AppointmentServiceFormFields } from '@/components/dashboard/appointment
 import { OnboardingInlineAddCalendarControls } from '@/components/onboarding/OnboardingInlineAddCalendarControls';
 import type { CalendarEntitlement } from '@/hooks/use-calendar-entitlement';
 import type { ClassPaymentRequirement, WorkingHours } from '@/types/booking-models';
+import { parseServiceLocationType } from '@/types/booking-models';
 import type { OpeningHours } from '@/types/availability';
 import type { VenueOpeningException } from '@/types/venue-opening-exceptions';
 
@@ -134,6 +135,9 @@ function appointmentServiceDraftFromApiRow(row: Record<string, unknown>, practit
     processing_time_blocks: parseProcessingTimeBlocksFromDb(
       (row as { processing_time_blocks?: unknown }).processing_time_blocks,
     ),
+    location_type: parseServiceLocationType(row.location_type),
+    online_meeting_url: typeof row.online_meeting_url === 'string' ? row.online_meeting_url : '',
+    online_meeting_info: typeof row.online_meeting_info === 'string' ? row.online_meeting_info : '',
   };
 }
 
@@ -201,6 +205,16 @@ export function serviceDraftToApiPayload(
     payload.custom_availability_enabled = draft.custom_availability_enabled;
     payload.custom_working_hours = draft.custom_availability_enabled ? draft.custom_working_hours : null;
     payload.processing_time_blocks = usesVariantsPayload ? [] : draft.processing_time_blocks;
+    payload.location_type = draft.location_type;
+    const meetingUrlRaw = draft.online_meeting_url.trim();
+    payload.online_meeting_url =
+      draft.location_type === 'online' && meetingUrlRaw
+        ? (/^https?:\/\//i.test(meetingUrlRaw) ? meetingUrlRaw : `https://${meetingUrlRaw}`)
+        : null;
+    payload.online_meeting_info =
+      draft.location_type === 'online' && draft.online_meeting_info.trim()
+        ? draft.online_meeting_info.trim()
+        : null;
     payload.variants = draft.variants.map((v, idx) => ({
       ...(v.id ? { id: v.id } : {}),
       name: v.name.trim(),

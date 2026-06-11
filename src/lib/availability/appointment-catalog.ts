@@ -12,6 +12,7 @@ import type {
   PractitionerService,
   ServiceVariant,
 } from '@/types/booking-models';
+import { parseServiceLocationType } from '@/types/booking-models';
 import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
 import { venueUsesUnifiedAppointmentData } from '@/lib/booking/unified-scheduling';
 import { entityBookingWindowFromRow } from '@/lib/booking/entity-booking-window';
@@ -56,6 +57,12 @@ export interface AppointmentCatalogPractitioner {
     addon_groups?: AppointmentCatalogAddonGroup[];
     /** Salon-style internal processing gaps (single-offering services). */
     processing_time_blocks?: import('@/types/booking-models').ProcessingTimeBlock[];
+    /**
+     * Where the service is delivered. `client_address` makes the booking form collect a
+     * mandatory address; `online` is shown as a badge. The meeting link/info are NOT
+     * exposed here — they are emailed after booking.
+     */
+    location_type?: import('@/types/booking-models').ServiceLocationType;
   }>;
 }
 
@@ -96,6 +103,9 @@ function serviceItemRowToAppointmentService(row: Record<string, unknown>): Appoi
     custom_availability_enabled: Boolean(row.custom_availability_enabled),
     custom_working_hours: parseCustomWorkingHoursFromDb(row.custom_working_hours),
     processing_time_blocks: parseProcessingTimeBlocksFromDb((row as { processing_time_blocks?: unknown }).processing_time_blocks),
+    location_type: parseServiceLocationType(row.location_type),
+    online_meeting_url: (row.online_meeting_url as string | null) ?? null,
+    online_meeting_info: (row.online_meeting_info as string | null) ?? null,
   };
 }
 
@@ -199,6 +209,7 @@ async function fetchUnifiedAppointmentCatalog(
         variants: (variantMap.get(svc.id) ?? []).filter((v) => v.is_active).map(variantToCatalog),
         addon_groups: addonGroupMap.get(svc.id) ?? [],
         processing_time_blocks: svc.processing_time_blocks ?? [],
+        location_type: parseServiceLocationType(svc.location_type),
       })),
     });
   }
@@ -292,6 +303,7 @@ export async function fetchAppointmentCatalog(
         variants: (variantMap.get(svc.id) ?? []).filter((v) => v.is_active).map(variantToCatalog),
         addon_groups: addonGroupMap.get(svc.id) ?? [],
         processing_time_blocks: svc.processing_time_blocks ?? [],
+        location_type: parseServiceLocationType(svc.location_type),
       })),
     });
   }
