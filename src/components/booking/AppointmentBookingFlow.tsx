@@ -312,7 +312,32 @@ interface CatalogPractitioner {
     addon_groups?: import('@/types/booking-models').AppointmentCatalogAddonGroup[];
     /** Combined page only: whether "any available" may be offered (false → pick a calendar). */
     any_available?: boolean;
+    /** Where the service is delivered; 'client_address' makes the details step collect an address. */
+    location_type?: import('@/types/booking-models').ServiceLocationType;
   }>;
+}
+
+/** Address fields for booking create payloads; empty object when no address was collected. */
+function clientAddressPayloadFields(details: GuestDetails): Record<string, string> {
+  if (!details.address_line1?.trim()) return {};
+  return {
+    client_address_line1: details.address_line1.trim(),
+    ...(details.address_line2?.trim() ? { client_address_line2: details.address_line2.trim() } : {}),
+    ...(details.address_city?.trim() ? { client_address_city: details.address_city.trim() } : {}),
+    ...(details.address_postcode?.trim() ? { client_address_postcode: details.address_postcode.trim() } : {}),
+  };
+}
+
+/** True when any of the given service ids is delivered at the client's address. */
+function anyServiceNeedsClientAddress(catalog: CatalogPractitioner[], serviceIds: Array<string | null | undefined>): boolean {
+  const wanted = new Set(serviceIds.filter((id): id is string => Boolean(id)));
+  if (wanted.size === 0) return false;
+  for (const prac of catalog) {
+    for (const svc of prac.services) {
+      if (wanted.has(svc.id) && svc.location_type === 'client_address') return true;
+    }
+  }
+  return false;
 }
 
 /** Per-date availability from /api/booking/availability. */
@@ -1306,6 +1331,7 @@ export function AppointmentBookingFlow({
         description: string | null;
         duration_minutes: number;
         minPricePence: number | null;
+        location_type?: import('@/types/booking-models').ServiceLocationType;
       }
     >();
     for (const p of catalogStaff) {
@@ -1319,6 +1345,7 @@ export function AppointmentBookingFlow({
             description: s.description?.trim() ? s.description.trim() : null,
             duration_minutes: s.duration_minutes,
             minPricePence: price,
+            location_type: s.location_type,
           });
         } else {
           if (!existing.description && s.description?.trim()) {
@@ -1657,6 +1684,22 @@ export function AppointmentBookingFlow({
     setError(null);
   }, [isEdit, date, selectedTime]);
 
+  /** Client-address services: the details step must collect where staff travel to. */
+  const collectClientAddressSingle = useMemo(
+    () =>
+      anyServiceNeedsClientAddress(
+        catalogStaff,
+        multiServiceSegments && multiServiceSegments.length > 0
+          ? multiServiceSegments.map((s) => s.serviceId)
+          : [selectedServiceId],
+      ),
+    [catalogStaff, multiServiceSegments, selectedServiceId],
+  );
+  const collectClientAddressGroup = useMemo(
+    () => anyServiceNeedsClientAddress(catalogStaff, groupPeople.map((p) => p.serviceId)),
+    [catalogStaff, groupPeople],
+  );
+
   // ── Single booking handlers ──
 
   const validateMultiServiceChain = useCallback(
@@ -1961,6 +2004,7 @@ export function AppointmentBookingFlow({
               source: isStaff ? staffBookingSource : 'booking_page',
               dietary_notes: details.dietary_notes,
               occasion: details.occasion,
+              ...clientAddressPayloadFields(details),
               services: chain.map((s) => ({
                 service_id: s.serviceId,
                 practitioner_id: s.practitionerId,
@@ -2035,6 +2079,7 @@ export function AppointmentBookingFlow({
               email: details.email || undefined,
               dietary_notes: details.dietary_notes,
               occasion: details.occasion,
+              ...clientAddressPayloadFields(details),
               require_deposit,
               practitioner_id: practitionerIdForCreate,
               appointment_service_id: selectedServiceId,
@@ -2085,6 +2130,7 @@ export function AppointmentBookingFlow({
             service_variant_id: selectedVariantId ?? undefined,
             dietary_notes: details.dietary_notes,
             occasion: details.occasion,
+            ...clientAddressPayloadFields(details),
             marketing_consent: details.marketing_consent,
             collective_id: collectiveId,
             collective_service_item_id: collectiveServiceItemId,
@@ -2300,6 +2346,7 @@ export function AppointmentBookingFlow({
           phone: details.phone?.trim() || undefined,
           source: isStaff ? staffBookingSource : 'booking_page',
           dietary_notes: details.dietary_notes,
+          ...clientAddressPayloadFields(details),
           people: groupPeople.map((p) => ({
             person_label: p.label,
             practitioner_id: p.practitionerId,
@@ -2634,7 +2681,19 @@ export function AppointmentBookingFlow({
                     >
                       <div className="flex items-center justify-between gap-3">
                         <div className="min-w-0">
-                          <div className="font-medium text-slate-900">{svc.name}</div>
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="font-medium text-slate-900">{svc.name}</span>
+                            {svc.location_type === 'online' && (
+                              <span className="rounded-full bg-sky-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-700 ring-1 ring-sky-200/80">
+                                Online
+                              </span>
+                            )}
+                            {svc.location_type === 'client_address' && (
+                              <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700 ring-1 ring-emerald-200/80">
+                                At your address
+                              </span>
+                            )}
+                          </div>
                           <div className="mt-0.5 text-xs text-slate-500">{svc.duration_minutes} min</div>
                           <ServiceCatalogDescription description={svc.description} />
                         </div>
@@ -3947,6 +4006,7 @@ export function AppointmentBookingFlow({
               refundNoticeHours={refundNoticeHours}
               phoneDefaultCountry={phoneDefaultCountry}
               audience={detailsAudience}
+              collectClientAddress={collectClientAddressSingle}
               initialDetails={mergeGuestDetailsPrefill(
                 editBooking
                   ? {
@@ -4626,6 +4686,7 @@ export function AppointmentBookingFlow({
               multiAppointmentSlots={groupPeople.map((p) => ({ date: p.date, time: p.time }))}
               phoneDefaultCountry={phoneDefaultCountry}
               audience={detailsAudience}
+              collectClientAddress={collectClientAddressGroup}
               initialDetails={isPublicGuest ? accountGate.guestDetailsPrefill : undefined}
               emailReadOnly={isPublicGuest && accountGate.emailReadOnly}
               {...publicDetailsFieldProps}

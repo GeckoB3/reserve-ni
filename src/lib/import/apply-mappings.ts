@@ -87,5 +87,18 @@ export function applyMappingsToDataRow(
     targets.last_name ||= last;
   }
 
+  // Combined datetime mapped to booking_date (e.g. Timely's "Appointment start"
+  // = "14/03/2026 14:30"): keep the date part and recover the time component
+  // into booking_time so the row doesn't fail the required-time check.
+  if (targets.booking_date && !targets.booking_time) {
+    const m = targets.booking_date
+      .trim()
+      .match(/^((?:\d{4}-\d{2}-\d{2})|(?:\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}))[T ](.+)$/);
+    if (m?.[1] && m[2]) {
+      targets.booking_date = m[1];
+      targets.booking_time = m[2].trim();
+    }
+  }
+
   return { targets, custom };
 }

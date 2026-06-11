@@ -18,6 +18,7 @@ export function UploadStepClient({ sessionId }: { sessionId: string }) {
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [warnings, setWarnings] = useState<string[]>([]);
   const [expanded, setExpanded] = useState(false);
 
   const load = useCallback(async () => {
@@ -46,7 +47,9 @@ export function UploadStepClient({ sessionId }: { sessionId: string }) {
     if (!list?.length) return;
     setUploading(true);
     setError(null);
+    setWarnings([]);
     try {
+      const collectedWarnings: string[] = [];
       for (const file of Array.from(list)) {
         const fd = new FormData();
         fd.append('file', file);
@@ -55,9 +58,11 @@ export function UploadStepClient({ sessionId }: { sessionId: string }) {
           method: 'POST',
           body: fd,
         });
-        const j = await readResponseJson<{ error?: string }>(res);
+        const j = await readResponseJson<{ error?: string; warnings?: string[] }>(res);
         if (!res.ok) throw new Error(j.error ?? 'Upload failed');
+        if (Array.isArray(j.warnings)) collectedWarnings.push(...j.warnings);
       }
+      setWarnings(collectedWarnings);
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Upload failed');
@@ -91,30 +96,43 @@ export function UploadStepClient({ sessionId }: { sessionId: string }) {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-xl font-semibold text-slate-900">Upload CSV files</h1>
+        <h1 className="text-xl font-semibold text-slate-900">Upload your files</h1>
         <p className="mt-1 text-sm text-slate-500">
-          Drag and drop one or more <code className="rounded bg-slate-100 px-1">.csv</code> files, then label each as
-          client list or booking history.
+          Drop in the client and booking exports from your previous system — Excel
+          (<code className="rounded bg-slate-100 px-1">.xlsx</code>) or CSV both work, exactly as they came out. Then
+          label each one as client list or booking history.
         </p>
       </div>
 
       <label className="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-300 bg-white px-6 py-14 text-center hover:border-brand-400">
         <input
           type="file"
-          accept=".csv,text/csv"
+          accept=".csv,.tsv,.txt,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
           multiple
           className="hidden"
           disabled={uploading}
           onChange={(e) => void onFilesSelected(e.target.files)}
         />
         <span className="text-sm font-medium text-slate-700">
-          {uploading ? 'Uploading…' : 'Drop CSV files here or click to browse'}
+          {uploading ? 'Uploading…' : 'Drop CSV or Excel files here, or click to browse'}
         </span>
-        <span className="mt-1 text-xs text-slate-500">Multiple files supported</span>
+        <span className="mt-1 text-xs text-slate-500">
+          Multiple files supported · each sheet in a workbook is read separately
+        </span>
       </label>
 
       {error && (
         <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</div>
+      )}
+      {warnings.length > 0 && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+          <p className="font-semibold">We tidied a few things while reading your files:</p>
+          <ul className="mt-1 list-inside list-disc space-y-0.5">
+            {warnings.map((w, i) => (
+              <li key={i}>{w}</li>
+            ))}
+          </ul>
+        </div>
       )}
 
       {loading ? (
@@ -174,9 +192,10 @@ export function UploadStepClient({ sessionId }: { sessionId: string }) {
         <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
           <p className="font-medium text-slate-800">Supported sources</p>
           <p className="mt-2">
-            Most CSV exports from existing salon, clinic, or restaurant booking systems work. On the next step you map
-            each column to a Resneo field — manually or with AI suggestions — so the source platform does not need to
-            be recognised.
+            Excel workbooks (.xlsx, .xls) and CSV exports from existing salon, clinic, or restaurant booking systems
+            all work — including files with title rows, multiple sheets, or unusual characters. On the next step your
+            columns are matched to Resneo fields automatically; you just review the result, so the source platform
+            does not need to be recognised.
           </p>
         </div>
       )}

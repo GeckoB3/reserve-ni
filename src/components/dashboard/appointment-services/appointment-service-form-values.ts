@@ -3,6 +3,7 @@ import type {
   ClassPaymentRequirement,
   ProcessingTimeBlock,
   ServiceCustomScheduleV2,
+  ServiceLocationType,
   AppointmentCatalogAddonGroup,
 } from '@/types/booking-models';
 
@@ -77,6 +78,12 @@ export interface AppointmentServiceFormValues {
    * services API.
    */
   addon_group_links: AppointmentCatalogAddonGroup[];
+  /** Where the service is delivered (business venue / client's address / online). */
+  location_type: ServiceLocationType;
+  /** Online services: meeting link sent to the client in booking emails. */
+  online_meeting_url: string;
+  /** Online services: joining instructions shown alongside the link in emails. */
+  online_meeting_info: string;
 }
 
 export const DEFAULT_APPOINTMENT_SERVICE_FORM_VALUES: AppointmentServiceFormValues = {
@@ -100,6 +107,9 @@ export const DEFAULT_APPOINTMENT_SERVICE_FORM_VALUES: AppointmentServiceFormValu
   variants: [],
   processing_time_blocks: [],
   addon_group_links: [],
+  location_type: 'business_venue',
+  online_meeting_url: '',
+  online_meeting_info: '',
 };
 
 export const APPOINTMENT_SERVICE_COLOUR_OPTIONS = [

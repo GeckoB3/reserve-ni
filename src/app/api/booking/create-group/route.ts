@@ -3,6 +3,13 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { createClient } from '@/lib/supabase/server';
 import { stripe } from '@/lib/stripe';
 import { findOrCreateGuest } from '@/lib/guests';
+import {
+  CLIENT_ADDRESS_REQUIRED_ERROR,
+  bookingLocationInsertFields,
+  clientAddressRequestFields,
+  hasCompleteClientAddress,
+  resolveServiceLocation,
+} from '@/lib/booking/service-location';
 import { sendBookingConfirmationNotifications } from '@/lib/communications/send-templated';
 import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
 import { generateConfirmToken, hashConfirmToken } from '@/lib/confirm-token';
@@ -67,6 +74,8 @@ const createGroupSchema = z.object({
   people: z.array(personEntrySchema).min(1).max(10),
   dietary_notes: z.string().max(1000).optional(),
   marketing_consent: z.boolean().optional(),
+  /** Client-address services: where staff travel to (mandatory for public sources). */
+  ...clientAddressRequestFields,
 });
 
 /**
@@ -391,6 +400,33 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Per-person service delivery location: any client-address service in the group
+    // makes the organiser's address mandatory for public sources; each booking row
+    // snapshots its own service's location.
+    const personLocations = new Map<string, Awaited<ReturnType<typeof resolveServiceLocation>>>();
+    for (const person of validatedPeople) {
+      if (personLocations.has(person.appointment_service_id)) continue;
+      personLocations.set(
+        person.appointment_service_id,
+        await resolveServiceLocation(supabase, venue_id, {
+          serviceItemId: useUnifiedBookingRows ? person.appointment_service_id : null,
+          appointmentServiceId: useUnifiedBookingRows ? null : person.appointment_service_id,
+        }),
+      );
+    }
+    const clientAddressInput = {
+      client_address_line1: parsed.data.client_address_line1,
+      client_address_line2: parsed.data.client_address_line2,
+      client_address_city: parsed.data.client_address_city,
+      client_address_postcode: parsed.data.client_address_postcode,
+    };
+    const anyClientAddressService = [...personLocations.values()].some(
+      (l) => l.locationType === 'client_address',
+    );
+    if (anyClientAddressService && isOnlineLikeSource && !hasCompleteClientAddress(clientAddressInput)) {
+      return NextResponse.json({ error: CLIENT_ADDRESS_REQUIRED_ERROR }, { status: 400 });
+    }
+
     const emailNorm = customerEmail;
     const guestFirst = normaliseGuestNamePart(first_name);
     const guestLast = normaliseGuestNamePart(last_name);
@@ -403,6 +439,16 @@ export async function POST(request: NextRequest) {
         email: emailNorm,
         phone: phoneE164,
         marketing_consent: marketingConsentForGuest,
+        ...(anyClientAddressService && clientAddressInput.client_address_line1?.trim()
+          ? {
+              address: {
+                line1: clientAddressInput.client_address_line1,
+                line2: clientAddressInput.client_address_line2 ?? null,
+                city: clientAddressInput.client_address_city ?? null,
+                postcode: clientAddressInput.client_address_postcode ?? null,
+              },
+            }
+          : {}),
       },
       guestLinkOptions,
     );
@@ -515,6 +561,10 @@ export async function POST(request: NextRequest) {
               service_item_id: person.appointment_service_id,
             }
           : {}),
+        ...(() => {
+          const loc = personLocations.get(person.appointment_service_id);
+          return loc ? bookingLocationInsertFields(loc.locationType, clientAddressInput) : {};
+        })(),
       };
 
       const { data: booking, error: bookErr } = await supabase

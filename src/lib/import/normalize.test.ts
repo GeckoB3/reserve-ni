@@ -3,11 +3,90 @@ import {
   durationMinutesBetweenTimes,
   mapBookingStatus,
   mapImportBookingStatus,
+  normalisePhoneUk,
+  parseCurrencyPence,
   parseDateString,
+  parseTimeString,
   resolveDepositFromImport,
   splitFullName,
   todayIsoLocal,
 } from './normalize';
+
+describe('parseTimeString', () => {
+  it('parses 24-hour times', () => {
+    expect(parseTimeString('14:30')).toBe('14:30:00');
+    expect(parseTimeString('9:05')).toBe('09:05:00');
+    expect(parseTimeString('14:30:45')).toBe('14:30:00');
+  });
+
+  it('parses 12-hour AM/PM times', () => {
+    expect(parseTimeString('2:30 PM')).toBe('14:30:00');
+    expect(parseTimeString('2:30pm')).toBe('14:30:00');
+    expect(parseTimeString('2.30 pm')).toBe('14:30:00');
+    expect(parseTimeString('12 AM')).toBe('00:00:00');
+    expect(parseTimeString('12:15 p.m.')).toBe('12:15:00');
+    expect(parseTimeString('9 am')).toBe('09:00:00');
+  });
+
+  it('extracts the time from combined datetimes', () => {
+    expect(parseTimeString('2026-03-14T14:30:00')).toBe('14:30:00');
+    expect(parseTimeString('2026-03-14 14:30')).toBe('14:30:00');
+    expect(parseTimeString('14/03/2026 2:30 PM')).toBe('14:30:00');
+  });
+
+  it('rejects nonsense', () => {
+    expect(parseTimeString('25:99')).toBeNull();
+    expect(parseTimeString('13:00 PM')).toBeNull();
+    expect(parseTimeString('soon')).toBeNull();
+    expect(parseTimeString('')).toBeNull();
+  });
+});
+
+describe('parseCurrencyPence', () => {
+  it('parses UK formats', () => {
+    expect(parseCurrencyPence('£45.00')).toBe(4500);
+    expect(parseCurrencyPence('1,234.56')).toBe(123456);
+    expect(parseCurrencyPence('1,234')).toBe(123400);
+  });
+
+  it('parses European decimal-comma formats to the correct value', () => {
+    expect(parseCurrencyPence('1.234,56')).toBe(123456);
+    expect(parseCurrencyPence('12,50')).toBe(1250);
+    expect(parseCurrencyPence('€ 1 234,56')).toBe(123456);
+    expect(parseCurrencyPence('1.234.567')).toBe(123456700);
+  });
+
+  it('returns null for non-numeric input', () => {
+    expect(parseCurrencyPence('free')).toBeNull();
+    expect(parseCurrencyPence('')).toBeNull();
+  });
+});
+
+describe('normalisePhoneUk', () => {
+  it('normalises UK national numbers', () => {
+    expect(normalisePhoneUk('07725 002233')).toEqual({ e164: '+447725002233', warning: false });
+  });
+
+  it('normalises international numbers with + prefix', () => {
+    expect(normalisePhoneUk('+353 87 123 4567')).toEqual({ e164: '+353871234567', warning: false });
+  });
+
+  it('normalises 00-prefixed international numbers', () => {
+    expect(normalisePhoneUk('00353871234567')).toEqual({ e164: '+353871234567', warning: false });
+  });
+
+  it('recovers international numbers exported without the +', () => {
+    expect(normalisePhoneUk('447725002233')).toEqual({ e164: '+447725002233', warning: false });
+  });
+
+  it('strips Excel numeric artifacts', () => {
+    expect(normalisePhoneUk('447725002233.0')).toEqual({ e164: '+447725002233', warning: false });
+  });
+
+  it('keeps unparseable values with a warning', () => {
+    expect(normalisePhoneUk('ext. 12')).toEqual({ e164: 'ext. 12', warning: true });
+  });
+});
 
 describe('todayIsoLocal', () => {
   it('returns a YYYY-MM-DD string', () => {

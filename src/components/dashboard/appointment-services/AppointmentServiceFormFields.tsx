@@ -71,6 +71,7 @@ export function AppointmentServiceFormFields({
   const usesVariants = isAdmin && form.variants.length > 0;
   const paymentName = `payment-requirement-${fieldGroupSuffix}`;
   const bookingModeName = `service-booking-mode-${fieldGroupSuffix}`;
+  const locationName = `service-location-${fieldGroupSuffix}`;
 
   const allVariantsReadyForAnother = useMemo(
     () => form.variants.every((v) => isVariantCompleteForGuidedFlow(v, form.payment_requirement)),
@@ -111,6 +112,48 @@ export function AppointmentServiceFormFields({
         />
       </div>
 
+      {!usesVariants && (
+        <>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-sm font-medium text-slate-700">Duration (mins) *</label>
+              <NumericInput
+                value={form.duration_minutes}
+                onChange={(v) => setForm({ ...form, duration_minutes: v })}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                min={5}
+                max={480}
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-slate-700">Buffer (mins)</label>
+              <NumericInput
+                value={form.buffer_minutes}
+                onChange={(v) => setForm({ ...form, buffer_minutes: v })}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                min={0}
+                max={120}
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-sm font-medium text-slate-700">Price ({sym})</label>
+            <div className="relative max-w-[200px]">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">{sym}</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={form.price}
+                onChange={(e) => setForm({ ...form, price: e.target.value })}
+                className="w-full rounded-lg border border-slate-300 py-2 pl-7 pr-3 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                placeholder="0.00"
+              />
+            </div>
+          </div>
+        </>
+      )}
+
       {isAdmin && (
         <div className="min-w-0 max-w-full space-y-3 rounded-xl border border-slate-200 bg-gradient-to-b from-slate-50/90 to-white p-4 shadow-sm ring-1 ring-slate-100/80">
           <div>
@@ -147,7 +190,7 @@ export function AppointmentServiceFormFields({
               <div className="min-w-0">
                 <p className="text-sm font-semibold text-slate-900">One fixed offering</p>
                 <p className="mt-0.5 text-xs text-slate-600">
-                  One duration, buffer, and price. What you set below applies to every booking.
+                  One duration, buffer, and price. What you set above applies to every booking.
                 </p>
               </div>
             </label>
@@ -461,56 +504,16 @@ export function AppointmentServiceFormFields({
         />
       ) : null}
 
-      {!usesVariants && (
-        <>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">Duration (mins) *</label>
-              <NumericInput
-                value={form.duration_minutes}
-                onChange={(v) => setForm({ ...form, duration_minutes: v })}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                min={5}
-                max={480}
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">Buffer (mins)</label>
-              <NumericInput
-                value={form.buffer_minutes}
-                onChange={(v) => setForm({ ...form, buffer_minutes: v })}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                min={0}
-                max={120}
-              />
-            </div>
-          </div>
-
-          {isAdmin ? (
-            <ProcessingTimeTimelineEditor
-              durationMinutes={form.duration_minutes}
-              bufferMinutes={form.buffer_minutes}
-              blocks={form.processing_time_blocks}
-              onChange={(blocks) => setForm((f) => ({ ...f, processing_time_blocks: blocks }))}
-            />
-          ) : null}
-
-          <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">Price ({sym})</label>
-            <div className="relative max-w-[200px]">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">{sym}</span>
-              <input
-                type="text"
-                inputMode="decimal"
-                value={form.price}
-                onChange={(e) => setForm({ ...form, price: e.target.value })}
-                className="w-full rounded-lg border border-slate-300 py-2 pl-7 pr-3 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                placeholder="0.00"
-              />
-            </div>
-          </div>
-        </>
-      )}
+      {!usesVariants && isAdmin ? (
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <ProcessingTimeTimelineEditor
+            durationMinutes={form.duration_minutes}
+            bufferMinutes={form.buffer_minutes}
+            blocks={form.processing_time_blocks}
+            onChange={(blocks) => setForm((f) => ({ ...f, processing_time_blocks: blocks }))}
+          />
+        </div>
+      ) : null}
 
       {usesVariants ? (
         <p className="rounded-lg border border-amber-100 bg-amber-50/80 px-3 py-2 text-xs text-amber-950/90">
@@ -598,14 +601,16 @@ export function AppointmentServiceFormFields({
         </SectionCard.Body>
       </SectionCard>
 
-      <div className="min-w-0 max-w-full space-y-3 rounded-lg border border-slate-200 p-4">
-        <p className="text-sm font-medium text-slate-800">Guest booking rules</p>
-        <p className="text-xs text-slate-500">
-          Applies to online bookings for this service (advance window, notice, and deposit refund notice).
-        </p>
-        <div className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2">
+      <div className="min-w-0 max-w-full space-y-2 rounded-lg border border-slate-200 p-3">
+        <div>
+          <p className="text-sm font-medium text-slate-800">Guest booking rules</p>
+          <p className="mt-0.5 text-xs text-slate-500">
+            Applies to online bookings for this service (advance window, notice, and deposit refund notice).
+          </p>
+        </div>
+        <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-3 sm:items-end">
           <div>
-            <label className="mb-1 block text-sm text-slate-700">Max advance (days)</label>
+            <label className="mb-0.5 block text-sm text-slate-700">Max advance (days)</label>
             <NumericInput
               min={1}
               max={365}
@@ -615,7 +620,7 @@ export function AppointmentServiceFormFields({
             />
           </div>
           <div>
-            <label className="mb-1 block text-sm text-slate-700">Min booking notice (hours)</label>
+            <label className="mb-0.5 block text-sm text-slate-700">Min booking notice (hours)</label>
             <NumericInput
               min={0}
               max={168}
@@ -625,7 +630,7 @@ export function AppointmentServiceFormFields({
             />
           </div>
           <div>
-            <label htmlFor={`svc-cancel-${fieldGroupSuffix}`} className="mb-1 block text-sm text-slate-700">
+            <label htmlFor={`svc-cancel-${fieldGroupSuffix}`} className="mb-0.5 block text-sm text-slate-700">
               Cancellation notice (hours){' '}
               <HelpTooltip
                 maxWidth={300}
@@ -641,19 +646,112 @@ export function AppointmentServiceFormFields({
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
             />
           </div>
-          <div className="flex flex-col justify-end">
-            <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+        </div>
+        <label className="flex w-fit cursor-pointer items-center gap-2 text-sm text-slate-700">
+          <input
+            type="checkbox"
+            checked={form.allow_same_day_booking}
+            onChange={(e) => setForm({ ...form, allow_same_day_booking: e.target.checked })}
+            className="rounded border-slate-300"
+          />
+          Allow same-day bookings
+        </label>
+      </div>
+
+      {isAdmin && (
+        <div className="min-w-0 max-w-full space-y-2 rounded-lg border border-slate-200 p-3">
+          <div>
+            <p className="text-sm font-medium text-slate-800">Location</p>
+            <p className="mt-0.5 text-xs text-slate-500">
+              Where this service is delivered. Confirmation and reminder emails show this instead of your
+              venue address when you choose client&apos;s address or online.
+            </p>
+          </div>
+          <div className="space-y-2">
+            <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-700">
               <input
-                type="checkbox"
-                checked={form.allow_same_day_booking}
-                onChange={(e) => setForm({ ...form, allow_same_day_booking: e.target.checked })}
-                className="rounded border-slate-300"
+                type="radio"
+                name={locationName}
+                className="mt-0.5"
+                checked={form.location_type === 'business_venue'}
+                onChange={() => setForm((f) => ({ ...f, location_type: 'business_venue' }))}
               />
-              Allow same-day bookings
+              <span>
+                At your venue{' '}
+                <span className="text-xs text-slate-500">— clients come to your business address</span>
+              </span>
+            </label>
+            <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-700">
+              <input
+                type="radio"
+                name={locationName}
+                className="mt-0.5"
+                checked={form.location_type === 'client_address'}
+                onChange={() => setForm((f) => ({ ...f, location_type: 'client_address' }))}
+              />
+              <span>
+                At the client&apos;s address{' '}
+                <span className="text-xs text-slate-500">— you travel to them</span>
+              </span>
+            </label>
+            <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-700">
+              <input
+                type="radio"
+                name={locationName}
+                className="mt-0.5"
+                checked={form.location_type === 'online'}
+                onChange={() => setForm((f) => ({ ...f, location_type: 'online' }))}
+              />
+              <span>
+                Online <span className="text-xs text-slate-500">— delivered remotely (video call, etc.)</span>
+              </span>
             </label>
           </div>
+
+          {form.location_type === 'client_address' && (
+            <p className="rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-2 text-xs text-slate-600">
+              The booking form will ask the client for their address (required), it is saved to their
+              contact record, and emails show their address as the location.
+            </p>
+          )}
+
+          {form.location_type === 'online' && (
+            <div className="space-y-2 pt-1">
+              <div>
+                <label className="mb-0.5 block text-sm text-slate-700">
+                  Link to the online service{' '}
+                  <HelpTooltip
+                    maxWidth={300}
+                    content="Included in the booking confirmation and reminder emails so the client can join. Leave blank if you send a personal link separately."
+                  />
+                </label>
+                <input
+                  type="url"
+                  value={form.online_meeting_url}
+                  onChange={(e) => setForm({ ...form, online_meeting_url: e.target.value })}
+                  maxLength={500}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                  placeholder="https://zoom.us/j/123456789"
+                />
+              </div>
+              <div>
+                <label className="mb-0.5 block text-sm text-slate-700">Joining information for the client</label>
+                <textarea
+                  value={form.online_meeting_info}
+                  onChange={(e) => setForm({ ...form, online_meeting_info: e.target.value })}
+                  rows={3}
+                  maxLength={2000}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                  placeholder="e.g. Join 5 minutes early. The meeting passcode is 1234. Please have your camera on."
+                />
+                <p className="mt-0.5 text-xs text-slate-500">
+                  Shown with the link in the confirmation and reminder emails.
+                </p>
+              </div>
+            </div>
+          )}
         </div>
-      </div>
+      )}
 
       <div>
         <label className="mb-1 block text-sm font-medium text-slate-700">Colour</label>

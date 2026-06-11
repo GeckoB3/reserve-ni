@@ -13,7 +13,8 @@ import {
 import { confirmationSubject } from '@/lib/emails/templates/booking-confirmation';
 import { renderBookingConfirmationDocumentHtml, renderTransactionalEmailHtml } from '@/lib/emails/templates/booking-confirmation-layout';
 import { buildGoogleCalendarAddUrlForBooking } from '@/lib/emails/calendar-links';
-import { buildGoogleMapsDirectionsUrl, normalizeWebsiteUrlForLink } from '@/lib/emails/external-links';
+import { normalizeWebsiteUrlForLink } from '@/lib/emails/external-links';
+import { resolveEmailLocation } from '@/lib/emails/booking-location';
 import { accountBookingsMagicLinkUrl, accountBookingsPortalUrl } from '@/lib/emails/account-portal-links';
 import {
   bookingConfirmationSmsPriceSuffix,
@@ -779,6 +780,10 @@ export function renderCommunicationEmail(
 
   const appointmentLane = isAppointmentLane(opts.lane);
 
+  // Service delivery location: venue address (default), client's address, or online
+  // joining details — drives the Location row/card, maps link, and text lines.
+  const resolvedLocation = resolveEmailLocation(opts.booking, opts.venue);
+
   let html: string;
 
   const cancelOnly = isAppointmentCancelOnly(opts);
@@ -814,7 +819,9 @@ export function renderCommunicationEmail(
       bookingDate: formatDate(opts.booking.booking_date),
       bookingTime: formatTime(opts.booking.booking_time),
       partySize: opts.booking.party_size,
-      venueAddress: opts.venue.address ?? null,
+      venueAddress: resolvedLocation.rowValue,
+      locationJoinUrl: resolvedLocation.joinUrl,
+      locationExtra: resolvedLocation.rowExtra,
       specialRequests: opts.booking.special_requests ?? null,
       customMessage: opts.emailCustomMessage ?? null,
       ctaLabel: config.ctaLabel,
@@ -836,7 +843,7 @@ export function renderCommunicationEmail(
     opts.messageKey === 'booking_confirmation'
       ? buildGoogleCalendarAddUrlForBooking(opts.booking, opts.venue)
       : null;
-  const mapsUrl = buildGoogleMapsDirectionsUrl(opts.venue.address);
+  const mapsUrl = resolvedLocation.mapsUrl;
   const venueWeb = normalizeWebsiteUrlForLink(opts.venue.website_url ?? undefined);
 
   let ctaLabel = config.ctaLabel;
@@ -856,13 +863,23 @@ export function renderCommunicationEmail(
     }
   }
 
+  // Non-venue locations matter on every message (reminders included), so the client
+  // always has the address / join link to hand; the venue-maps line stays
+  // confirmation-only as before.
+  const locationTextLines =
+    resolvedLocation.kind === 'business_venue'
+      ? opts.messageKey === 'booking_confirmation' && mapsUrl
+        ? [`Location (Google Maps): ${mapsUrl}`]
+        : []
+      : resolvedLocation.textLines;
+
   const text = buildTextLines([
     ...config.textLines,
     opts.emailCustomMessage ? '' : null,
     opts.emailCustomMessage ?? null,
-    opts.messageKey === 'booking_confirmation' ? '' : null,
+    opts.messageKey === 'booking_confirmation' || locationTextLines.length > 0 ? '' : null,
     opts.messageKey === 'booking_confirmation' && calendarUrl ? `Add to calendar: ${calendarUrl}` : null,
-    opts.messageKey === 'booking_confirmation' && mapsUrl ? `Location (Google Maps): ${mapsUrl}` : null,
+    ...locationTextLines,
     opts.messageKey === 'booking_confirmation' && venueWeb ? `Venue website: ${venueWeb}` : null,
     opts.messageKey === 'booking_confirmation' && opts.booking.manage_booking_link?.trim()
       ? manageBookingTextLinkLine(cancelOnly, opts.booking.manage_booking_link.trim())

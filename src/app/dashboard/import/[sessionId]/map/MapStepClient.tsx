@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { readResponseJson } from '@/lib/api/read-response-json';
 import { CLIENT_FIELDS, BOOKING_FIELDS } from '@/lib/import/constants';
@@ -41,7 +41,7 @@ export function MapStepClient({ sessionId }: { sessionId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (): Promise<{ files: ImportFile[]; mappings: MappingRow[] }> => {
     const res = await fetch(`/api/import/sessions/${sessionId}`);
     const data = await readResponseJson<{
       files?: ImportFile[];
@@ -52,23 +52,58 @@ export function MapStepClient({ sessionId }: { sessionId: string }) {
     if (!res.ok) throw new Error(data.error ?? 'Failed to load');
     setFiles(data.files ?? []);
     setMappings(data.mappings ?? []);
-    if (data.files?.[0]?.id) setActiveFileId(data.files[0].id);
+    if (data.files?.[0]?.id) setActiveFileId((prev) => prev ?? data.files![0]!.id);
     if (data.session?.ai_mapping_used) {
       setBanner('We pre-filled mappings from your column headers. Review them below before continuing.');
     }
+    return { files: data.files ?? [], mappings: data.mappings ?? [] };
   }, [sessionId]);
+
+  /**
+   * Auto-map on arrival: any data file with no mappings at all (unrecognised
+   * platform, so no template applied) gets one automatic AI mapping run —
+   * the user shouldn't have to know a "Run AI mapping" button exists.
+   */
+  const autoMapAttempted = useRef(false);
 
   useEffect(() => {
     void (async () => {
       setLoading(true);
       try {
-        await load();
+        const { files: loadedFiles, mappings: loadedMappings } = await load();
+        if (!autoMapAttempted.current) {
+          autoMapAttempted.current = true;
+          const mappedFileIds = new Set(loadedMappings.map((m) => m.file_id));
+          const unmapped = loadedFiles.filter(
+            (f) => !mappedFileIds.has(f.id) && (f.file_type === 'clients' || f.file_type === 'bookings'),
+          );
+          if (unmapped.length > 0) {
+            setAiBusy(true);
+            setBanner('Mapping your columns automatically…');
+            let anyMapped = false;
+            for (const f of unmapped) {
+              const res = await fetch(`/api/import/sessions/${sessionId}/files/${f.id}/ai-map`, {
+                method: 'POST',
+              });
+              const j = await readResponseJson<{ ok?: boolean }>(res);
+              if (res.ok && j.ok) anyMapped = true;
+            }
+            await load();
+            setBanner(
+              anyMapped
+                ? 'We mapped your columns automatically. Review them below before continuing.'
+                : 'Automatic mapping was unavailable — map your columns below.',
+            );
+            setAiBusy(false);
+          }
+        }
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Failed to load');
+        setAiBusy(false);
       }
       setLoading(false);
     })();
-  }, [load]);
+  }, [load, sessionId]);
 
   const activeFile = files.find((f) => f.id === activeFileId) ?? files[0] ?? null;
 

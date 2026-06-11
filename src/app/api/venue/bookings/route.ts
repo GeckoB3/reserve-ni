@@ -4,6 +4,11 @@ import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { stripe } from '@/lib/stripe';
 import { findOrCreateGuest } from '@/lib/guests';
+import {
+  bookingLocationInsertFields,
+  clientAddressRequestFields,
+  resolveServiceLocation,
+} from '@/lib/booking/service-location';
 import { generateConfirmToken, hashConfirmToken } from '@/lib/confirm-token';
 
 import { sendBookingConfirmationNotifications, sendDepositRequestNotifications } from '@/lib/communications/send-templated';
@@ -118,6 +123,8 @@ const phoneBookingSchema = z.object({
     .optional(),
   /** Admin acknowledgement to proceed past an unmet `block_all` compliance requirement (§5.2). */
   override_compliance: z.boolean().optional(),
+  /** Client-address services: where staff travel to for this appointment. */
+  ...clientAddressRequestFields,
 });
 
 function cancellationDeadline(bookingDate: string, bookingTime: string): string {
@@ -1121,6 +1128,41 @@ export async function POST(request: NextRequest) {
       apptInsert.processing_time_blocks = svc
         ? snapshotProcessingTimeBlocksFromCatalog({ service: svc, variant: chosenVariant })
         : [];
+
+      // Service delivery location snapshot. Staff bookings collect the address in the
+      // dashboard form; it is not server-mandatory so phone/walk-in flows never block.
+      const staffServiceLocation = await resolveServiceLocation(admin, venueId, {
+        serviceItemId: useUnifiedAppointmentStorage ? appointment_service_id : null,
+        appointmentServiceId: useUnifiedAppointmentStorage ? null : appointment_service_id,
+      });
+      const staffClientAddress = {
+        client_address_line1: parsed.data.client_address_line1,
+        client_address_line2: parsed.data.client_address_line2,
+        client_address_city: parsed.data.client_address_city,
+        client_address_postcode: parsed.data.client_address_postcode,
+      };
+      Object.assign(
+        apptInsert,
+        bookingLocationInsertFields(staffServiceLocation.locationType, staffClientAddress),
+      );
+      if (
+        staffServiceLocation.locationType === 'client_address' &&
+        staffClientAddress.client_address_line1?.trim()
+      ) {
+        const { error: guestAddrErr } = await admin
+          .from('guests')
+          .update({
+            address_line1: staffClientAddress.client_address_line1.trim(),
+            address_line2: staffClientAddress.client_address_line2?.trim() || null,
+            address_city: staffClientAddress.client_address_city?.trim() || null,
+            address_postcode: staffClientAddress.client_address_postcode?.trim() || null,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', guest.id);
+        if (guestAddrErr) {
+          console.error('POST /api/venue/bookings guest address update failed:', guestAddrErr.message);
+        }
+      }
 
       if (linkedCreate) {
         apptInsert.created_by_linked_venue_id = linkedCreate.actingVenueId;

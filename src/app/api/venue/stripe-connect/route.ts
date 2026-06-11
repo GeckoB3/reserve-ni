@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { stripe } from '@/lib/stripe';
 import { sanitizeAuthNextPath } from '@/lib/safe-auth-redirect';
@@ -26,7 +26,7 @@ const postBodySchema = z
 /** POST /api/venue/stripe-connect - create or resume Stripe Connect onboarding. */
 export async function POST(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    const supabase = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabase);
     if (!staff) {
       return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
@@ -110,9 +110,9 @@ export async function POST(request: NextRequest) {
 }
 
 /** GET /api/venue/stripe-connect - check Stripe Connect account status. */
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    const supabase = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabase);
     if (!staff) {
       return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });

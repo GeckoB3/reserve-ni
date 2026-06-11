@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { z } from 'zod';
 
 const schema = z.object({
@@ -9,7 +9,7 @@ const schema = z.object({
 /** POST /api/venue/staff/change-password - change the currently logged-in user's password. */
 export async function POST(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    const supabase = await createVenueRouteClient(request);
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
 

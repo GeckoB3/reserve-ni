@@ -27,7 +27,26 @@ function formatDate(dateStr: string): string {
   return `${SHORT_WEEKDAYS[d.getDay()]} ${d.getDate()} ${SHORT_MONTHS[d.getMonth()]}`;
 }
 
-function buildDetailsSchemaWithTerms(phoneCc: CountryCode) {
+/**
+ * Client-address services: line 1 / town / postcode mandatory (line 2 optional) when
+ * `required`; staff walk-ins keep them optional so an in-person booking is never blocked.
+ */
+function addressSchemaFields(required: boolean) {
+  return {
+    address_line1: required
+      ? z.string().trim().min(1, 'Address line 1 is required').max(200)
+      : z.string().trim().max(200).optional(),
+    address_line2: z.string().trim().max(200).optional(),
+    address_city: required
+      ? z.string().trim().min(1, 'Town or city is required').max(100)
+      : z.string().trim().max(100).optional(),
+    address_postcode: required
+      ? z.string().trim().min(1, 'Postcode is required').max(20)
+      : z.string().trim().max(20).optional(),
+  };
+}
+
+function buildDetailsSchemaWithTerms(phoneCc: CountryCode, collectAddress: boolean) {
   return z
     .object({
       first_name: z.string().min(1, 'First name is required').max(100),
@@ -42,6 +61,7 @@ function buildDetailsSchemaWithTerms(phoneCc: CountryCode) {
       occasion: z.string().max(200).optional(),
       /** Model B: shown as “Comments or requests”, stored as booking dietary_notes */
       comments_requests: z.string().max(1000).optional(),
+      ...addressSchemaFields(collectAddress),
     })
     .and(
       z.object({
@@ -52,7 +72,7 @@ function buildDetailsSchemaWithTerms(phoneCc: CountryCode) {
 }
 
 /** Staff dashboard: name + phone required; email optional when provided. No guest terms checkbox. */
-function buildDetailsSchemaStaff(phoneCc: CountryCode) {
+function buildDetailsSchemaStaff(phoneCc: CountryCode, collectAddress: boolean) {
   return z.object({
     first_name: z.string().max(100),
     last_name: z.string().max(100),
@@ -66,6 +86,7 @@ function buildDetailsSchemaStaff(phoneCc: CountryCode) {
     occasion: z.string().max(200).optional(),
     comments_requests: z.string().max(1000).optional(),
     acceptTerms: z.boolean().optional(),
+    ...addressSchemaFields(collectAddress),
   });
 }
 
@@ -83,6 +104,7 @@ function buildDetailsSchemaStaffWalkIn(phoneCc: CountryCode) {
     occasion: z.string().max(200).optional(),
     comments_requests: z.string().max(1000).optional(),
     acceptTerms: z.boolean().optional(),
+    ...addressSchemaFields(false),
   });
 }
 
@@ -114,6 +136,11 @@ interface DetailsStepProps {
   payAtVenuePaymentRequirement?: ClassPaymentRequirement;
   /** Staff dashboard: email optional; guest terms checkbox omitted. */
   audience?: 'public' | 'staff' | 'staff_walk_in';
+  /**
+   * Client-address services: show the address fieldset. Line 1 / town / postcode are
+   * mandatory for public and staff bookings; optional for staff walk-ins.
+   */
+  collectClientAddress?: boolean;
   initialDetails?: Partial<GuestDetails>;
   /** Lock email when booking under a signed-in Resneo account. */
   emailReadOnly?: boolean;
@@ -145,6 +172,7 @@ export function DetailsStep({
   payAtVenueBalancePence,
   payAtVenuePaymentRequirement,
   audience = 'public',
+  collectClientAddress = false,
   initialDetails,
   emailReadOnly = false,
   initialAppointmentComments,
@@ -157,12 +185,12 @@ export function DetailsStep({
   const isStaff = audience === 'staff';
   const isStaffWalkIn = audience === 'staff_walk_in';
   const detailsSchemaWithTerms = useMemo(
-    () => buildDetailsSchemaWithTerms(phoneDefaultCountry),
-    [phoneDefaultCountry],
+    () => buildDetailsSchemaWithTerms(phoneDefaultCountry, collectClientAddress),
+    [phoneDefaultCountry, collectClientAddress],
   );
   const detailsSchemaStaff = useMemo(
-    () => buildDetailsSchemaStaff(phoneDefaultCountry),
-    [phoneDefaultCountry],
+    () => buildDetailsSchemaStaff(phoneDefaultCountry, collectClientAddress),
+    [phoneDefaultCountry, collectClientAddress],
   );
   const detailsSchemaStaffWalkIn = useMemo(
     () => buildDetailsSchemaStaffWalkIn(phoneDefaultCountry),
@@ -183,6 +211,10 @@ export function DetailsStep({
       occasion: initialDetails?.occasion ?? '',
       comments_requests:
         (initialAppointmentComments?.trim() ? initialAppointmentComments : initialDetails?.dietary_notes) ?? '',
+      address_line1: initialDetails?.address_line1 ?? '',
+      address_line2: initialDetails?.address_line2 ?? '',
+      address_city: initialDetails?.address_city ?? '',
+      address_postcode: initialDetails?.address_postcode ?? '',
       acceptTerms: false,
       marketingConsent: true,
     },
@@ -256,10 +288,19 @@ export function DetailsStep({
           ? { marketing_consent: Boolean(d.marketingConsent) }
           : {}),
         ...(useStaffContactAutocomplete && selectedKnownContact ? { returning_guest: true } : {}),
+        ...(collectClientAddress
+          ? {
+              address_line1: ('address_line1' in d ? d.address_line1 : '')?.trim() || undefined,
+              address_line2: ('address_line2' in d ? d.address_line2 : '')?.trim() || undefined,
+              address_city: ('address_city' in d ? d.address_city : '')?.trim() || undefined,
+              address_postcode: ('address_postcode' in d ? d.address_postcode : '')?.trim() || undefined,
+            }
+          : {}),
       });
     },
     [
       audience,
+      collectClientAddress,
       onSubmit,
       phoneDefaultCountry,
       selectedKnownContact,
@@ -474,6 +515,68 @@ export function DetailsStep({
               />
             </FormField>
           </>
+        )}
+
+        {collectClientAddress && (
+          <fieldset className="space-y-4 rounded-xl border border-slate-200 bg-slate-50/50 p-4">
+            <legend className="px-1 text-sm font-semibold text-slate-800">
+              {audience === 'public' ? 'Your address' : "Client's address"}
+            </legend>
+            <p className="-mt-2 text-xs text-slate-500">
+              {audience === 'public'
+                ? 'This service takes place at your address, so we need to know where to come.'
+                : 'This service takes place at the client’s address.'}
+            </p>
+            <FormField
+              label="Address line 1"
+              required={!isStaffWalkIn}
+              error={'address_line1' in errors ? errors.address_line1?.message : undefined}
+            >
+              <input
+                {...register('address_line1')}
+                autoComplete="address-line1"
+                className={inputCls}
+                placeholder="House number and street"
+              />
+            </FormField>
+            <FormField
+              label="Address line 2"
+              error={'address_line2' in errors ? errors.address_line2?.message : undefined}
+            >
+              <input
+                {...register('address_line2')}
+                autoComplete="address-line2"
+                className={inputCls}
+                placeholder="Apartment, area (optional)"
+              />
+            </FormField>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <FormField
+                label="Town or city"
+                required={!isStaffWalkIn}
+                error={'address_city' in errors ? errors.address_city?.message : undefined}
+              >
+                <input
+                  {...register('address_city')}
+                  autoComplete="address-level2"
+                  className={inputCls}
+                  placeholder="Town or city"
+                />
+              </FormField>
+              <FormField
+                label="Postcode"
+                required={!isStaffWalkIn}
+                error={'address_postcode' in errors ? errors.address_postcode?.message : undefined}
+              >
+                <input
+                  {...register('address_postcode')}
+                  autoComplete="postal-code"
+                  className={inputCls}
+                  placeholder="Postcode"
+                />
+              </FormField>
+            </div>
+          </fieldset>
         )}
 
         {!useAppointmentFields && (

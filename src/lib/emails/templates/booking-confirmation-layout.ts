@@ -16,7 +16,8 @@ import {
   formatMoneyOrNull,
 } from '@/lib/communications/booking-confirmation-pricing';
 import { buildGoogleCalendarAddUrlForBooking } from '@/lib/emails/calendar-links';
-import { buildGoogleMapsDirectionsUrl, normalizeWebsiteUrlForLink } from '@/lib/emails/external-links';
+import { normalizeWebsiteUrlForLink } from '@/lib/emails/external-links';
+import { resolveEmailLocation } from '@/lib/emails/booking-location';
 import { escapeHtml, escapeHtmlMultiline, formatDate, formatTime } from './base-template';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
@@ -97,9 +98,12 @@ function buildActionButtons(opts: {
   venueUrl: string | null;
   manageUrl: string | null;
   manageLabel?: string;
+  /** Online services: join link shown instead of the maps Location button. */
+  joinOnlineUrl?: string | null;
 }): string {
   const buttons: Array<{ href: string; label: string }> = [];
   if (opts.calendarUrl) buttons.push({ href: opts.calendarUrl, label: 'Add to calendar' });
+  if (opts.joinOnlineUrl) buttons.push({ href: opts.joinOnlineUrl, label: 'Join online' });
   if (opts.mapsUrl)     buttons.push({ href: opts.mapsUrl,     label: 'Location' });
   if (opts.venueUrl)    buttons.push({ href: opts.venueUrl,    label: 'Visit website' });
   if (opts.manageUrl)   buttons.push({ href: opts.manageUrl,   label: opts.manageLabel ?? 'Manage' });
@@ -409,6 +413,42 @@ function buildLocationInner(opts: {
   );
 }
 
+/** Online services: "Location — Online" card with join button and joining info. */
+function buildOnlineLocationInner(opts: { joinUrl: string | null; info: string | null }): string {
+  const joinButton = opts.joinUrl
+    ? `<p style="margin:14px 0 0">` +
+      `<a href="${escapeHtml(opts.joinUrl)}" target="_blank" rel="noopener noreferrer" ` +
+      `style="display:inline-block;padding:8px 18px;border-radius:9999px;` +
+      `font-family:${FONT};font-size:13px;font-weight:600;color:#ffffff;text-decoration:none;background:${ACCENT}">` +
+      `Join online &#8594;</a></p>` +
+      `<p style="margin:8px 0 0;font-size:12px;color:${TEXT_MUTED};word-break:break-all;font-family:${FONT}">${escapeHtml(opts.joinUrl)}</p>`
+    : '';
+
+  const infoBlock = opts.info
+    ? `<p style="margin:12px 0 0;font-size:14px;color:${TEXT_BODY};line-height:1.55;font-family:${FONT}">${escapeHtmlMultiline(opts.info)}</p>`
+    : '';
+
+  return (
+    `<p style="margin:0 0 16px;font-size:17px;font-weight:700;color:${TEXT_DARK};font-family:${FONT}">Location</p>` +
+    `<p style="margin:0;font-size:15px;font-weight:600;color:${TEXT_BODY};font-family:${FONT}">Online</p>` +
+    `<p style="margin:4px 0 0;font-size:14px;color:${TEXT_MUTED};line-height:1.5;font-family:${FONT}">This service is delivered online — no need to travel.</p>` +
+    infoBlock +
+    joinButton
+  );
+}
+
+/** Client-address services: the visit happens at the client's own address. */
+function buildClientAddressLocationInner(opts: { address: string | null }): string {
+  return (
+    `<p style="margin:0 0 16px;font-size:17px;font-weight:700;color:${TEXT_DARK};font-family:${FONT}">Location</p>` +
+    `<p style="margin:0;font-size:15px;font-weight:600;color:${TEXT_BODY};font-family:${FONT}">Your address</p>` +
+    (opts.address
+      ? `<p style="margin:4px 0 0;font-size:14px;color:${TEXT_MUTED};line-height:1.5;font-family:${FONT}">${escapeHtml(opts.address)}</p>`
+      : '') +
+    `<p style="margin:12px 0 0;font-size:13px;color:${TEXT_MUTED};line-height:1.5;font-family:${FONT}">We come to you for this appointment.</p>`
+  );
+}
+
 // ─── Policy / instructions card inner HTML ────────────────────────────────────
 
 function buildInfoCardInner(heading: string, body: string, accentBg = '#f8fafc', accentBorder = CARD_BORDER): string {
@@ -445,7 +485,8 @@ export function renderBookingConfirmationDocumentHtml(input: {
   const { booking, venue, appointmentStyle, blocks, priceDisplay, manageButtonLabel } = input;
 
   const calendarUrl = buildGoogleCalendarAddUrlForBooking(booking, venue);
-  const mapsUrl = buildGoogleMapsDirectionsUrl(venue.address);
+  const resolvedLocation = resolveEmailLocation(booking, venue);
+  const mapsUrl = resolvedLocation.mapsUrl;
   const venueWebUrl = normalizeWebsiteUrlForLink(venue.website_url ?? undefined);
   const manageUrl = booking.manage_booking_link?.trim() || null;
   const thumbUrl = venue.logo_url?.trim() || null;
@@ -476,7 +517,14 @@ export function renderBookingConfirmationDocumentHtml(input: {
     `<p style="margin:0 0 4px;font-size:17px;font-weight:700;color:${TEXT_DARK};text-align:center;font-family:${FONT}">${escapeHtml(venue.name)}</p>` +
     `<p style="margin:0;font-size:14px;color:${TEXT_MUTED};text-align:center;font-family:${FONT}">${escapeHtml(dateTimeLine(booking))}</p>` +
     // Action buttons
-    buildActionButtons({ calendarUrl, mapsUrl, venueUrl: venueWebUrl, manageUrl, manageLabel: manageButtonLabel });
+    buildActionButtons({
+      calendarUrl,
+      mapsUrl,
+      venueUrl: venueWebUrl,
+      manageUrl,
+      manageLabel: manageButtonLabel,
+      joinOnlineUrl: resolvedLocation.joinUrl,
+    });
 
   // ── Details card ───────────────────────────────────────────────────────────
 
@@ -525,16 +573,29 @@ export function renderBookingConfirmationDocumentHtml(input: {
 
   // ── Location card ──────────────────────────────────────────────────────────
 
-  const hasAddress = Boolean(venue.address?.trim());
-  const locationCardHtml = hasAddress
-    ? card(
-        buildLocationInner({
-          venueName: venue.name,
-          address: venue.address!.trim(),
-          mapsUrl,
-        }),
-      )
-    : '';
+  let locationCardHtml = '';
+  if (resolvedLocation.kind === 'online') {
+    locationCardHtml = card(
+      buildOnlineLocationInner({
+        joinUrl: resolvedLocation.joinUrl,
+        info: booking.booking_location?.online_info?.trim() || null,
+      }),
+    );
+  } else if (resolvedLocation.kind === 'client_address') {
+    locationCardHtml = card(
+      buildClientAddressLocationInner({
+        address: booking.booking_location?.client_address?.trim() || null,
+      }),
+    );
+  } else if (venue.address?.trim()) {
+    locationCardHtml = card(
+      buildLocationInner({
+        venueName: venue.name,
+        address: venue.address.trim(),
+        mapsUrl,
+      }),
+    );
+  }
 
   // ── Cancellation policy card ───────────────────────────────────────────────
 
@@ -608,6 +669,10 @@ function buildTransactionalDetailRows(opts: {
   groupAppointments?: GroupAppointmentLine[];
   addonLines?: string[] | null;
   venueAddress?: string | null;
+  /** Online services: join link rendered under the Location value. */
+  locationJoinUrl?: string | null;
+  /** Online services: joining info rendered under the Location value. */
+  locationExtra?: string | null;
   specialRequests?: string | null;
 }): string {
   const isAppt = opts.emailVariant === 'appointment';
@@ -646,7 +711,7 @@ function buildTransactionalDetailRows(opts: {
   }
 
   // Standard label / value rows
-  const items: Array<{ label: string; value: string; multiline?: boolean }> = [];
+  const items: Array<{ label: string; value: string; multiline?: boolean; extraHtml?: string }> = [];
   if (opts.bookingDate) items.push({ label: 'Date', value: opts.bookingDate });
   if (opts.bookingTime) items.push({ label: 'Time', value: opts.bookingTime });
   if (isAppt) {
@@ -663,7 +728,22 @@ function buildTransactionalDetailRows(opts: {
       items.push({ label: 'Guests', value: `${ps} guest${ps !== 1 ? 's' : ''}` });
     }
   }
-  if (opts.venueAddress) items.push({ label: 'Location', value: opts.venueAddress });
+  if (opts.venueAddress) {
+    const locationExtraHtml =
+      (opts.locationExtra?.trim()
+        ? `<p style="margin:5px 0 0;font-size:13px;color:${TEXT_MUTED};line-height:1.5;font-family:${FONT}">${escapeHtmlMultiline(opts.locationExtra.trim())}</p>`
+        : '') +
+      (opts.locationJoinUrl?.trim()
+        ? `<p style="margin:6px 0 0;font-size:13px;font-family:${FONT}">` +
+          `<a href="${escapeHtml(opts.locationJoinUrl.trim())}" target="_blank" rel="noopener noreferrer" ` +
+          `style="color:${ACCENT};font-weight:600;text-decoration:underline;word-break:break-all">Join online &#8594;</a></p>`
+        : '');
+    items.push({
+      label: 'Location',
+      value: opts.venueAddress,
+      ...(locationExtraHtml ? { extraHtml: locationExtraHtml } : {}),
+    });
+  }
   if (opts.specialRequests) items.push({ label: 'Notes', value: opts.specialRequests });
 
   if (items.length === 0) return '';
@@ -676,6 +756,7 @@ function buildTransactionalDetailRows(opts: {
       `<td style="padding:12px 0;${isLast ? '' : `border-bottom:1px solid ${RULE};`}vertical-align:top">` +
       `<p style="margin:0;font-size:11px;font-weight:700;color:${TEXT_MUTED};text-transform:uppercase;letter-spacing:0.05em;line-height:1.3;font-family:${FONT}">${escapeHtml(item.label)}</p>` +
       `<p style="margin:5px 0 0;font-size:15px;font-weight:500;color:${TEXT_DARK};line-height:1.4;font-family:${FONT}">${valueHtml}</p>` +
+      (item.extraHtml ?? '') +
       `</td>` +
       `</tr>`
     );
@@ -710,7 +791,12 @@ export interface TransactionalEmailOptions {
   bookingDate?: string;
   bookingTime?: string;
   partySize?: number;
+  /** Value of the "Location" detail row (venue address, client address, or "Online"). */
   venueAddress?: string | null;
+  /** Online services: join link rendered under the Location row. */
+  locationJoinUrl?: string | null;
+  /** Online services: joining info rendered under the Location row. */
+  locationExtra?: string | null;
   specialRequests?: string | null;
   emailVariant?: 'table' | 'appointment';
   practitionerName?: string | null;
@@ -776,6 +862,8 @@ export function renderTransactionalEmailHtml(opts: TransactionalEmailOptions): s
     groupAppointments: opts.groupAppointments,
     addonLines: opts.addonLines,
     venueAddress: opts.venueAddress,
+    locationJoinUrl: opts.locationJoinUrl,
+    locationExtra: opts.locationExtra,
     specialRequests: opts.specialRequests,
   });
 

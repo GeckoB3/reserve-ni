@@ -24,12 +24,28 @@ export interface NormalisedPhone {
 }
 
 export function normalisePhoneUk(raw: string | null | undefined): NormalisedPhone {
-  const t = raw?.trim();
+  let t = raw?.trim();
   if (!t) return { e164: null, warning: false };
+
+  // Excel artifacts: numeric coercion ("447725002233.0") and stray trailing ".0".
+  if (/^\d+\.0+$/.test(t)) t = t.replace(/\.0+$/, '');
+  // International dialling prefix written as 00 (e.g. "0033 6 12 34 56 78").
+  if (/^00\s*[1-9]/.test(t)) t = `+${t.replace(/^00\s*/, '')}`;
+
   const strict = normalizeToE164(t, 'GB');
   if (strict) return { e164: strict, warning: false };
   const lenient = normalizeToE164Lenient(t, 'GB');
   if (lenient) return { e164: lenient, warning: false };
+
+  // Exports often drop the "+" from full international numbers ("447725002233",
+  // "353871234567"). National numbers start with 0 (or are shorter), so a long
+  // digit string with no leading 0 is worth retrying with "+".
+  const digits = t.replace(/[^\d]/g, '');
+  if (digits.length >= 11 && digits.length <= 15 && !digits.startsWith('0')) {
+    const intl = normalizeToE164(`+${digits}`);
+    if (intl) return { e164: intl, warning: false };
+  }
+
   return { e164: t, warning: true };
 }
 
@@ -92,13 +108,32 @@ export function parseDateString(
 export function parseTimeString(raw: string | null | undefined): string | null {
   const t = raw?.trim();
   if (!t) return null;
+
+  // Combined date+time ("2026-03-14 14:30", "14/03/2026 2:30 PM", ISO "T"):
+  // parse the time component.
+  const dt = t.match(/^(?:\d{4}-\d{2}-\d{2}|\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4})[T ](.+)$/);
+  if (dt?.[1]) return parseTimeString(dt[1]);
+
+  // 12-hour clock: "2:30 PM", "2.30pm", "12 AM", "11:15:30 p.m."
+  const ampm = t.match(/^(\d{1,2})(?:[:.](\d{2}))?(?:[:.](\d{2}))?\s*([AaPp])\.?\s?[Mm]\.?$/);
+  if (ampm) {
+    let h = Number.parseInt(ampm[1]!, 10);
+    const m = ampm[2] ? Number.parseInt(ampm[2], 10) : 0;
+    if (h >= 1 && h <= 12 && m >= 0 && m <= 59) {
+      const isPm = ampm[4]!.toLowerCase() === 'p';
+      if (h === 12) h = isPm ? 12 : 0;
+      else if (isPm) h += 12;
+      return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00`;
+    }
+    return null;
+  }
+
   if (/^\d{1,2}:\d{2}(:\d{2})?$/.test(t)) {
     const [h, m] = t.split(':');
-    return `${String(Number(h)).padStart(2, '0')}:${String(Number(m)).padStart(2, '0')}:00`;
-  }
-  if (t.includes('T')) {
-    const part = (t.split('T')[1] ?? '').slice(0, 8);
-    if (part.length >= 5) return `${part.slice(0, 2)}:${part.slice(3, 5)}:00`;
+    const hour = Number(h);
+    const minute = Number(m);
+    if (hour > 23 || minute > 59) return null;
+    return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00`;
   }
   return null;
 }
@@ -106,8 +141,37 @@ export function parseTimeString(raw: string | null | undefined): string | null {
 export function parseCurrencyPence(raw: string | null | undefined): number | null {
   const t = raw?.trim();
   if (!t) return null;
-  const cleaned = t.replace(/[£$,]/g, '').trim();
-  const n = Number.parseFloat(cleaned);
+  const cleaned = t.replace(/[£$€\s]/g, '');
+  if (!cleaned) return null;
+
+  // Decide which of '.' / ',' is the decimal separator so European formats
+  // ("1.234,56", "12,50") parse to the right VALUE rather than a wrong one.
+  let normalized = cleaned;
+  const lastComma = cleaned.lastIndexOf(',');
+  const lastDot = cleaned.lastIndexOf('.');
+  if (lastComma > -1 && lastDot > -1) {
+    if (lastComma > lastDot) {
+      // "1.234,56" — dots are thousands, last comma is the decimal point.
+      const noDots = cleaned.replace(/\./g, '');
+      const li = noDots.lastIndexOf(',');
+      normalized = `${noDots.slice(0, li).replace(/,/g, '')}.${noDots.slice(li + 1)}`;
+    } else {
+      // "1,234.56" — commas are thousands.
+      normalized = cleaned.replace(/,/g, '');
+    }
+  } else if (lastComma > -1) {
+    const digitsAfter = cleaned.length - lastComma - 1;
+    const single = cleaned.indexOf(',') === lastComma;
+    normalized =
+      single && digitsAfter === 2
+        ? cleaned.replace(',', '.') // "12,50" decimal comma
+        : cleaned.replace(/,/g, ''); // "1,234" / "1,234,567" thousands
+  } else if (lastDot > -1 && cleaned.indexOf('.') !== lastDot) {
+    // "1.234.567" — multiple dots are thousands grouping.
+    normalized = cleaned.replace(/\./g, '');
+  }
+
+  const n = Number.parseFloat(normalized);
   if (!Number.isFinite(n)) return null;
   return Math.round(n * 100);
 }

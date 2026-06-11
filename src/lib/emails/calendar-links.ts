@@ -99,7 +99,15 @@ export function buildGoogleCalendarAddUrlForBooking(
 
   const title = confirmationEventTitle(booking, venue.name);
   const details = confirmationEventDetails(booking, venue);
-  const location = venue.address?.trim() ?? '';
+  // Calendar location follows the service delivery location: client's own address for
+  // at-home services, the join link for online ones, else the venue address.
+  const loc = booking.booking_location;
+  const location =
+    loc?.kind === 'client_address'
+      ? loc.client_address?.trim() ?? ''
+      : loc?.kind === 'online'
+        ? loc.online_url?.trim() || 'Online'
+        : venue.address?.trim() ?? '';
 
   const params = new URLSearchParams({
     action: 'TEMPLATE',

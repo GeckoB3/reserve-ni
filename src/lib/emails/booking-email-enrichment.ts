@@ -52,7 +52,7 @@ function summariseAddonRows(rows: AddonSnapshotRow[]): {
   return { lines, totalPrice, totalDuration };
 }
 
-type BookingAnchorRow = {
+export type BookingAnchorRow = {
   booking_model: string | null;
   practitioner_id: string | null;
   appointment_service_id: string | null;
@@ -62,7 +62,65 @@ type BookingAnchorRow = {
   group_booking_id: string | null;
   guest_id: string | null;
   person_label: string | null;
+  location_type: string | null;
+  client_address_line1: string | null;
+  client_address_line2: string | null;
+  client_address_city: string | null;
+  client_address_postcode: string | null;
 };
+
+/**
+ * Service delivery location for emails, from the booking snapshot. The online join
+ * link/info are read live from the service so a corrected link reaches reminders.
+ */
+export async function resolveBookingLocationForEmail(
+  supabase: SupabaseClient,
+  row: BookingAnchorRow,
+): Promise<BookingEmailData['booking_location']> {
+  if (row.location_type === 'client_address') {
+    const parts = [
+      row.client_address_line1,
+      row.client_address_line2,
+      row.client_address_city,
+      row.client_address_postcode,
+    ]
+      .map((p) => (p ?? '').trim())
+      .filter(Boolean);
+    return {
+      kind: 'client_address',
+      client_address: parts.length > 0 ? parts.join(', ') : null,
+    };
+  }
+
+  if (row.location_type === 'online') {
+    let url: string | null = null;
+    let info: string | null = null;
+    if (row.service_item_id) {
+      const { data } = await supabase
+        .from('service_items')
+        .select('online_meeting_url, online_meeting_info')
+        .eq('id', row.service_item_id)
+        .maybeSingle();
+      url = (data as { online_meeting_url?: string | null } | null)?.online_meeting_url ?? null;
+      info = (data as { online_meeting_info?: string | null } | null)?.online_meeting_info ?? null;
+    } else if (row.appointment_service_id) {
+      const { data } = await supabase
+        .from('appointment_services')
+        .select('online_meeting_url, online_meeting_info')
+        .eq('id', row.appointment_service_id)
+        .maybeSingle();
+      url = (data as { online_meeting_url?: string | null } | null)?.online_meeting_url ?? null;
+      info = (data as { online_meeting_info?: string | null } | null)?.online_meeting_info ?? null;
+    }
+    return { kind: 'online', online_url: url, online_info: info };
+  }
+
+  if (row.location_type === 'business_venue') {
+    return { kind: 'business_venue' };
+  }
+
+  return undefined;
+}
 
 /**
  * Combine parent service name with the chosen variant for confirmation/reminder emails.
@@ -158,7 +216,7 @@ export async function enrichBookingEmailForAppointment(
   const { data: row, error } = await supabase
     .from('bookings')
     .select(
-      'booking_model, practitioner_id, appointment_service_id, calendar_id, service_item_id, service_variant_id, group_booking_id, guest_id, person_label',
+      'booking_model, practitioner_id, appointment_service_id, calendar_id, service_item_id, service_variant_id, group_booking_id, guest_id, person_label, location_type, client_address_line1, client_address_line2, client_address_city, client_address_postcode',
     )
     .eq('id', bookingId)
     .maybeSingle();
@@ -168,9 +226,14 @@ export async function enrichBookingEmailForAppointment(
   }
 
   const anchor = row as BookingAnchorRow;
+  const bookingLocation = await resolveBookingLocationForEmail(supabase, anchor);
+  const baseWithLocation: BookingEmailData = bookingLocation
+    ? { ...base, booking_location: bookingLocation }
+    : base;
+
   const resolved = await resolveAppointmentLabels(supabase, anchor);
   if (!resolved) {
-    return base;
+    return baseWithLocation;
   }
 
   const { practitionerName, serviceName, appointmentPriceDisplay, servicePricePence } = resolved;
@@ -315,7 +378,7 @@ export async function enrichBookingEmailForAppointment(
     groupTotalPricePence != null ? groupTotalPricePence : servicePricePence ?? null;
 
   return {
-    ...base,
+    ...baseWithLocation,
     booking_model: (anchor.booking_model as BookingEmailData['booking_model']) ?? base.booking_model,
     email_variant: 'appointment',
     practitioner_name: practitionerName,

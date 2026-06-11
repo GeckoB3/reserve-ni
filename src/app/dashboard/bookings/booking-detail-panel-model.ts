@@ -90,6 +90,12 @@ export interface BookingDetail {
   guest_attendance_confirmed_at?: string | null;
   staff_attendance_confirmed_at?: string | null;
   client_arrived_at?: string | null;
+  /** Service delivery location snapshot; null/omitted = business venue (legacy rows). */
+  location_type?: string | null;
+  client_address_line1?: string | null;
+  client_address_line2?: string | null;
+  client_address_city?: string | null;
+  client_address_postcode?: string | null;
 }
 
 export interface AssignmentSuggestion {

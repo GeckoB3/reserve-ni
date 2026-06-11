@@ -1,8 +1,23 @@
 import { NextResponse } from 'next/server';
 import { requireImportAdmin } from '@/lib/import/auth';
-import { runAiMapReferences } from '@/lib/import/ai-map-references';
+import { runAiMapReferences, REF_COMPATIBLE_KINDS } from '@/lib/import/ai-map-references';
+import { FUZZY_AUTO_RESOLVE_THRESHOLD, fuzzyNameScore } from '@/lib/import/fuzzy-match';
+import { denormalizeReferenceOntoBookingRows } from '@/lib/import/denormalize-booking-rows';
+import { refreshImportReferencesResolved } from '@/lib/import/refresh-references-resolved';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { resolveVenueMode } from '@/lib/venue-mode';
+
+/** Candidate kind → import_booking_references.resolved_entity_type. */
+function entityTypeForKind(referenceType: string, kind: string): string | null {
+  if (referenceType === 'service' && kind === 'service_item') return 'service_item';
+  if (referenceType === 'service' && kind === 'appointment_service') return 'appointment_service';
+  if (referenceType === 'staff' && kind === 'calendar') return 'unified_calendar';
+  if (referenceType === 'staff' && kind === 'practitioner') return 'practitioner';
+  if (referenceType === 'event' && kind === 'event_session') return 'event_session';
+  if (referenceType === 'class' && kind === 'class_instance') return 'class_instance';
+  if (referenceType === 'resource' && kind === 'resource_calendar') return 'unified_calendar';
+  return null;
+}
 
 export async function POST(
   _request: Request,
@@ -24,9 +39,13 @@ export async function POST(
     .eq('session_id', sessionId)
     .eq('venue_id', venueId);
 
-  const pending = (refs ?? []).filter((r) => !(r as { is_resolved?: boolean }).is_resolved);
+  const pending = (refs ?? []).filter((r) => !(r as { is_resolved?: boolean }).is_resolved) as Array<{
+    id: string;
+    reference_type: string;
+    raw_value: string;
+  }>;
   if (!pending.length) {
-    return NextResponse.json({ ok: true, updated: 0, message: 'Nothing to map' });
+    return NextResponse.json({ ok: true, updated: 0, auto_resolved: 0, message: 'Nothing to map' });
   }
 
   const candidates: Array<{ id: string; name: string; kind: string }> = [];
@@ -105,59 +124,127 @@ export async function POST(
     }
   }
 
-  const ai = await runAiMapReferences({
-    references: pending.map((r) => ({
-      id: (r as { id: string }).id,
-      reference_type: (r as { reference_type: string }).reference_type,
-      raw_value: (r as { raw_value: string }).raw_value,
-    })),
-    candidates,
-  });
+  // ── Tier 1: deterministic auto-resolve ─────────────────────────────────────
+  // A reference whose name is a normalised-exact / containment match for exactly
+  // one catalogue entity needs no AI and no user click — resolve it outright.
+  let autoResolved = 0;
+  const stillPending: typeof pending = [];
 
-  let updated = 0;
-  const modelUsed = ai?.model;
+  for (const ref of pending) {
+    const compatible = REF_COMPATIBLE_KINDS[ref.reference_type] ?? [];
+    const scored = candidates
+      .filter((c) => compatible.includes(c.kind))
+      .map((c) => ({ c, score: fuzzyNameScore(ref.raw_value, c.name) }))
+      .sort((a, b) => b.score - a.score);
 
-  if (ai?.suggestions?.length) {
-    for (const s of ai.suggestions) {
-      const sugId = s.suggested_entity_id;
-      if (!sugId) continue;
-      const match = candidates.find((c) => c.id === sugId);
-      if (!match) continue;
+    const best = scored[0];
+    const runnerUp = scored[1];
+    const uniqueWinner =
+      best &&
+      best.score >= FUZZY_AUTO_RESOLVE_THRESHOLD &&
+      (!runnerUp || runnerUp.score < FUZZY_AUTO_RESOLVE_THRESHOLD);
 
-      const refRow = pending.find((r) => (r as { id: string }).id === s.reference_id);
-      if (!refRow) continue;
-
-      const rt = (refRow as { reference_type: string }).reference_type;
-      let entityType: string | null = null;
-      if (rt === 'service' && match.kind === 'service_item') entityType = 'service_item';
-      if (rt === 'service' && match.kind === 'appointment_service') entityType = 'appointment_service';
-      if (rt === 'staff' && match.kind === 'calendar') entityType = 'unified_calendar';
-      if (rt === 'staff' && match.kind === 'practitioner') entityType = 'practitioner';
-      if (rt === 'event' && match.kind === 'event_session') entityType = 'event_session';
-      if (rt === 'class' && match.kind === 'class_instance') entityType = 'class_instance';
-      if (rt === 'resource' && match.kind === 'resource_calendar') entityType = 'unified_calendar';
-      if (!entityType) continue;
-
-      const label =
-        s.suggested_entity_label ??
-        match.name ??
-        '';
-
-      const { error } = await admin
-        .from('import_booking_references')
-        .update({
-          ai_suggested_entity_id: sugId,
-          ai_suggested_entity_name: label,
-          ai_confidence: s.confidence,
-          ai_reasoning: s.reasoning,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', s.reference_id)
-        .eq('session_id', sessionId)
-        .eq('venue_id', venueId);
-
-      if (!error) updated += 1;
+    if (!uniqueWinner) {
+      stillPending.push(ref);
+      continue;
     }
+
+    const entityType = entityTypeForKind(ref.reference_type, best.c.kind);
+    if (!entityType) {
+      stillPending.push(ref);
+      continue;
+    }
+
+    const { error: upErr } = await admin
+      .from('import_booking_references')
+      .update({
+        resolution_action: 'map',
+        resolved_entity_id: best.c.id,
+        resolved_entity_type: entityType,
+        is_resolved: true,
+        ai_suggested_entity_id: best.c.id,
+        ai_suggested_entity_name: best.c.name,
+        ai_confidence: 'high',
+        ai_reasoning: 'Name matches this catalogue entry exactly.',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', ref.id)
+      .eq('session_id', sessionId)
+      .eq('venue_id', venueId);
+
+    if (upErr) {
+      console.error('[ai-map-references] auto-resolve update failed', upErr);
+      stillPending.push(ref);
+      continue;
+    }
+
+    await denormalizeReferenceOntoBookingRows(
+      admin,
+      sessionId,
+      venueId,
+      {
+        reference_type: ref.reference_type,
+        raw_value: ref.raw_value,
+        resolution_action: 'map',
+        resolved_entity_id: best.c.id,
+        resolved_entity_type: entityType,
+      },
+      bm,
+    );
+    autoResolved += 1;
+  }
+
+  // ── Tier 2: AI suggestions for the residue ─────────────────────────────────
+  let updated = 0;
+  let modelUsed: string | null = null;
+
+  if (stillPending.length > 0) {
+    const ai = await runAiMapReferences({
+      references: stillPending.map((r) => ({
+        id: r.id,
+        reference_type: r.reference_type,
+        raw_value: r.raw_value,
+      })),
+      candidates,
+    });
+
+    modelUsed = ai?.model ?? null;
+
+    if (ai?.suggestions?.length) {
+      for (const s of ai.suggestions) {
+        const sugId = s.suggested_entity_id;
+        if (!sugId) continue;
+        const match = candidates.find((c) => c.id === sugId);
+        if (!match) continue;
+
+        const refRow = stillPending.find((r) => r.id === s.reference_id);
+        if (!refRow) continue;
+
+        const entityType = entityTypeForKind(refRow.reference_type, match.kind);
+        if (!entityType) continue;
+
+        const label = s.suggested_entity_label ?? match.name ?? '';
+
+        const { error } = await admin
+          .from('import_booking_references')
+          .update({
+            ai_suggested_entity_id: sugId,
+            ai_suggested_entity_name: label,
+            ai_confidence: s.confidence,
+            ai_reasoning: s.reasoning,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', s.reference_id)
+          .eq('session_id', sessionId)
+          .eq('venue_id', venueId);
+
+        if (!error) updated += 1;
+      }
+    }
+  }
+
+  if (autoResolved > 0) {
+    await refreshImportReferencesResolved(admin, sessionId, venueId);
   }
 
   if (modelUsed) {
@@ -172,5 +259,10 @@ export async function POST(
       .eq('venue_id', venueId);
   }
 
-  return NextResponse.json({ ok: true, updated, model: modelUsed ?? null });
+  return NextResponse.json({
+    ok: true,
+    updated,
+    auto_resolved: autoResolved,
+    model: modelUsed,
+  });
 }

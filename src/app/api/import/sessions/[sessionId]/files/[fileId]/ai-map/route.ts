@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireImportAdmin } from '@/lib/import/auth';
 import { CLIENT_FIELDS, BOOKING_FIELDS } from '@/lib/import/constants';
 import { runAiColumnMapping } from '@/lib/import/ai-map-columns';
+import { getCachedMappings, storeCachedMappings } from '@/lib/import/mapping-cache';
+import { getSupabaseAdminClient } from '@/lib/supabase';
 
 export async function POST(
   _request: NextRequest,
@@ -28,6 +30,7 @@ export async function POST(
     headers: string[];
     sample_rows: Record<string, string>[];
     file_type: string;
+    column_profile?: unknown;
   };
 
   const ft = f.file_type === 'bookings' ? 'bookings' : 'clients';
@@ -41,27 +44,49 @@ export async function POST(
 
   const detected = (session as { detected_platform?: string | null } | null)?.detected_platform;
 
-  const ai = await runAiColumnMapping({
-    headers: f.headers ?? [],
-    sampleRows: Array.isArray(f.sample_rows) ? f.sample_rows : [],
-    fileType: ft,
-    detectedPlatform: detected,
-    targetFields,
-  });
+  // Cache first: the same export format (exact header list) recurs across
+  // venues, so most runs need no AI call at all.
+  const cacheAdmin = getSupabaseAdminClient();
+  const headers = f.headers ?? [];
+  const cached = await getCachedMappings(cacheAdmin, headers, ft);
+
+  let ai: { mappings: import('@/lib/import/ai-map-columns').AiMappingRow[]; model: string } | null = null;
+  let fromCache = false;
+  if (cached) {
+    ai = { mappings: cached.mappings, model: cached.model ?? 'cache' };
+    fromCache = true;
+  } else {
+    ai = await runAiColumnMapping({
+      headers,
+      sampleRows: Array.isArray(f.sample_rows) ? f.sample_rows : [],
+      fileType: ft,
+      detectedPlatform: detected,
+      targetFields,
+      columnProfiles: Array.isArray(f.column_profile)
+        ? (f.column_profile as import('@/lib/import/column-profile').ColumnProfile[])
+        : null,
+    });
+    if (ai?.mappings?.length) {
+      await storeCachedMappings(cacheAdmin, headers, ft, ai.mappings, ai.model);
+    }
+  }
 
   const modelUsed = ai?.model ?? null;
+
+  // AI failed or returned nothing: keep whatever mappings the user already has
+  // (platform-template prefills or manual work) instead of wiping them.
+  if (!ai?.mappings?.length) {
+    return NextResponse.json({
+      ok: false,
+      mappings: [],
+      message: 'AI mapping is unavailable right now. Your existing column mappings are unchanged.',
+    });
+  }
 
   const { error: delErr } = await staff.db.from('import_column_mappings').delete().eq('file_id', fileId);
   if (delErr) {
     console.error('[ai-map] delete mappings', delErr);
-  }
-
-  if (!ai?.mappings?.length) {
-    await staff.db
-      .from('import_sessions')
-      .update({ ai_mapping_used: false, ai_model_used: null, updated_at: new Date().toISOString() })
-      .eq('id', sessionId);
-    return NextResponse.json({ ok: true, mappings: [], message: 'AI mapping unavailable; map columns manually.' });
+    return NextResponse.json({ error: 'Could not replace existing mappings' }, { status: 500 });
   }
 
   let sortOrder = 0;
@@ -89,5 +114,5 @@ export async function POST(
     })
     .eq('id', sessionId);
 
-  return NextResponse.json({ ok: true, mappings: rows, model: modelUsed });
+  return NextResponse.json({ ok: true, mappings: rows, model: modelUsed, from_cache: fromCache });
 }

@@ -418,6 +418,33 @@ export function BookingDetailContent({ ctx }: { ctx: BookingDetailDrawerContext 
                   <CompactInfo dense={isPopover} label="Duration" value={`${durationMinutes} min`} />
                   <CompactInfo dense={isPopover} label="Source" value={d.source} />
                 </div>
+                {d.location_type === 'client_address' || d.location_type === 'online' ? (
+                  <div className="mt-2.5 border-t border-slate-100 pt-2.5">
+                    <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Location</p>
+                    {d.location_type === 'online' ? (
+                      <p className="mt-1 inline-flex items-center gap-1.5 rounded-md bg-sky-50 px-2 py-1 text-[11px] font-semibold text-sky-800 ring-1 ring-sky-200/80">
+                        Online appointment
+                      </p>
+                    ) : (
+                      <div className="mt-1 rounded-lg border border-emerald-100 bg-emerald-50/70 px-2.5 py-1.5">
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-800">
+                          At the client&apos;s address
+                        </p>
+                        <p className="mt-0.5 text-[11px] leading-snug text-emerald-950">
+                          {[
+                            d.client_address_line1,
+                            d.client_address_line2,
+                            d.client_address_city,
+                            d.client_address_postcode,
+                          ]
+                            .map((p) => (p ?? '').trim())
+                            .filter(Boolean)
+                            .join(', ') || 'Address not recorded — contact the client to confirm.'}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                ) : null}
                 {d.addons && d.addons.length > 0 ? (
                   <div className="col-span-2 mt-2.5 border-t border-slate-100 pt-2.5">
                     <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Extras</p>

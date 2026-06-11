@@ -13,6 +13,21 @@ export interface VenueEmailData {
   reply_to_email?: string | null;
 }
 
+/**
+ * Where the booked service is delivered, resolved from the booking snapshot + service.
+ * Replaces the venue-address "Location" block in confirmation/reminder emails for
+ * client-address and online services.
+ */
+export interface BookingLocationEmailData {
+  kind: 'business_venue' | 'client_address' | 'online';
+  /** client_address: one-line address captured at booking time. */
+  client_address?: string | null;
+  /** online: join link (read live from the service so corrections reach reminders). */
+  online_url?: string | null;
+  /** online: joining instructions shown with the link. */
+  online_info?: string | null;
+}
+
 /** One line in a group appointment booking (shared guest, multiple treatments). */
 export interface GroupAppointmentLine {
   person_label: string;
@@ -107,6 +122,13 @@ export interface BookingEmailData {
   addons_total_price_pence?: number | null;
   /** Sum of add-on duration (minutes); informational. */
   addons_total_duration_minutes?: number | null;
+  /**
+   * Service delivery location. Omitted = business venue (legacy bookings / models
+   * without a service location). Set by booking-email enrichment from the booking
+   * snapshot; templates use it to swap the venue address for the client's address
+   * or the online joining details.
+   */
+  booking_location?: BookingLocationEmailData;
 }
 
 export interface RenderedEmail {

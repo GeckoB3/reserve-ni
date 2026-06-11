@@ -59,3 +59,39 @@ describe('applyMappingsToDataRow full-name fallback', () => {
     expect(targets.last_name).toBe('Smith');
   });
 });
+
+describe('applyMappingsToDataRow datetime recovery', () => {
+  it('splits a combined datetime mapped to booking_date into date + time', () => {
+    const { targets } = applyMappingsToDataRow(
+      { 'Appointment start': '14/03/2026 14:30' },
+      [map('Appointment start', 'booking_date')],
+    );
+    expect(targets.booking_date).toBe('14/03/2026');
+    expect(targets.booking_time).toBe('14:30');
+  });
+
+  it('handles ISO datetimes and AM/PM time parts', () => {
+    const iso = applyMappingsToDataRow(
+      { When: '2026-03-14T14:30:00' },
+      [map('When', 'booking_date')],
+    );
+    expect(iso.targets.booking_date).toBe('2026-03-14');
+    expect(iso.targets.booking_time).toBe('14:30:00');
+
+    const ampm = applyMappingsToDataRow(
+      { When: '14/03/2026 2:30 PM' },
+      [map('When', 'booking_date')],
+    );
+    expect(ampm.targets.booking_date).toBe('14/03/2026');
+    expect(ampm.targets.booking_time).toBe('2:30 PM');
+  });
+
+  it('leaves plain dates and explicit booking_time mappings alone', () => {
+    const { targets } = applyMappingsToDataRow(
+      { Date: '14/03/2026', Time: '10:00' },
+      [map('Date', 'booking_date'), map('Time', 'booking_time')],
+    );
+    expect(targets.booking_date).toBe('14/03/2026');
+    expect(targets.booking_time).toBe('10:00');
+  });
+});

@@ -51,6 +51,35 @@ const staffMaySchema = {
 
 const paymentRequirementSchema = z.enum(['none', 'deposit', 'full_payment']);
 
+const locationTypeSchema = z.enum(['business_venue', 'client_address', 'online']);
+
+/** Meeting link for online services: http(s) URL up to 500 chars; empty/null clears. */
+const onlineMeetingUrlSchema = z.preprocess(
+  (val) => (typeof val === 'string' && val.trim() === '' ? null : val),
+  z
+    .string()
+    .max(500)
+    .refine(
+      (v) => {
+        try {
+          const u = new URL(v);
+          return (u.protocol === 'http:' || u.protocol === 'https:') && Boolean(u.hostname);
+        } catch {
+          return false;
+        }
+      },
+      { message: 'Enter a valid http(s) link for the online service.' },
+    )
+    .nullable()
+    .optional(),
+);
+
+const locationFieldsSchema = {
+  location_type: locationTypeSchema.optional(),
+  online_meeting_url: onlineMeetingUrlSchema,
+  online_meeting_info: z.string().max(2000).nullable().optional(),
+};
+
 const customWorkingHoursSchema = customWorkingHoursRequestSchema;
 const STAFF_SERVICE_FIELD_PERMISSIONS = {
   name: 'staff_may_customize_name',
@@ -81,6 +110,7 @@ const serviceSchema = z
     custom_availability_enabled: z.boolean().optional(),
     custom_working_hours: customWorkingHoursSchema,
     processing_time_blocks: processingTimeBlocksSchema.optional(),
+    ...locationFieldsSchema,
     ...staffMaySchema,
   })
   .superRefine((data, ctx) => {
@@ -146,6 +176,7 @@ const servicePatchSchema = z
     custom_availability_enabled: z.boolean().optional(),
     custom_working_hours: customWorkingHoursSchema,
     processing_time_blocks: processingTimeBlocksSchema.optional(),
+    ...locationFieldsSchema,
     ...staffMaySchema,
   })
   .superRefine((data, ctx) => {
@@ -208,10 +239,66 @@ function normalizeServicePaymentFields(data: {
   return { payment_requirement: 'full_payment', deposit_pence: null };
 }
 
+/**
+ * Location columns for insert. Online link/info are stored only for online services so a
+ * later switch back to venue/client-address cannot leak a stale meeting link into emails.
+ */
+function locationInsertFields(data: {
+  location_type?: 'business_venue' | 'client_address' | 'online';
+  online_meeting_url?: string | null;
+  online_meeting_info?: string | null;
+}): { location_type: string; online_meeting_url: string | null; online_meeting_info: string | null } {
+  const locationType = data.location_type ?? 'business_venue';
+  const isOnline = locationType === 'online';
+  return {
+    location_type: locationType,
+    online_meeting_url: isOnline ? (data.online_meeting_url ?? null) : null,
+    online_meeting_info: isOnline ? (data.online_meeting_info?.trim() || null) : null,
+  };
+}
+
+/**
+ * Location updates for PATCH. Applied only when the request mentions location fields;
+ * resolves the effective location type (patch value, else current row) and clears the
+ * online fields whenever the effective type is not online.
+ */
+function locationPatchFields(
+  patch: {
+    location_type?: 'business_venue' | 'client_address' | 'online';
+    online_meeting_url?: string | null;
+    online_meeting_info?: string | null;
+  },
+  hasOwn: (key: string) => boolean,
+  currentRow: Record<string, unknown>,
+): Record<string, unknown> {
+  const touchesLocation =
+    hasOwn('location_type') || hasOwn('online_meeting_url') || hasOwn('online_meeting_info');
+  if (!touchesLocation) return {};
+  const effectiveType =
+    patch.location_type ??
+    ((currentRow.location_type as string | undefined) === 'client_address' ||
+    (currentRow.location_type as string | undefined) === 'online'
+      ? (currentRow.location_type as 'client_address' | 'online')
+      : 'business_venue');
+  const updates: Record<string, unknown> = {};
+  if (hasOwn('location_type')) updates.location_type = effectiveType;
+  if (effectiveType !== 'online') {
+    updates.online_meeting_url = null;
+    updates.online_meeting_info = null;
+  } else {
+    if (hasOwn('online_meeting_url')) updates.online_meeting_url = patch.online_meeting_url ?? null;
+    if (hasOwn('online_meeting_info')) {
+      updates.online_meeting_info = patch.online_meeting_info?.trim() || null;
+    }
+  }
+  return updates;
+}
+
 function mapServiceItemRowForDashboard(row: Record<string, unknown>): Record<string, unknown> {
   return {
     ...row,
     colour: row.colour ?? '#3B82F6',
+    location_type: (row.location_type as string | undefined) ?? 'business_venue',
     custom_availability_enabled: (row.custom_availability_enabled as boolean | undefined) ?? false,
     staff_may_customize_name: (row.staff_may_customize_name as boolean | undefined) ?? false,
     staff_may_customize_description: (row.staff_may_customize_description as boolean | undefined) ?? false,
@@ -684,6 +771,7 @@ export async function POST(request: NextRequest) {
         min_booking_notice_hours: parsed.data.min_booking_notice_hours ?? 1,
         cancellation_notice_hours: parsed.data.cancellation_notice_hours ?? 48,
         allow_same_day_booking: parsed.data.allow_same_day_booking ?? true,
+        ...locationInsertFields(parsed.data),
         ...(staff.role === 'admin'
           ? {
               custom_availability_enabled: parsed.data.custom_availability_enabled ?? false,
@@ -788,6 +876,7 @@ export async function POST(request: NextRequest) {
       min_booking_notice_hours: parsed.data.min_booking_notice_hours ?? 1,
       cancellation_notice_hours: parsed.data.cancellation_notice_hours ?? 48,
       allow_same_day_booking: parsed.data.allow_same_day_booking ?? true,
+      ...locationInsertFields(parsed.data),
     };
     const { data, error } = await admin.from('appointment_services').insert(insertRow).select().single();
 
@@ -1096,6 +1185,18 @@ export async function PATCH(request: NextRequest) {
         updatePayload.deposit_pence = dp > 0 ? dp : null;
       }
 
+      delete updatePayload.location_type;
+      delete updatePayload.online_meeting_url;
+      delete updatePayload.online_meeting_info;
+      Object.assign(
+        updatePayload,
+        locationPatchFields(
+          parsed.data,
+          (k) => Object.prototype.hasOwnProperty.call(rest, k),
+          serviceRow as Record<string, unknown>,
+        ),
+      );
+
       if (staff.role === 'admin' && parsed.data.custom_availability_enabled === false) {
         updatePayload.custom_working_hours = null;
       }
@@ -1331,6 +1432,18 @@ export async function PATCH(request: NextRequest) {
       patchPayload.payment_requirement = dp > 0 ? 'deposit' : 'none';
       patchPayload.deposit_pence = dp > 0 ? dp : null;
     }
+
+    delete patchPayload.location_type;
+    delete patchPayload.online_meeting_url;
+    delete patchPayload.online_meeting_info;
+    Object.assign(
+      patchPayload,
+      locationPatchFields(
+        parsed.data,
+        (k) => Object.prototype.hasOwnProperty.call(rest, k),
+        serviceRow as Record<string, unknown>,
+      ),
+    );
 
     if (staff.role === 'admin' && parsed.data.custom_availability_enabled === false) {
       patchPayload.custom_working_hours = null;

@@ -21,6 +21,11 @@ const patchSchema = z
     custom_fields: z.record(z.string(), z.unknown()).optional(),
     marketing_opt_out: z.boolean().optional(),
     marketing_consent: z.boolean().optional(),
+    /** Contact address (client-address services); empty string clears a field. */
+    address_line1: z.string().max(200).optional(),
+    address_line2: z.string().max(200).optional(),
+    address_city: z.string().max(100).optional(),
+    address_postcode: z.string().max(20).optional(),
   })
   .refine(
     (d) =>
@@ -32,7 +37,11 @@ const patchSchema = z
       d.customer_profile_notes !== undefined ||
       d.custom_fields !== undefined ||
       d.marketing_opt_out !== undefined ||
-      d.marketing_consent !== undefined,
+      d.marketing_consent !== undefined ||
+      d.address_line1 !== undefined ||
+      d.address_line2 !== undefined ||
+      d.address_city !== undefined ||
+      d.address_postcode !== undefined,
     { message: 'At least one field required' },
   );
 
@@ -78,7 +87,7 @@ export async function GET(
     const { data: guest, error: gErr } = await staff.db
       .from('guests')
       .select(
-        'id, venue_id, first_name, last_name, email, phone, tags, visit_count, no_show_count, last_visit_date, customer_profile_notes, created_at, updated_at, marketing_opt_out, marketing_consent, marketing_consent_at, custom_fields',
+        'id, venue_id, first_name, last_name, email, phone, tags, visit_count, no_show_count, last_visit_date, customer_profile_notes, created_at, updated_at, marketing_opt_out, marketing_consent, marketing_consent_at, custom_fields, address_line1, address_line2, address_city, address_postcode',
       )
       .eq('id', guestId)
       .eq('venue_id', staff.venue_id)
@@ -435,6 +444,10 @@ export async function GET(
         marketing_consent: Boolean((guest as { marketing_consent?: boolean }).marketing_consent),
         marketing_consent_at: (guest as { marketing_consent_at?: string | null }).marketing_consent_at ?? null,
         custom_fields,
+        address_line1: (guest as { address_line1?: string | null }).address_line1 ?? null,
+        address_line2: (guest as { address_line2?: string | null }).address_line2 ?? null,
+        address_city: (guest as { address_city?: string | null }).address_city ?? null,
+        address_postcode: (guest as { address_postcode?: string | null }).address_postcode ?? null,
       },
       stats: {
         total_bookings: totalBookingsExcludingCancelled,
@@ -529,6 +542,13 @@ export async function PATCH(
     if (parsed.data.customer_profile_notes !== undefined) {
       const t = parsed.data.customer_profile_notes;
       update.customer_profile_notes = t === null || t.trim() === '' ? null : t.trim();
+    }
+    for (const key of ['address_line1', 'address_line2', 'address_city', 'address_postcode'] as const) {
+      const v = parsed.data[key];
+      if (v !== undefined) {
+        const t = v.trim();
+        update[key] = t === '' ? null : t;
+      }
     }
 
     let nextOptOut = Boolean(prev.marketing_opt_out);

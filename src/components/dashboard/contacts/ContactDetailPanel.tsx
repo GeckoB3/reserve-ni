@@ -486,6 +486,21 @@ export function ContactDetailPanel({
                 <p className="mt-0.5 min-h-8 text-xs font-bold tabular-nums text-slate-400">Not provided</p>
               )}
             </div>
+            {(() => {
+              const addressLine = [g.address_line1, g.address_line2, g.address_city, g.address_postcode]
+                .map((p) => (p ?? '').trim())
+                .filter(Boolean)
+                .join(', ');
+              if (!addressLine) return null;
+              return (
+                <div className="min-w-[min(100%,12rem)] max-w-full flex-[1_1_12rem] rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
+                  <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Address</p>
+                  <p className="mt-0.5 hyphens-auto break-words text-xs font-bold leading-snug text-slate-800 [overflow-wrap:anywhere]">
+                    {addressLine}
+                  </p>
+                </div>
+              );
+            })()}
             <div className="min-w-[min(100%,12rem)] max-w-full flex-[1_1_12rem] rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
               <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Last visit</p>
               <p className="mt-0.5 hyphens-auto break-words text-xs font-bold leading-snug text-slate-800 [overflow-wrap:anywhere]" title={lastVisitRelative ?? undefined}>

@@ -57,6 +57,7 @@ export function ReferencesStepClient({ sessionId }: { sessionId: string }) {
   const [confirming, setConfirming] = useState(false);
   const [ack, setAck] = useState(false);
   const [mappingId, setMappingId] = useState<string | null>(null);
+  const [bulkAccepting, setBulkAccepting] = useState(false);
   const [selectByRef, setSelectByRef] = useState<Record<string, string>>({});
 
   const loadSession = useCallback(async () => {
@@ -158,60 +159,89 @@ export function ReferencesStepClient({ sessionId }: { sessionId: string }) {
     }
   }, [tabTypes, tab]);
 
+  function entityTypeForRef(ref: BookingRef):
+    | 'service_item'
+    | 'appointment_service'
+    | 'unified_calendar'
+    | 'practitioner'
+    | 'event_session'
+    | 'class_instance'
+    | undefined {
+    if (ref.reference_type === 'service') {
+      return catalog?.bookingModel === 'practitioner_appointment' ? 'appointment_service' : 'service_item';
+    }
+    if (ref.reference_type === 'staff') {
+      return catalog?.bookingModel === 'practitioner_appointment' ? 'practitioner' : 'unified_calendar';
+    }
+    if (ref.reference_type === 'event') return 'event_session';
+    if (ref.reference_type === 'class') return 'class_instance';
+    if (ref.reference_type === 'resource') return 'unified_calendar';
+    return undefined;
+  }
+
+  /** PATCH one reference as mapped; returns true on success. Does not reload. */
+  async function resolveReferenceOnServer(ref: BookingRef, pick: string): Promise<boolean> {
+    const resolved_entity_type = entityTypeForRef(ref);
+    const res = await fetch(`/api/import/sessions/${sessionId}/references/${ref.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        resolution_action: 'map',
+        resolved_entity_id: pick,
+        resolved_entity_type,
+      }),
+    });
+    if (!res.ok) {
+      const data = await readResponseJson<{ error?: string }>(res);
+      throw new Error(data.error ?? 'Could not save');
+    }
+    return true;
+  }
+
+  async function reloadResolvedFlag() {
+    await loadSession();
+    const ses = await fetch(`/api/import/sessions/${sessionId}`);
+    const j = await readResponseJson<{ session?: { references_resolved?: boolean } }>(ses);
+    setResolvedFlag(j.session?.references_resolved === true);
+  }
+
   async function applyMap(ref: BookingRef) {
     const pick = selectByRef[ref.id] ?? ref.ai_suggested_entity_id ?? '';
     if (!pick) return;
     setMappingId(ref.id);
     setError(null);
     try {
-      let resolved_entity_type:
-        | 'service_item'
-        | 'appointment_service'
-        | 'unified_calendar'
-        | 'practitioner'
-        | 'event_session'
-        | 'class_instance'
-        | undefined;
-
-      if (ref.reference_type === 'service') {
-        if (catalog?.bookingModel === 'practitioner_appointment') {
-          resolved_entity_type = 'appointment_service';
-        } else {
-          resolved_entity_type = 'service_item';
-        }
-      } else if (ref.reference_type === 'staff') {
-        if (catalog?.bookingModel === 'practitioner_appointment') {
-          resolved_entity_type = 'practitioner';
-        } else {
-          resolved_entity_type = 'unified_calendar';
-        }
-      } else if (ref.reference_type === 'event') {
-        resolved_entity_type = 'event_session';
-      } else if (ref.reference_type === 'class') {
-        resolved_entity_type = 'class_instance';
-      } else if (ref.reference_type === 'resource') {
-        resolved_entity_type = 'unified_calendar';
-      }
-
-      const res = await fetch(`/api/import/sessions/${sessionId}/references/${ref.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          resolution_action: 'map',
-          resolved_entity_id: pick,
-          resolved_entity_type,
-        }),
-      });
-      const data = await readResponseJson<{ error?: string }>(res);
-      if (!res.ok) throw new Error(data.error ?? 'Could not save');
-      await loadSession();
-      const ses = await fetch(`/api/import/sessions/${sessionId}`);
-      const j = await readResponseJson<{ session?: { references_resolved?: boolean } }>(ses);
-      setResolvedFlag(j.session?.references_resolved === true);
+      await resolveReferenceOnServer(ref, pick);
+      await reloadResolvedFlag();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed');
     }
     setMappingId(null);
+  }
+
+  /** Accept every outstanding AI suggestion in one go. */
+  async function acceptAllSuggestions() {
+    const accepting = refs.filter((r) => !r.is_resolved && r.ai_suggested_entity_id);
+    if (!accepting.length) return;
+    setBulkAccepting(true);
+    setError(null);
+    let failures = 0;
+    for (const ref of accepting) {
+      try {
+        await resolveReferenceOnServer(ref, ref.ai_suggested_entity_id!);
+      } catch {
+        failures += 1;
+      }
+    }
+    try {
+      await reloadResolvedFlag();
+    } catch {
+      /* reload best-effort */
+    }
+    if (failures > 0) {
+      setError(`${failures} suggestion${failures === 1 ? '' : 's'} could not be applied — match those below.`);
+    }
+    setBulkAccepting(false);
   }
 
   async function applySkip(ref: BookingRef) {
@@ -225,10 +255,7 @@ export function ReferencesStepClient({ sessionId }: { sessionId: string }) {
       });
       const data = await readResponseJson<{ error?: string }>(res);
       if (!res.ok) throw new Error(data.error ?? 'Could not save');
-      await loadSession();
-      const ses = await fetch(`/api/import/sessions/${sessionId}`);
-      const j = await readResponseJson<{ session?: { references_resolved?: boolean } }>(ses);
-      setResolvedFlag(j.session?.references_resolved === true);
+      await reloadResolvedFlag();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed');
     }
@@ -341,10 +368,27 @@ export function ReferencesStepClient({ sessionId }: { sessionId: string }) {
                   </button>
                 ))}
               </div>
-              <p className="text-xs text-slate-600">
-                Map each external label to an existing catalogue entry, or skip to exclude those booking rows from
-                import.
-              </p>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs text-slate-600">
+                  Map each external label to an existing catalogue entry, or skip to exclude those booking rows from
+                  import.
+                </p>
+                {refs.filter((r) => !r.is_resolved && r.ai_suggested_entity_id).length > 1 && (
+                  <button
+                    type="button"
+                    disabled={bulkAccepting}
+                    onClick={() => void acceptAllSuggestions()}
+                    className="inline-flex min-h-9 items-center gap-2 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 disabled:cursor-wait disabled:opacity-70"
+                  >
+                    {bulkAccepting ? (
+                      <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" aria-hidden />
+                    ) : null}
+                    {bulkAccepting
+                      ? 'Accepting…'
+                      : `Accept all ${refs.filter((r) => !r.is_resolved && r.ai_suggested_entity_id).length} suggestions`}
+                  </button>
+                )}
+              </div>
               <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
                 {filtered.map((ref) => {
                   const opts = optionsForRef(ref);

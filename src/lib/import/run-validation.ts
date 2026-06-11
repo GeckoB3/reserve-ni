@@ -12,20 +12,32 @@ import {
 import {
   normaliseEmail,
   normalisePhoneUk,
-  parseDateString,
-  parseTimeString,
 } from '@/lib/import/normalize';
+import {
+  parseDateWithRepairs,
+  parseTimeWithRepairs,
+  readValueRepairs,
+} from '@/lib/import/value-repair';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
 
 /** How often to persist validation row progress to `import_sessions` (reduces write load). */
 const VALIDATION_PROGRESS_FLUSH_EVERY = 400;
 
+export interface ImportValidationResult {
+  errorCount: number;
+  warningCount: number;
+  /** Distinct date strings no parser or existing repair could read (never AI-tried). */
+  unparseableDates: string[];
+  /** Distinct time strings no parser or existing repair could read (never AI-tried). */
+  unparseableTimes: string[];
+}
+
 export async function runImportValidation(
   admin: SupabaseClient,
   sessionId: string,
   venueId: string,
-): Promise<{ errorCount: number; warningCount: number }> {
+): Promise<ImportValidationResult> {
   await admin.from('import_validation_issues').delete().eq('session_id', sessionId);
 
   const { data: session } = await admin
@@ -65,8 +77,12 @@ export async function runImportValidation(
 
   const settings = (session.session_settings ?? {}) as {
     ambiguous_date_format?: 'dd/MM/yyyy' | 'MM/dd/yyyy' | null;
-  };
+  } & Record<string, unknown>;
   const datePref = settings.ambiguous_date_format ?? null;
+  const valueRepairs = readValueRepairs(settings);
+  /** Values neither the parser nor an existing repair could read; undefined in the map = never AI-tried. */
+  const unparseableDates = new Set<string>();
+  const unparseableTimes = new Set<string>();
 
   const { data: files } = await admin
     .from('import_files')
@@ -316,8 +332,9 @@ export async function runImportValidation(
         for (const key of ['first_visit_date', 'last_visit_date', 'date_of_birth'] as const) {
           const raw = targets[key];
           if (!raw?.trim()) continue;
-          const { iso, ambiguous } = parseDateString(raw, datePref ?? undefined);
+          const { iso, ambiguous } = parseDateWithRepairs(raw, datePref, valueRepairs);
           if (!iso) {
+            if (valueRepairs.dates[raw.trim()] === undefined) unparseableDates.add(raw.trim());
             await issueBuffer.add({
               session_id: sessionId,
               file_id: f.id,
@@ -377,8 +394,9 @@ export async function runImportValidation(
           });
           errorCount += 1;
         } else {
-          const { iso, ambiguous } = parseDateString(bdRaw, datePref ?? undefined);
+          const { iso, ambiguous } = parseDateWithRepairs(bdRaw, datePref, valueRepairs);
           if (!iso) {
+            if (valueRepairs.dates[bdRaw] === undefined) unparseableDates.add(bdRaw);
             blockingErrorRowKeys.add(rowKey(f.id, rowNum));
             await issueBuffer.add({
               session_id: sessionId,
@@ -406,8 +424,10 @@ export async function runImportValidation(
           }
         }
 
-        const bt = parseTimeString(targets.booking_time ?? null);
-        if (!targets.booking_time?.trim() || !bt) {
+        const btRaw = targets.booking_time?.trim() ?? '';
+        const { time: bt } = parseTimeWithRepairs(btRaw, valueRepairs);
+        if (!btRaw || !bt) {
+          if (btRaw && valueRepairs.times[btRaw] === undefined) unparseableTimes.add(btRaw);
           blockingErrorRowKeys.add(rowKey(f.id, rowNum));
           await issueBuffer.add({
             session_id: sessionId,
@@ -543,5 +563,10 @@ export async function runImportValidation(
     })
     .eq('id', sessionId);
 
-  return { errorCount, warningCount };
+  return {
+    errorCount,
+    warningCount,
+    unparseableDates: [...unparseableDates],
+    unparseableTimes: [...unparseableTimes],
+  };
 }

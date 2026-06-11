@@ -113,6 +113,19 @@ export function ValidateStepClient({ sessionId }: { sessionId: string }) {
   const [hasBookingFile, setHasBookingFile] = useState(false);
   const [sendImportReminders, setSendImportReminders] = useState(true);
   const [savingImportCommsPref, setSavingImportCommsPref] = useState(false);
+  const [plan, setPlan] = useState<{ headline: string; narrative: string } | null>(null);
+
+  /** Stage 5 Import Plan: plain-English summary fetched once validation has settled. */
+  const loadPlan = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/import/sessions/${sessionId}/plan`);
+      if (!res.ok) return;
+      const j = await readResponseJson<{ headline?: string; narrative?: string }>(res);
+      if (j.headline && j.narrative) setPlan({ headline: j.headline, narrative: j.narrative });
+    } catch {
+      /* plan is decorative; never block validation on it */
+    }
+  }, [sessionId]);
 
   const clearPoll = useCallback(() => {
     if (pollTimer.current) {
@@ -190,6 +203,7 @@ export function ValidateStepClient({ sessionId }: { sessionId: string }) {
           const data = await fetchSession(sessionId);
           applyLoaded(data);
           setValidationScan(null);
+          void loadPlan();
           return true;
         }
         return false;
@@ -211,7 +225,7 @@ export function ValidateStepClient({ sessionId }: { sessionId: string }) {
         })();
       }, 900);
     },
-    [applyLoaded, clearPoll, sessionId],
+    [applyLoaded, clearPoll, loadPlan, sessionId],
   );
 
   useEffect(() => {
@@ -249,6 +263,7 @@ export function ValidateStepClient({ sessionId }: { sessionId: string }) {
         if (st === 'complete' && sessStatus === 'ready') {
           applyLoaded(data);
           setLoading(false);
+          void loadPlan();
           return;
         }
 
@@ -278,7 +293,7 @@ export function ValidateStepClient({ sessionId }: { sessionId: string }) {
       cancelled = true;
       clearPoll();
     };
-  }, [sessionId, applyLoaded, waitForValidation, clearPoll]);
+  }, [sessionId, applyLoaded, waitForValidation, clearPoll, loadPlan]);
 
   async function runValidation(extra?: { ambiguous_date_format?: 'dd/MM/yyyy' | 'MM/dd/yyyy' }) {
     setLoading(true);
@@ -368,10 +383,19 @@ export function ValidateStepClient({ sessionId }: { sessionId: string }) {
     !bookingDefaultsBlocking;
 
   const friendlyTypeLabel = (t: string) => {
-    if (t === 'reference_skipped') return 'Skipped references (Step 3b)';
-    if (t === 'booking_defaults_missing') return 'Booking defaults missing';
-    if (t === 'no_contact_details') return 'No contact details';
-    if (t === 'skipped_at_execute') return 'Skipped during import';
+    if (t === 'reference_skipped') return 'Services or staff you chose to skip';
+    if (t === 'booking_defaults_missing') return 'Venue setup needed before bookings can import';
+    if (t === 'no_contact_details') return 'Rows with no way to identify the client';
+    if (t === 'skipped_at_execute') return 'Rows skipped during import';
+    if (t === 'missing_required') return 'Rows missing required information';
+    if (t === 'email_invalid') return 'Email addresses that look wrong';
+    if (t === 'duplicate_email') return 'Duplicate email addresses in your file';
+    if (t === 'duplicate_phone') return 'Duplicate phone numbers in your file';
+    if (t === 'existing_client') return 'Clients that already exist in Resneo';
+    if (t === 'date_format_ambiguous') return 'Dates that could be read two ways';
+    if (t === 'duplicate_external_client_id') return 'Duplicate client IDs in your file';
+    if (t === 'duplicate_external_appointment_id') return 'Duplicate appointment IDs';
+    if (t === 'phone_invalid') return 'Phone numbers that look wrong';
     return t.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
   };
 
@@ -389,6 +413,14 @@ export function ValidateStepClient({ sessionId }: { sessionId: string }) {
           use the job id if you resume later.
         </p>
       </div>
+
+      {!loading && !polling && plan && (
+        <div className="rounded-xl border border-brand-200 bg-gradient-to-br from-brand-50 to-white p-4 shadow-sm">
+          <p className="text-[10px] font-semibold uppercase tracking-widest text-brand-700">Your import plan</p>
+          <p className="mt-1 text-base font-bold text-slate-900">{plan.headline}</p>
+          <p className="mt-1.5 text-sm leading-relaxed text-slate-700">{plan.narrative}</p>
+        </div>
+      )}
 
       {error && (
         <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</div>
